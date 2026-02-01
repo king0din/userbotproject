@@ -1,0 +1,19 @@
+# ============================================
+# KingTG UserBot Service - Gereksinimler
+# ============================================
+
+# Telegram Client
+telethon>=1.28.0
+
+# Async MongoDB
+motor>=3.0.0
+
+# Ortam değişkenleri
+python-dotenv>=1.0.0
+
+# Git işlemleri
+GitPython>=3.1.0
+
+# Opsiyonel: Pyrogram desteği için
+# pyrogram>=2.0.0
+# tgcrypto>=1.2.0
