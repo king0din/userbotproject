@@ -20,7 +20,7 @@ load_dotenv()
 
 import config
 from database import database as db
-from userbot import userbot_manager, plugin_manager
+from userbot_compat import userbot_manager, plugin_manager
 from handlers import register_user_handlers, register_admin_handlers
 from utils import send_log, get_readable_time
 
