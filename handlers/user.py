@@ -14,6 +14,17 @@ from utils import (
     back_button, close_button, yes_no_buttons
 )
 
+# Kullanıcı durumları (state management)
+user_states = {}
+
+# State sabitleri
+STATE_NONE = None
+STATE_WAITING_PHONE = "waiting_phone"
+STATE_WAITING_CODE = "waiting_code"
+STATE_WAITING_2FA = "waiting_2fa"
+STATE_WAITING_SESSION_TELETHON = "waiting_session_telethon"
+STATE_WAITING_SESSION_PYROGRAM = "waiting_session_pyrogram"
+
 def register_user_handlers(bot):
     """Kullanıcı handler'larını kaydet"""
     
@@ -28,10 +39,13 @@ def register_user_handlers(bot):
     @register_user
     async def start_handler(event):
         """Başlangıç komutu"""
+        # Kullanıcı state'ini temizle
+        if event.sender_id in user_states:
+            del user_states[event.sender_id]
+        
         user = await event.get_sender()
         user_data = await db.get_user(event.sender_id)
         
-        # Kullanıcı giriş yapmış mı?
         is_logged_in = user_data.get("is_logged_in", False) if user_data else False
         
         text = config.MESSAGES["welcome"]
@@ -47,7 +61,6 @@ def register_user_handlers(bot):
             buttons.append([Button.inline(config.BUTTONS["my_plugins"], b"my_plugins")])
             buttons.append([Button.inline(config.BUTTONS["logout"], b"logout_confirm")])
         else:
-            # Kaydedilmiş session var mı?
             session_data = await db.get_session(event.sender_id)
             if session_data and session_data.get("remember"):
                 buttons.append([Button.inline("⚡ Hızlı Giriş", b"quick_login")])
@@ -55,11 +68,35 @@ def register_user_handlers(bot):
         
         buttons.append([Button.inline(config.BUTTONS["help"], b"help")])
         
-        # Owner/Sudo için ayarlar butonu
         if event.sender_id == config.OWNER_ID or await db.is_sudo(event.sender_id):
             buttons.append([Button.inline(config.BUTTONS["settings"], b"settings_menu")])
         
         await event.respond(text, buttons=buttons)
+    
+    # ==========================================
+    # MESAJ HANDLER (State-based)
+    # ==========================================
+    
+    @bot.on(events.NewMessage(func=lambda e: e.is_private and not e.text.startswith('/')))
+    async def message_handler(event):
+        """Kullanıcı mesajlarını state'e göre işle"""
+        user_id = event.sender_id
+        
+        if user_id not in user_states:
+            return
+        
+        state = user_states[user_id].get("state")
+        
+        if state == STATE_WAITING_PHONE:
+            await handle_phone_input(event, bot)
+        elif state == STATE_WAITING_CODE:
+            await handle_code_input(event, bot)
+        elif state == STATE_WAITING_2FA:
+            await handle_2fa_input(event, bot)
+        elif state == STATE_WAITING_SESSION_TELETHON:
+            await handle_session_input(event, bot, "telethon")
+        elif state == STATE_WAITING_SESSION_PYROGRAM:
+            await handle_session_input(event, bot, "pyrogram")
     
     # ==========================================
     # GİRİŞ MENÜSÜ
@@ -71,6 +108,10 @@ def register_user_handlers(bot):
     @check_private_mode
     async def login_menu_handler(event):
         """Giriş yöntemi seçimi"""
+        # State temizle
+        if event.sender_id in user_states:
+            del user_states[event.sender_id]
+        
         text = config.MESSAGES["login_method"]
         
         buttons = [
@@ -89,108 +130,199 @@ def register_user_handlers(bot):
     @bot.on(events.CallbackQuery(data=b"login_phone"))
     async def login_phone_start(event):
         """Telefon ile giriş başlat"""
-        text = config.MESSAGES["login_phone"]
+        user_id = event.sender_id
         
-        # Conversation başlat
-        async with bot.conversation(event.chat_id) as conv:
-            await event.edit(text, buttons=[back_button("login_menu")])
+        # State ayarla
+        user_states[user_id] = {
+            "state": STATE_WAITING_PHONE,
+            "message_id": event.message_id
+        }
+        
+        text = config.MESSAGES["login_phone"]
+        text += "\n\n⚠️ **İptal etmek için:** /cancel"
+        
+        await event.edit(text, buttons=[
+            [Button.inline("❌ İptal", b"login_menu")]
+        ])
+    
+    async def handle_phone_input(event, bot):
+        """Telefon numarası girişini işle"""
+        user_id = event.sender_id
+        phone = event.text.strip()
+        
+        if not is_valid_phone(phone):
+            await event.respond(
+                "❌ Geçersiz telefon numarası formatı.\n\n"
+                "✅ Örnek: `+905551234567`\n\n"
+                "Tekrar deneyin veya /cancel yazın."
+            )
+            return
+        
+        # Mesajı sil (gizlilik için)
+        try:
+            await event.delete()
+        except:
+            pass
+        
+        msg = await bot.send_message(user_id, "⏳ Doğrulama kodu gönderiliyor...")
+        
+        result = await userbot_manager.start_phone_login(user_id, phone)
+        
+        if not result["success"]:
+            if result.get("error") == "flood_wait":
+                await msg.edit(
+                    config.MESSAGES["error_flood"].format(seconds=result["seconds"]),
+                    buttons=[[Button.inline("🔙 Geri", b"login_menu")]]
+                )
+            else:
+                await msg.edit(
+                    config.MESSAGES["login_failed"].format(error=result["error"]),
+                    buttons=[[Button.inline("🔙 Geri", b"login_menu")]]
+                )
             
-            try:
-                response = await conv.get_response(timeout=120)
-                phone = response.text.strip()
-                
-                if not is_valid_phone(phone):
-                    await event.respond("❌ Geçersiz telefon numarası formatı.\n\nÖrnek: `+905551234567`")
-                    return
-                
-                await response.delete()
-                msg = await event.respond("⏳ Kod gönderiliyor...")
-                
-                result = await userbot_manager.start_phone_login(event.sender_id, phone)
-                
-                if not result["success"]:
-                    if result.get("error") == "flood_wait":
-                        await msg.edit(config.MESSAGES["error_flood"].format(seconds=result["seconds"]))
-                    else:
-                        await msg.edit(config.MESSAGES["login_failed"].format(error=result["error"]))
-                    return
-                
-                # Kod bekleme
-                await msg.edit(config.MESSAGES["login_code"])
-                
-                code_response = await conv.get_response(timeout=300)
-                code = code_response.text.strip().replace(" ", "")
-                await code_response.delete()
-                
-                await msg.edit("⏳ Doğrulanıyor...")
-                
-                verify_result = await userbot_manager.verify_code(event.sender_id, code)
-                
-                if verify_result.get("stage") == "2fa":
-                    # 2FA gerekli
-                    await msg.edit(config.MESSAGES["login_2fa"])
-                    
-                    password_response = await conv.get_response(timeout=120)
-                    password = password_response.text.strip()
-                    await password_response.delete()
-                    
-                    await msg.edit("⏳ 2FA doğrulanıyor...")
-                    
-                    verify_result = await userbot_manager.verify_2fa(event.sender_id, password)
-                
-                if verify_result["success"]:
-                    user_info = verify_result["user_info"]
-                    session_string = verify_result["session_string"]
-                    
-                    # Kaydet
-                    await db.update_user(event.sender_id, {
-                        "is_logged_in": True,
-                        "userbot_id": user_info["id"],
-                        "userbot_username": user_info["username"]
-                    })
-                    
-                    # Beni hatırla sorusu
-                    await msg.edit(
-                        config.MESSAGES["login_success"].format(
-                            name=user_info["first_name"],
-                            user_id=user_info["id"]
-                        ) + "\n\n" + config.MESSAGES["login_remember"],
-                        buttons=[
-                            [
-                                Button.inline(config.BUTTONS["remember_yes"], f"save_session_{phone}".encode()),
-                                Button.inline(config.BUTTONS["remember_no"], b"dont_save_session")
-                            ]
-                        ]
-                    )
-                    
-                    # Geçici olarak session'ı sakla
-                    bot.session_temp = {
-                        event.sender_id: {
-                            "session": session_string,
-                            "phone": phone,
-                            "type": "phone"
-                        }
-                    }
-                    
-                    await send_log(
-                        bot, "login",
-                        f"Yeni giriş (Telefon)\n"
-                        f"Userbot: @{user_info['username']} ({user_info['id']})",
-                        event.sender_id
-                    )
-                else:
-                    error = verify_result.get("error", "Bilinmeyen hata")
-                    error_messages = {
-                        "invalid_code": "Geçersiz kod",
-                        "code_expired": "Kodun süresi doldu",
-                        "invalid_password": "Yanlış 2FA şifresi"
-                    }
-                    await msg.edit(config.MESSAGES["login_failed"].format(
-                        error=error_messages.get(error, error)
-                    ))
-                    
-            except TimeoutError:
-                await event.respond(config.MESSAGES["error_timeout"])
+            if user_id in user_states:
+                del user_states[user_id]
+            return
+        
+        # State güncelle
+        user_states[user_id] = {
+            "state": STATE_WAITING_CODE,
+            "phone": phone,
+            "message_id": msg.id
+        }
+        
+        await msg.edit(
+            config.MESSAGES["login_code"] + "\n\n⚠️ **İptal etmek için:** /cancel",
+            buttons=[[Button.inline("❌ İptal", b"login_menu")]]
+        )
+    
+    async def handle_code_input(event, bot):
+        """Doğrulama kodu girişini işle"""
+        user_id = event.sender_id
+        code = event.text.strip().replace(" ", "").replace("-", "")
+        
+        # Mesajı sil
+        try:
+            await event.delete()
+        except:
+            pass
+        
+        msg = await bot.send_message(user_id, "⏳ Kod doğrulanıyor...")
+        
+        result = await userbot_manager.verify_code(user_id, code)
+        
+        if result.get("stage") == "2fa":
+            # 2FA gerekli
+            user_states[user_id]["state"] = STATE_WAITING_2FA
+            user_states[user_id]["message_id"] = msg.id
+            
+            await msg.edit(
+                config.MESSAGES["login_2fa"] + "\n\n⚠️ **İptal etmek için:** /cancel",
+                buttons=[[Button.inline("❌ İptal", b"login_menu")]]
+            )
+            return
+        
+        if result["success"]:
+            await handle_login_success(event, bot, result, msg)
+        else:
+            error = result.get("error", "Bilinmeyen hata")
+            error_messages = {
+                "invalid_code": "Geçersiz kod. Tekrar deneyin.",
+                "code_expired": "Kodun süresi doldu. Baştan başlayın.",
+                "no_pending_login": "Giriş işlemi bulunamadı. Baştan başlayın."
+            }
+            
+            if error == "code_expired" or error == "no_pending_login":
+                if user_id in user_states:
+                    del user_states[user_id]
+                await msg.edit(
+                    f"❌ {error_messages.get(error, error)}",
+                    buttons=[[Button.inline("🔙 Geri", b"login_menu")]]
+                )
+            else:
+                await msg.edit(
+                    f"❌ {error_messages.get(error, error)}\n\nTekrar deneyin:",
+                    buttons=[[Button.inline("❌ İptal", b"login_menu")]]
+                )
+    
+    async def handle_2fa_input(event, bot):
+        """2FA şifre girişini işle"""
+        user_id = event.sender_id
+        password = event.text.strip()
+        
+        # Mesajı sil
+        try:
+            await event.delete()
+        except:
+            pass
+        
+        msg = await bot.send_message(user_id, "⏳ 2FA doğrulanıyor...")
+        
+        result = await userbot_manager.verify_2fa(user_id, password)
+        
+        if result["success"]:
+            await handle_login_success(event, bot, result, msg)
+        else:
+            error = result.get("error", "Bilinmeyen hata")
+            if error == "invalid_password":
+                await msg.edit(
+                    "❌ Yanlış şifre. Tekrar deneyin:",
+                    buttons=[[Button.inline("❌ İptal", b"login_menu")]]
+                )
+            else:
+                if user_id in user_states:
+                    del user_states[user_id]
+                await msg.edit(
+                    f"❌ Hata: {error}",
+                    buttons=[[Button.inline("🔙 Geri", b"login_menu")]]
+                )
+    
+    async def handle_login_success(event, bot, result, msg):
+        """Başarılı giriş işle"""
+        user_id = event.sender_id
+        user_info = result["user_info"]
+        session_string = result["session_string"]
+        phone = user_states.get(user_id, {}).get("phone")
+        
+        # Veritabanı güncelle
+        await db.update_user(user_id, {
+            "is_logged_in": True,
+            "userbot_id": user_info["id"],
+            "userbot_username": user_info["username"]
+        })
+        
+        # Geçici session bilgisi
+        if not hasattr(bot, 'session_temp'):
+            bot.session_temp = {}
+        
+        bot.session_temp[user_id] = {
+            "session": session_string,
+            "phone": phone,
+            "type": user_states.get(user_id, {}).get("session_type", "phone")
+        }
+        
+        # State temizle
+        if user_id in user_states:
+            del user_states[user_id]
+        
+        await msg.edit(
+            config.MESSAGES["login_success"].format(
+                name=user_info["first_name"] or "Kullanıcı",
+                user_id=user_info["id"]
+            ) + "\n\n" + config.MESSAGES["login_remember"],
+            buttons=[
+                [
+                    Button.inline(config.BUTTONS["remember_yes"], b"save_session"),
+                    Button.inline(config.BUTTONS["remember_no"], b"dont_save_session")
+                ]
+            ]
+        )
+        
+        await send_log(
+            bot, "login",
+            f"Yeni giriş\nUserbot: @{user_info['username']} ({user_info['id']})",
+            user_id
+        )
     
     # ==========================================
     # SESSION İLE GİRİŞ
@@ -199,112 +331,166 @@ def register_user_handlers(bot):
     @bot.on(events.CallbackQuery(data=b"login_telethon"))
     async def login_telethon_start(event):
         """Telethon session ile giriş"""
-        await session_login_flow(event, "telethon")
+        user_id = event.sender_id
+        
+        user_states[user_id] = {
+            "state": STATE_WAITING_SESSION_TELETHON,
+            "session_type": "telethon",
+            "message_id": event.message_id
+        }
+        
+        text = config.MESSAGES["login_session_telethon"]
+        text += "\n\n⚠️ **İptal etmek için:** /cancel"
+        
+        await event.edit(text, buttons=[
+            [Button.inline("❌ İptal", b"login_menu")]
+        ])
     
     @bot.on(events.CallbackQuery(data=b"login_pyrogram"))
     async def login_pyrogram_start(event):
         """Pyrogram session ile giriş"""
-        await session_login_flow(event, "pyrogram")
-    
-    async def session_login_flow(event, session_type: str):
-        """Session giriş akışı"""
-        if session_type == "telethon":
-            text = config.MESSAGES["login_session_telethon"]
-        else:
-            text = config.MESSAGES["login_session_pyrogram"]
+        user_id = event.sender_id
         
-        async with bot.conversation(event.chat_id) as conv:
-            await event.edit(text, buttons=[back_button("login_menu")])
+        user_states[user_id] = {
+            "state": STATE_WAITING_SESSION_PYROGRAM,
+            "session_type": "pyrogram",
+            "message_id": event.message_id
+        }
+        
+        text = config.MESSAGES["login_session_pyrogram"]
+        text += "\n\n⚠️ **İptal etmek için:** /cancel"
+        
+        await event.edit(text, buttons=[
+            [Button.inline("❌ İptal", b"login_menu")]
+        ])
+    
+    async def handle_session_input(event, bot, session_type):
+        """Session string girişini işle"""
+        user_id = event.sender_id
+        session_string = event.text.strip()
+        
+        # Mesajı sil
+        try:
+            await event.delete()
+        except:
+            pass
+        
+        msg = await bot.send_message(user_id, "⏳ Session doğrulanıyor...")
+        
+        result = await userbot_manager.login_with_session(user_id, session_string, session_type)
+        
+        if result["success"]:
+            user_info = result["user_info"]
             
-            try:
-                response = await conv.get_response(timeout=120)
-                session_string = response.text.strip()
-                await response.delete()
-                
-                msg = await event.respond("⏳ Session doğrulanıyor...")
-                
-                result = await userbot_manager.login_with_session(
-                    event.sender_id, 
-                    session_string, 
-                    session_type
-                )
-                
-                if result["success"]:
-                    user_info = result["user_info"]
-                    
-                    await db.update_user(event.sender_id, {
-                        "is_logged_in": True,
-                        "userbot_id": user_info["id"],
-                        "userbot_username": user_info["username"]
-                    })
-                    
-                    await msg.edit(
-                        config.MESSAGES["login_success"].format(
-                            name=user_info["first_name"],
-                            user_id=user_info["id"]
-                        ) + "\n\n" + config.MESSAGES["login_remember"],
-                        buttons=[
-                            [
-                                Button.inline(config.BUTTONS["remember_yes"], b"save_session_direct"),
-                                Button.inline(config.BUTTONS["remember_no"], b"dont_save_session")
-                            ]
-                        ]
-                    )
-                    
-                    # Geçici olarak session'ı sakla
-                    if not hasattr(bot, 'session_temp'):
-                        bot.session_temp = {}
-                    bot.session_temp[event.sender_id] = {
-                        "session": session_string,
-                        "phone": None,
-                        "type": session_type
-                    }
-                    
-                    await send_log(
-                        bot, "login",
-                        f"Yeni giriş ({session_type.title()} Session)\n"
-                        f"Userbot: @{user_info['username']} ({user_info['id']})",
-                        event.sender_id
-                    )
-                else:
-                    error = result.get("error", "Bilinmeyen hata")
-                    error_messages = {
-                        "invalid_session": "Geçersiz session string",
-                        "session_terminated": "Session sonlandırılmış",
-                        "account_banned": "Hesap yasaklı"
-                    }
-                    await msg.edit(config.MESSAGES["login_failed"].format(
-                        error=error_messages.get(error, error)
-                    ))
-                    
-            except TimeoutError:
-                await event.respond(config.MESSAGES["error_timeout"])
+            await db.update_user(user_id, {
+                "is_logged_in": True,
+                "userbot_id": user_info["id"],
+                "userbot_username": user_info["username"]
+            })
+            
+            if not hasattr(bot, 'session_temp'):
+                bot.session_temp = {}
+            
+            bot.session_temp[user_id] = {
+                "session": session_string,
+                "phone": None,
+                "type": session_type
+            }
+            
+            # State temizle
+            if user_id in user_states:
+                del user_states[user_id]
+            
+            await msg.edit(
+                config.MESSAGES["login_success"].format(
+                    name=user_info["first_name"] or "Kullanıcı",
+                    user_id=user_info["id"]
+                ) + "\n\n" + config.MESSAGES["login_remember"],
+                buttons=[
+                    [
+                        Button.inline(config.BUTTONS["remember_yes"], b"save_session"),
+                        Button.inline(config.BUTTONS["remember_no"], b"dont_save_session")
+                    ]
+                ]
+            )
+            
+            await send_log(
+                bot, "login",
+                f"Yeni giriş ({session_type.title()} Session)\nUserbot: @{user_info['username']}",
+                user_id
+            )
+        else:
+            error = result.get("error", "Bilinmeyen hata")
+            error_messages = {
+                "invalid_session": "Geçersiz session string",
+                "session_terminated": "Session sonlandırılmış",
+                "account_banned": "Hesap yasaklı"
+            }
+            
+            # State temizle
+            if user_id in user_states:
+                del user_states[user_id]
+            
+            await msg.edit(
+                config.MESSAGES["login_failed"].format(error=error_messages.get(error, error)),
+                buttons=[[Button.inline("🔙 Geri", b"login_menu")]]
+            )
+    
+    # ==========================================
+    # CANCEL KOMUTU
+    # ==========================================
+    
+    @bot.on(events.NewMessage(pattern=r'^/cancel$'))
+    async def cancel_handler(event):
+        """İşlemi iptal et"""
+        user_id = event.sender_id
+        
+        if user_id in user_states:
+            del user_states[user_id]
+            
+            # Pending login varsa temizle
+            if user_id in userbot_manager.pending_logins:
+                try:
+                    await userbot_manager.pending_logins[user_id]["client"].disconnect()
+                except:
+                    pass
+                del userbot_manager.pending_logins[user_id]
+            
+            await event.respond(
+                "❌ İşlem iptal edildi.",
+                buttons=[[Button.inline("🏠 Ana Menü", b"main_menu")]]
+            )
+        else:
+            await event.respond("ℹ️ İptal edilecek bir işlem yok.")
     
     # ==========================================
     # SESSION KAYDETME
     # ==========================================
     
-    @bot.on(events.CallbackQuery(pattern=b"save_session_.*"))
+    @bot.on(events.CallbackQuery(data=b"save_session"))
     async def save_session_handler(event):
         """Session'ı kaydet"""
-        if not hasattr(bot, 'session_temp') or event.sender_id not in bot.session_temp:
+        user_id = event.sender_id
+        
+        if not hasattr(bot, 'session_temp') or user_id not in bot.session_temp:
             await event.answer("⚠️ Session bulunamadı", alert=True)
             return
         
-        temp_data = bot.session_temp[event.sender_id]
+        temp_data = bot.session_temp[user_id]
         
         await db.save_session(
-            event.sender_id,
+            user_id,
             temp_data["session"],
             temp_data["type"],
             temp_data.get("phone"),
             remember=True
         )
         
-        del bot.session_temp[event.sender_id]
+        del bot.session_temp[user_id]
         
         await event.edit(
             "✅ **Giriş tamamlandı ve session kaydedildi!**\n\n"
+            "💾 Bir sonraki girişte hızlı giriş yapabilirsiniz.\n\n"
             "Artık plugin'leri kullanabilirsiniz.",
             buttons=[
                 [Button.inline(config.BUTTONS["plugins"], b"plugins_menu")],
@@ -315,22 +501,25 @@ def register_user_handlers(bot):
     @bot.on(events.CallbackQuery(data=b"dont_save_session"))
     async def dont_save_session_handler(event):
         """Session'ı kaydetme"""
-        if hasattr(bot, 'session_temp') and event.sender_id in bot.session_temp:
-            temp_data = bot.session_temp[event.sender_id]
+        user_id = event.sender_id
+        
+        if hasattr(bot, 'session_temp') and user_id in bot.session_temp:
+            temp_data = bot.session_temp[user_id]
             
             await db.save_session(
-                event.sender_id,
+                user_id,
                 temp_data["session"],
                 temp_data["type"],
                 temp_data.get("phone"),
                 remember=False
             )
             
-            del bot.session_temp[event.sender_id]
+            del bot.session_temp[user_id]
         
         await event.edit(
             "✅ **Giriş tamamlandı!**\n\n"
-            "Session kaydedilmedi. Bir sonraki girişte tekrar bilgi girmeniz gerekecek.",
+            "Session kaydedilmedi. Bir sonraki girişte tekrar bilgi girmeniz gerekecek.\n\n"
+            "Artık plugin'leri kullanabilirsiniz.",
             buttons=[
                 [Button.inline(config.BUTTONS["plugins"], b"plugins_menu")],
                 [Button.inline("🏠 Ana Menü", b"main_menu")]
@@ -344,7 +533,9 @@ def register_user_handlers(bot):
     @bot.on(events.CallbackQuery(data=b"quick_login"))
     async def quick_login_handler(event):
         """Kaydedilmiş session ile hızlı giriş"""
-        session_data = await db.get_session(event.sender_id)
+        user_id = event.sender_id
+        
+        session_data = await db.get_session(user_id)
         
         if not session_data or not session_data.get("data"):
             await event.answer("⚠️ Kaydedilmiş session bulunamadı", alert=True)
@@ -353,7 +544,7 @@ def register_user_handlers(bot):
         await event.edit("⏳ Giriş yapılıyor...")
         
         result = await userbot_manager.login_with_session(
-            event.sender_id,
+            user_id,
             session_data["data"],
             session_data.get("type", "telethon")
         )
@@ -361,21 +552,20 @@ def register_user_handlers(bot):
         if result["success"]:
             user_info = result["user_info"]
             
-            await db.update_user(event.sender_id, {
+            await db.update_user(user_id, {
                 "is_logged_in": True,
                 "userbot_id": user_info["id"],
                 "userbot_username": user_info["username"]
             })
             
             # Eski pluginleri geri yükle
-            client = userbot_manager.get_client(event.sender_id)
+            client = userbot_manager.get_client(user_id)
+            restored = 0
             if client:
-                restored = await plugin_manager.restore_user_plugins(event.sender_id, client)
-            else:
-                restored = 0
+                restored = await plugin_manager.restore_user_plugins(user_id, client)
             
             text = config.MESSAGES["login_success"].format(
-                name=user_info["first_name"],
+                name=user_info["first_name"] or "Kullanıcı",
                 user_id=user_info["id"]
             )
             
@@ -390,10 +580,10 @@ def register_user_handlers(bot):
                 ]
             )
             
-            await send_log(bot, "login", f"Hızlı giriş\nUserbot: @{user_info['username']}", event.sender_id)
+            await send_log(bot, "login", f"Hızlı giriş\nUserbot: @{user_info['username']}", user_id)
         else:
-            # Session geçersiz, temizle
-            await db.clear_session(event.sender_id, keep_data=False)
+            # Session geçersiz
+            await db.clear_session(user_id, keep_data=False)
             
             await event.edit(
                 "❌ Kaydedilmiş session geçersiz.\n\n"
@@ -425,18 +615,19 @@ def register_user_handlers(bot):
     @bot.on(events.CallbackQuery(pattern=b"logout_(keep|delete)"))
     async def logout_handler(event):
         """Çıkış işlemi"""
+        user_id = event.sender_id
         keep_data = event.data == b"logout_keep"
         
         await event.edit("⏳ Çıkış yapılıyor...")
         
         # Userbot'u kapat
-        await userbot_manager.logout(event.sender_id)
+        await userbot_manager.logout(user_id)
         
         # Pluginleri temizle
-        plugin_manager.clear_user_plugins(event.sender_id)
+        plugin_manager.clear_user_plugins(user_id)
         
         # Veritabanını güncelle
-        await db.clear_session(event.sender_id, keep_data=keep_data)
+        await db.clear_session(user_id, keep_data=keep_data)
         
         text = config.MESSAGES["logout_success"]
         if keep_data:
@@ -449,7 +640,7 @@ def register_user_handlers(bot):
             buttons=[[Button.inline("🏠 Ana Menü", b"main_menu")]]
         )
         
-        await send_log(bot, "logout", f"Çıkış yapıldı (Veri sakla: {keep_data})", event.sender_id)
+        await send_log(bot, "logout", f"Çıkış yapıldı (Veri sakla: {keep_data})", user_id)
     
     # ==========================================
     # PLUGİN MENÜSÜ
@@ -575,7 +766,10 @@ def register_user_handlers(bot):
     @bot.on(events.CallbackQuery(data=b"main_menu"))
     async def main_menu_handler(event):
         """Ana menüye dön"""
-        # Start komutunu simüle et
+        # State temizle
+        if event.sender_id in user_states:
+            del user_states[event.sender_id]
+        
         user = await event.get_sender()
         user_data = await db.get_user(event.sender_id)
         
@@ -614,7 +808,8 @@ def register_user_handlers(bot):
         text += "• `/start` - Ana menü\n"
         text += "• `/plugins` - Plugin listesi\n"
         text += "• `/pactive <isim>` - Plugin aktif et\n"
-        text += "• `/pinactive <isim>` - Plugin deaktif et\n\n"
+        text += "• `/pinactive <isim>` - Plugin deaktif et\n"
+        text += "• `/cancel` - İşlemi iptal et\n\n"
         text += "**Giriş Yöntemleri:**\n"
         text += "• 📱 Telefon numarası\n"
         text += "• 📄 Telethon Session String\n"

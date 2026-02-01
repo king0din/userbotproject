@@ -32,11 +32,17 @@ class Database:
     
     async def get_user(self, user_id: int) -> Optional[Dict]:
         """Kullanıcı bilgilerini getir"""
+        # Önce yerel, sonra MongoDB (yerel her zaman güncel olmalı)
+        local_user = self.local.get_user(user_id)
+        if local_user:
+            return local_user
+        
         if self.mongo.connected:
             user = await self.mongo.get_user(user_id)
             if user:
                 return user
-        return self.local.get_user(user_id)
+        
+        return None
     
     async def add_user(self, user_id: int, username: str = None, first_name: str = None) -> bool:
         """Yeni kullanıcı ekle (her iki DB'ye)"""
@@ -70,20 +76,15 @@ class Database:
     
     async def get_all_users(self) -> List[Dict]:
         """Tüm kullanıcıları getir"""
-        if self.mongo.connected:
-            return await self.mongo.get_all_users()
+        # Yerel dosyadan al (her zaman güncel)
         return self.local.get_all_users()
     
     async def get_logged_in_users(self) -> List[Dict]:
         """Giriş yapmış kullanıcıları getir"""
-        if self.mongo.connected:
-            return await self.mongo.get_logged_in_users()
         return self.local.get_logged_in_users()
     
     async def get_user_count(self) -> int:
         """Toplam kullanıcı sayısı"""
-        if self.mongo.connected:
-            return await self.mongo.get_user_count()
         return self.local.get_user_count()
     
     # ==========================================
@@ -93,53 +94,49 @@ class Database:
     async def save_session(self, user_id: int, session_data: str, session_type: str,
                           phone: str = None, remember: bool = False) -> bool:
         """Session kaydet"""
+        print(f"[DB] Session kaydediliyor: user={user_id}, type={session_type}, remember={remember}")
+        
         # Yerel dosyaya kaydet
-        self.local.save_session_file(user_id, session_data, session_type)
-        self.local.update_user(user_id, {
-            "session_type": session_type,
-            "phone_number": phone,
-            "remember_session": remember,
-            "is_logged_in": True
-        })
+        local_result = self.local.save_session(user_id, session_data, session_type, phone, remember)
         
         # MongoDB'ye kaydet
         if self.mongo.connected:
             await self.mongo.save_session(user_id, session_data, session_type, phone, remember)
         
-        return True
+        print(f"[DB] Session kaydedildi: {local_result}")
+        return local_result
     
     async def get_session(self, user_id: int) -> Optional[Dict]:
         """Session bilgilerini getir"""
-        # Önce MongoDB'den dene
+        # Önce yerel dosyadan dene
+        session = self.local.get_session(user_id)
+        if session and session.get("data"):
+            print(f"[DB] Session bulundu (local): user={user_id}, type={session.get('type')}")
+            return session
+        
+        # MongoDB'den dene
         if self.mongo.connected:
             user = await self.mongo.get_user(user_id)
             if user and user.get("session_data"):
+                print(f"[DB] Session bulundu (mongo): user={user_id}")
                 return {
-                    "type": user.get("session_type"),
                     "data": user.get("session_data"),
+                    "type": user.get("session_type"),
                     "phone": user.get("phone_number"),
-                    "remember": user.get("remember_session")
+                    "remember": user.get("remember_session", False)
                 }
         
-        # Yerel dosyadan dene
-        session = self.local.load_session_file(user_id)
-        if session:
-            return session
-        
+        print(f"[DB] Session bulunamadı: user={user_id}")
         return None
     
     async def clear_session(self, user_id: int, keep_data: bool = False) -> bool:
         """Session temizle"""
-        if not keep_data:
-            self.local.delete_session_file(user_id)
+        print(f"[DB] Session temizleniyor: user={user_id}, keep_data={keep_data}")
         
-        self.local.update_user(user_id, {
-            "is_logged_in": False,
-            "userbot_id": None,
-            "userbot_username": None,
-            **({"session_type": None, "phone_number": None, "remember_session": False} if not keep_data else {})
-        })
+        # Yerel temizle
+        self.local.clear_session(user_id, keep_data)
         
+        # MongoDB temizle
         if self.mongo.connected:
             await self.mongo.clear_session(user_id, keep_data)
         
@@ -151,11 +148,16 @@ class Database:
     
     async def get_plugin(self, plugin_name: str) -> Optional[Dict]:
         """Plugin bilgilerini getir"""
+        plugin = self.local.get_plugin(plugin_name)
+        if plugin:
+            return plugin
+        
         if self.mongo.connected:
             plugin = await self.mongo.get_plugin(plugin_name)
             if plugin:
                 return plugin
-        return self.local.get_plugin(plugin_name)
+        
+        return None
     
     async def add_plugin(self, name: str, filename: str, description: str = "",
                         commands: List[str] = None, is_public: bool = True,
@@ -191,31 +193,22 @@ class Database:
     
     async def get_all_plugins(self) -> List[Dict]:
         """Tüm pluginleri getir"""
-        if self.mongo.connected:
-            return await self.mongo.get_all_plugins()
         return self.local.get_all_plugins()
     
     async def get_public_plugins(self) -> List[Dict]:
         """Genel pluginleri getir"""
-        if self.mongo.connected:
-            return await self.mongo.get_public_plugins()
         return self.local.get_public_plugins()
     
     async def get_user_accessible_plugins(self, user_id: int) -> List[Dict]:
         """Kullanıcının erişebildiği pluginleri getir"""
-        if self.mongo.connected:
-            return await self.mongo.get_user_accessible_plugins(user_id)
         return self.local.get_user_accessible_plugins(user_id)
     
     async def check_command_exists(self, command: str, exclude_plugin: str = None) -> Optional[str]:
         """Komut kontrolü"""
-        if self.mongo.connected:
-            return await self.mongo.check_command_exists(command, exclude_plugin)
         return self.local.check_command_exists(command, exclude_plugin)
     
     async def add_plugin_user_access(self, plugin_name: str, user_id: int) -> bool:
         """Plugin erişimi ekle"""
-        # Yerel güncelle
         plugin = self.local.get_plugin(plugin_name)
         if plugin:
             allowed = plugin.get("allowed_users", [])
@@ -294,14 +287,10 @@ class Database:
     
     async def is_banned(self, user_id: int) -> bool:
         """Ban kontrolü"""
-        if self.mongo.connected:
-            return await self.mongo.is_banned(user_id)
         return self.local.is_banned(user_id)
     
     async def get_banned_users(self) -> List[Dict]:
         """Banlı kullanıcılar"""
-        if self.mongo.connected:
-            return await self.mongo.get_banned_users()
         return self.local.get_banned_users()
     
     # ==========================================
@@ -330,14 +319,10 @@ class Database:
         """Sudo kontrolü"""
         if user_id == config.OWNER_ID:
             return True
-        if self.mongo.connected:
-            return await self.mongo.is_sudo(user_id)
         return self.local.is_sudo(user_id)
     
     async def get_sudos(self) -> List[Dict]:
         """Sudo listesi"""
-        if self.mongo.connected:
-            return await self.mongo.get_sudos()
         return self.local.get_sudos()
     
     # ==========================================
@@ -346,8 +331,6 @@ class Database:
     
     async def get_settings(self) -> Dict:
         """Ayarları getir"""
-        if self.mongo.connected:
-            return await self.mongo.get_settings()
         return self.local.get_settings()
     
     async def update_settings(self, data: Dict) -> bool:
@@ -382,8 +365,6 @@ class Database:
     
     async def get_stats(self) -> Dict:
         """İstatistikleri getir"""
-        if self.mongo.connected:
-            return await self.mongo.get_stats()
         return self.local.get_stats()
 
 

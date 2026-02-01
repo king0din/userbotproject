@@ -27,11 +27,14 @@ class UserbotManager:
         self.active_clients: Dict[int, TelegramClient] = {}
         self.pending_logins: Dict[int, Dict] = {}  # Giriş işlemi bekleyenler
         self.session_monitors: Dict[int, asyncio.Task] = {}  # Oturum izleyicileri
+        self.on_session_terminated_callback = None
     
     async def create_client_from_session(self, user_id: int, session_string: str, 
                                          session_type: str = "telethon") -> Optional[TelegramClient]:
         """Session string'den client oluştur"""
         try:
+            print(f"[USERBOT] Client oluşturuluyor: user={user_id}, type={session_type}")
+            
             if session_type == "telethon":
                 client = TelegramClient(
                     StringSession(session_string),
@@ -40,18 +43,23 @@ class UserbotManager:
                 )
             elif session_type == "pyrogram":
                 # Pyrogram session'ı Telethon'a dönüştür
-                # Bu basit bir dönüşüm, gerçek implementasyon daha karmaşık olabilir
                 client = TelegramClient(
                     StringSession(session_string),
                     config.API_ID,
                     config.API_HASH
                 )
             else:
-                return None
+                # phone tipi için de StringSession kullan
+                client = TelegramClient(
+                    StringSession(session_string),
+                    config.API_ID,
+                    config.API_HASH
+                )
             
             await client.connect()
             
             if not await client.is_user_authorized():
+                print(f"[USERBOT] Kullanıcı yetkili değil: user={user_id}")
                 await client.disconnect()
                 return None
             
@@ -60,9 +68,11 @@ class UserbotManager:
             # Session izleyiciyi başlat
             self.start_session_monitor(user_id)
             
+            print(f"[USERBOT] Client başarıyla oluşturuldu: user={user_id}")
             return client
             
         except AuthKeyUnregisteredError:
+            print(f"[USERBOT] AuthKey geçersiz: user={user_id}")
             return None
         except Exception as e:
             print(f"[USERBOT] Client oluşturma hatası: {e}")
@@ -90,8 +100,9 @@ class UserbotManager:
             return {"success": True, "stage": "code"}
             
         except FloodWaitError as e:
-            return {"success": False, "error": f"flood_wait", "seconds": e.seconds}
+            return {"success": False, "error": "flood_wait", "seconds": e.seconds}
         except Exception as e:
+            print(f"[USERBOT] Telefon giriş hatası: {e}")
             return {"success": False, "error": str(e)}
     
     async def verify_code(self, user_id: int, code: str) -> Dict:
@@ -141,6 +152,7 @@ class UserbotManager:
             return {"success": False, "error": "code_expired"}
             
         except Exception as e:
+            print(f"[USERBOT] Kod doğrulama hatası: {e}")
             return {"success": False, "error": str(e)}
     
     async def verify_2fa(self, user_id: int, password: str) -> Dict:
@@ -179,16 +191,20 @@ class UserbotManager:
             return {"success": False, "error": "invalid_password"}
             
         except Exception as e:
+            print(f"[USERBOT] 2FA hatası: {e}")
             return {"success": False, "error": str(e)}
     
     async def login_with_session(self, user_id: int, session_string: str, 
                                  session_type: str = "telethon") -> Dict:
         """Session string ile giriş"""
         try:
+            print(f"[USERBOT] Session ile giriş: user={user_id}, type={session_type}")
+            
             client = await self.create_client_from_session(user_id, session_string, session_type)
             
             if client:
                 me = await client.get_me()
+                print(f"[USERBOT] Giriş başarılı: @{me.username}")
                 return {
                     "success": True,
                     "session_string": session_string,
@@ -208,6 +224,7 @@ class UserbotManager:
         except AuthKeyUnregisteredError:
             return {"success": False, "error": "session_terminated"}
         except Exception as e:
+            print(f"[USERBOT] Session giriş hatası: {e}")
             return {"success": False, "error": str(e)}
     
     async def logout(self, user_id: int, terminate_session: bool = False) -> bool:
@@ -222,7 +239,11 @@ class UserbotManager:
                     except:
                         pass
                 
-                await client.disconnect()
+                try:
+                    await client.disconnect()
+                except:
+                    pass
+                
                 del self.active_clients[user_id]
             
             # Session izleyiciyi durdur
@@ -270,7 +291,7 @@ class UserbotManager:
             self.session_monitors[user_id].cancel()
         
         async def monitor():
-            while True:
+            while user_id in self.active_clients:
                 await asyncio.sleep(300)  # 5 dakikada bir kontrol
                 
                 if not await self.check_session_valid(user_id):
@@ -288,6 +309,8 @@ class UserbotManager:
     
     async def on_session_terminated(self, user_id: int):
         """Session sonlandırıldığında çağrılır"""
+        print(f"[USERBOT] Session sonlandırıldı: user={user_id}")
+        
         # Client'ı temizle
         if user_id in self.active_clients:
             try:
@@ -299,9 +322,12 @@ class UserbotManager:
         # Veritabanını güncelle
         await db.update_user(user_id, {"is_logged_in": False})
         
-        # Bildirim callback'i çağır (main.py'de ayarlanacak)
-        if hasattr(self, 'on_session_terminated_callback') and self.on_session_terminated_callback:
-            await self.on_session_terminated_callback(user_id)
+        # Bildirim callback'i çağır
+        if self.on_session_terminated_callback:
+            try:
+                await self.on_session_terminated_callback(user_id)
+            except Exception as e:
+                print(f"[USERBOT] Callback hatası: {e}")
     
     def set_session_terminated_callback(self, callback: Callable):
         """Session sonlandırma callback'ini ayarla"""
@@ -309,32 +335,56 @@ class UserbotManager:
     
     async def restore_sessions(self) -> int:
         """Kaydedilmiş session'ları geri yükle"""
+        print("[USERBOT] Session'lar geri yükleniyor...")
+        
         restored = 0
         users = await db.get_logged_in_users()
         
+        print(f"[USERBOT] {len(users)} giriş yapmış kullanıcı bulundu")
+        
         for user in users:
             user_id = user.get("user_id")
-            session_data = await db.get_session(user_id)
             
-            if session_data and session_data.get("data"):
-                result = await self.login_with_session(
-                    user_id,
-                    session_data["data"],
-                    session_data.get("type", "telethon")
-                )
-                
-                if result.get("success"):
-                    restored += 1
-                    print(f"[USERBOT] ✅ Session geri yüklendi: {user_id}")
-                else:
-                    # Session geçersiz, veritabanını güncelle
-                    await db.update_user(user_id, {"is_logged_in": False})
-                    print(f"[USERBOT] ❌ Session geçersiz: {user_id} - {result.get('error')}")
+            # Session bilgisini al
+            session_data = user.get("session_data")
+            session_type = user.get("session_type", "telethon")
+            
+            if not session_data:
+                # get_session ile dene
+                session_info = await db.get_session(user_id)
+                if session_info:
+                    session_data = session_info.get("data")
+                    session_type = session_info.get("type", "telethon")
+            
+            if not session_data:
+                print(f"[USERBOT] Session bulunamadı: user={user_id}")
+                # Kullanıcıyı logged out olarak işaretle
+                await db.update_user(user_id, {"is_logged_in": False})
+                continue
+            
+            print(f"[USERBOT] Session yükleniyor: user={user_id}, type={session_type}")
+            
+            result = await self.login_with_session(
+                user_id,
+                session_data,
+                session_type
+            )
+            
+            if result.get("success"):
+                restored += 1
+                print(f"[USERBOT] ✅ Session geri yüklendi: user={user_id}")
+            else:
+                # Session geçersiz, veritabanını güncelle ama veriyi silme
+                await db.update_user(user_id, {"is_logged_in": False})
+                print(f"[USERBOT] ❌ Session geçersiz: user={user_id} - {result.get('error')}")
         
+        print(f"[USERBOT] Toplam {restored} session geri yüklendi")
         return restored
     
     async def shutdown(self):
         """Tüm client'ları kapat"""
+        print("[USERBOT] Tüm client'lar kapatılıyor...")
+        
         for user_id in list(self.active_clients.keys()):
             await self.logout(user_id)
         
@@ -343,6 +393,8 @@ class UserbotManager:
                 await self.pending_logins[user_id]["client"].disconnect()
             except:
                 pass
+        
+        print("[USERBOT] Tüm client'lar kapatıldı")
 
 
 # Global UserBot Manager instance

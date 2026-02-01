@@ -67,6 +67,7 @@ class LocalStorage:
                 "created_at": datetime.utcnow().isoformat(),
                 "last_active": datetime.utcnow().isoformat(),
                 "is_logged_in": False,
+                "session_data": None,  # Session string burada saklanacak
                 "session_type": None,
                 "remember_session": False,
                 "phone_number": None,
@@ -85,6 +86,11 @@ class LocalStorage:
     def update_user(self, user_id: int, data: Dict) -> bool:
         """Kullanıcı bilgilerini güncelle"""
         users = self._load_json(config.USERS_FILE) or {}
+        
+        if str(user_id) not in users:
+            # Kullanıcı yoksa oluştur
+            self.add_user(user_id)
+            users = self._load_json(config.USERS_FILE) or {}
         
         if str(user_id) in users:
             users[str(user_id)].update(data)
@@ -120,40 +126,46 @@ class LocalStorage:
     # SESSION İŞLEMLERİ
     # ==========================================
     
-    def save_session_file(self, user_id: int, session_data: str, session_type: str) -> bool:
-        """Session dosyasını kaydet"""
-        session_path = os.path.join(config.SESSIONS_DIR, f"{user_id}.session")
-        try:
-            with open(session_path, 'w', encoding='utf-8') as f:
-                json.dump({
-                    "type": session_type,
-                    "data": session_data,
-                    "created_at": datetime.utcnow().isoformat()
-                }, f)
-            return True
-        except Exception as e:
-            print(f"[LOCAL] Session kaydetme hatası: {e}")
-            return False
+    def save_session(self, user_id: int, session_data: str, session_type: str,
+                    phone: str = None, remember: bool = False) -> bool:
+        """Session bilgilerini kullanıcı verisine kaydet"""
+        return self.update_user(user_id, {
+            "session_data": session_data,
+            "session_type": session_type,
+            "phone_number": phone,
+            "remember_session": remember,
+            "is_logged_in": True
+        })
     
-    def load_session_file(self, user_id: int) -> Optional[Dict]:
-        """Session dosyasını yükle"""
-        session_path = os.path.join(config.SESSIONS_DIR, f"{user_id}.session")
-        try:
-            with open(session_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return None
+    def get_session(self, user_id: int) -> Optional[Dict]:
+        """Session bilgilerini getir"""
+        user = self.get_user(user_id)
+        if user and user.get("session_data"):
+            return {
+                "data": user.get("session_data"),
+                "type": user.get("session_type"),
+                "phone": user.get("phone_number"),
+                "remember": user.get("remember_session", False)
+            }
+        return None
     
-    def delete_session_file(self, user_id: int) -> bool:
-        """Session dosyasını sil"""
-        session_path = os.path.join(config.SESSIONS_DIR, f"{user_id}.session")
-        try:
-            if os.path.exists(session_path):
-                os.remove(session_path)
-            return True
-        except Exception as e:
-            print(f"[LOCAL] Session silme hatası: {e}")
-            return False
+    def clear_session(self, user_id: int, keep_data: bool = False) -> bool:
+        """Session bilgilerini temizle"""
+        update_data = {
+            "is_logged_in": False,
+            "userbot_id": None,
+            "userbot_username": None
+        }
+        
+        if not keep_data:
+            update_data.update({
+                "session_data": None,
+                "session_type": None,
+                "phone_number": None,
+                "remember_session": False
+            })
+        
+        return self.update_user(user_id, update_data)
     
     # ==========================================
     # PLUGİN İŞLEMLERİ
