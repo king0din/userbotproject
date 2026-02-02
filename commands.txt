@@ -1,0 +1,17 @@
+start - Ana menüyü açar
+plugins - Plugin listesini gösterir
+pactive - Plugin aktif eder
+pinactive - Plugin deaktif eder
+pinfo - Plugin detaylarını gösterir
+cancel - İşlemi iptal eder
+help - Yardım menüsünü açar
+addplugin - Plugin ekler (Admin)
+delplugin - Plugin siler (Admin)
+setpublic - Plugini genel yapar (Admin)
+setprivate - Plugini özel yapar (Admin)
+ban - Kullanıcı banlar (Admin)
+unban - Ban kaldırır (Admin)
+addsudo - Sudo ekler (Admin)
+delsudo - Sudo kaldırır (Admin)
+broadcast - Duyuru gönderir (Admin)
+stats - İstatistikleri gösterir (Admin)
