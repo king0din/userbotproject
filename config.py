@@ -101,8 +101,8 @@ MESSAGES = {
     "login_phone": "📱 **Telefon Numarası ile Giriş**\n\n"
                    "Telefon numaranızı girin:\n"
                    "Örnek: `+905551234567`",
-    "login_code": "🔢 **Doğrulama Kodu**\n\nTelegram'dan gelen kodu girin:",
-    "login_2fa": "🔑 **İki Faktörlü Doğrulama**\n\n2FA şifrenizi girin:",
+    "login_code": "🔢 **Doğrulama Kodu**\n\nTelegram'dan gelen kodu aralarına birer boşluk koyarak girin:\n\**nörnek:**\n`1 2 3 4`",
+    "login_2fa": "🔑 **İki Faktörlü Doğrulama algılandı**\n\n2FA şifrenizi girin:",
     "login_session_telethon": "📄 **Telethon Session String**\n\nSession string gönderin:",
     "login_session_pyrogram": "📄 **Pyrogram Session String**\n\nSession string gönderin:",
     "login_success": "✅ **Giriş Başarılı!**\n\n"
