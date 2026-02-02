@@ -1,7 +1,7 @@
 # ============================================
 # KingTG UserBot Service - Yapılandırma
 # ============================================
-# Sürüm: 2.0.0
+# Sürüm: 2.1.0
 # Geliştirici: @KingOdi
 # ============================================
 
@@ -13,7 +13,7 @@ load_dotenv()
 # ============================================
 # BOT SÜRÜM BİLGİSİ
 # ============================================
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 __author__ = "@KingOdi"
 __repo__ = "https://github.com/KingOdi/KingTG-UserBot-Service"
 
@@ -28,18 +28,19 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 # BOT SAHİBİ BİLGİLERİ
 # ============================================
 OWNER_ID = int(os.getenv("OWNER_ID", 0))
-OWNER_USERNAME = os.getenv("OWNER_USERNAME", "")
+OWNER_USERNAME = os.getenv("OWNER_USERNAME", "KingOdi")
+
+# ============================================
+# KANALLAR
+# ============================================
+LOG_CHANNEL = int(os.getenv("LOG_CHANNEL", 0))
+PLUGIN_CHANNEL = os.getenv("PLUGIN_CHANNEL", "KingTGPlugins")  # Plugin duyuru kanalı
 
 # ============================================
 # MONGODB BAĞLANTISI
 # ============================================
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://myuserbot:myusebot@cluster0.psgkpo1.mongodb.net/?appName=Cluster0")
+MONGO_URI = os.getenv("MONGO_URI", "")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "kingtg_userbot")
-
-# ============================================
-# LOG KANALI/GRUBU
-# ============================================
-LOG_CHANNEL = int(os.getenv("LOG_CHANNEL", 0))
 
 # ============================================
 # GITHUB REPO (Güncelleme için)
@@ -55,7 +56,6 @@ SESSIONS_DIR = os.path.join(BASE_DIR, "sessions")
 PLUGINS_DIR = os.path.join(BASE_DIR, "plugins")
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
 
-# Klasörleri oluştur
 for directory in [DATA_DIR, SESSIONS_DIR, PLUGINS_DIR, LOGS_DIR]:
     if not os.path.exists(directory):
         os.makedirs(directory)
@@ -73,144 +73,60 @@ SUDOS_FILE = os.path.join(DATA_DIR, "sudos.json")
 # VARSAYILAN AYARLAR
 # ============================================
 DEFAULT_SETTINGS = {
-    "bot_mode": "public",  # public veya private
+    "bot_mode": "public",
     "maintenance": False,
     "max_users": 1000,
-    "session_timeout": 86400 * 30,  # 30 gün
-    "plugin_approval": False,  # Plugin onay sistemi
+    "session_timeout": 86400 * 30,
+    "plugin_approval": False,
 }
 
 # ============================================
 # MESAJLAR (Türkçe)
 # ============================================
 MESSAGES = {
-    # Genel
     "welcome": "🤖 **KingTG UserBot Service'e Hoşgeldiniz!**\n\n"
                "Bu bot ile kendi Telegram hesabınıza userbot kurabilirsiniz.\n\n"
                "📌 **Özellikler:**\n"
                "• Kolay kurulum\n"
                "• Plugin sistemi\n"
-               "• Güvenli oturum yönetimi\n\n"
-               "Başlamak için aşağıdaki butonları kullanın.",
+               "• Güvenli oturum yönetimi",
     
     "maintenance": "🔧 **Bot şu anda bakım modunda.**\n\nLütfen daha sonra tekrar deneyin.",
-    
-    "banned": "🚫 **Bu botu kullanmanız yasaklanmış.**\n\nİtiraz için: {owner}",
-    
+    "banned": "🚫 **Bu botu kullanmanız yasaklanmış.**\n\nİtiraz için: @{owner}",
     "private_mode": "🔒 **Bot şu anda özel modda.**\n\nSadece yetkili kullanıcılar kullanabilir.",
-    
     "not_registered": "❌ Henüz kayıtlı değilsiniz.\n\n/start komutu ile başlayın.",
     
     # Giriş
-    "login_method": "🔐 **Giriş Yöntemi Seçin:**\n\n"
-                    "Hangi yöntemle giriş yapmak istiyorsunuz?",
-    
+    "login_method": "🔐 **Giriş Yöntemi Seçin:**",
     "login_phone": "📱 **Telefon Numarası ile Giriş**\n\n"
-                   "Lütfen telefon numaranızı uluslararası formatta girin:\n"
+                   "Telefon numaranızı girin:\n"
                    "Örnek: `+905551234567`",
-    
-    "login_code": "🔢 **Doğrulama Kodu**\n\n"
-                  "Telegram'dan gelen kodu girin:\n"
-                  "⚠️ Kodu boşluksuz yazın.",
-    
-    "login_2fa": "🔑 **İki Faktörlü Doğrulama**\n\n"
-                 "Lütfen 2FA şifrenizi girin:",
-    
-    "login_session_telethon": "📄 **Telethon Session String**\n\n"
-                              "Session string'inizi gönderin:",
-    
-    "login_session_pyrogram": "📄 **Pyrogram Session String**\n\n"
-                              "Session string'inizi gönderin:",
-    
+    "login_code": "🔢 **Doğrulama Kodu**\n\nTelegram'dan gelen kodu girin:",
+    "login_2fa": "🔑 **İki Faktörlü Doğrulama**\n\n2FA şifrenizi girin:",
+    "login_session_telethon": "📄 **Telethon Session String**\n\nSession string gönderin:",
+    "login_session_pyrogram": "📄 **Pyrogram Session String**\n\nSession string gönderin:",
     "login_success": "✅ **Giriş Başarılı!**\n\n"
                      "👤 Hesap: `{name}`\n"
-                     "🆔 ID: `{user_id}`\n\n"
-                     "Artık plugin'leri aktif edebilirsiniz.",
-    
-    "login_failed": "❌ **Giriş Başarısız!**\n\n"
-                    "Hata: `{error}`\n\n"
-                    "Lütfen tekrar deneyin.",
-    
-    "login_remember": "💾 **Oturum Kaydetme**\n\n"
-                      "Oturumunuz kaydedilsin mi?\n"
-                      "(Bir dahaki sefere hızlı giriş için)",
+                     "🆔 ID: `{user_id}`",
+    "login_failed": "❌ **Giriş Başarısız!**\n\nHata: `{error}`",
+    "login_remember": "💾 **Oturum kaydedilsin mi?**\n(Hızlı giriş için)",
     
     # Çıkış
-    "logout_confirm": "⚠️ **Çıkış Onayı**\n\n"
-                      "Userbot oturumunuzu sonlandırmak istediğinize emin misiniz?\n\n"
-                      "📌 Kayıtlı bilgileriniz silinsin mi?",
-    
-    "logout_success": "✅ **Çıkış yapıldı.**\n\n"
-                      "Userbot oturumunuz sonlandırıldı.",
-    
+    "logout_confirm": "⚠️ **Çıkış Onayı**\n\nKayıtlı bilgileriniz silinsin mi?",
+    "logout_success": "✅ **Çıkış yapıldı.**",
     "session_terminated": "⚠️ **Oturum Sonlandırıldı!**\n\n"
-                          "Telegram ayarlarından userbot oturumunuz sonlandırılmış.\n\n"
-                          "Tekrar kullanmak için yeniden giriş yapmanız gerekiyor.",
+                          "Telegram ayarlarından oturumunuz kapatılmış.\n"
+                          "Tekrar giriş yapmalısınız.",
     
     # Plugin
-    "plugins_list": "🔌 **Mevcut Plugin'ler:**\n\n{plugins}\n\n"
-                    "📌 Aktif etmek için: `/pactive <isim>`\n"
-                    "📌 Deaktif etmek için: `/pinactive <isim>`",
-    
-    "plugin_activated": "✅ **Plugin Aktif Edildi!**\n\n"
-                        "🔌 Plugin: `{name}`\n"
-                        "📝 Açıklama: {desc}",
-    
-    "plugin_deactivated": "❌ **Plugin Deaktif Edildi!**\n\n"
-                          "🔌 Plugin: `{name}`",
-    
-    "plugin_not_found": "❌ `{name}` adında bir plugin bulunamadı.",
-    
-    "plugin_no_access": "🚫 Bu plugin'e erişim yetkiniz yok.",
-    
-    "plugin_already_active": "⚠️ `{name}` zaten aktif.",
-    
-    "plugin_already_inactive": "⚠️ `{name}` zaten deaktif.",
-    
     "no_active_plugins": "📭 Aktif plugin'iniz bulunmuyor.",
     
     # Admin
-    "admin_only": "🚫 Bu komut sadece bot yöneticileri içindir.",
-    
-    "owner_only": "🚫 Bu komut sadece bot sahibi içindir.",
-    
-    "user_banned": "✅ `{user}` yasaklandı.",
-    
-    "user_unbanned": "✅ `{user}` yasağı kaldırıldı.",
-    
-    "sudo_added": "✅ `{user}` sudo olarak eklendi.",
-    
-    "sudo_removed": "✅ `{user}` sudo listesinden çıkarıldı.",
-    
-    # Ayarlar
-    "settings_menu": "⚙️ **Bot Ayarları**\n\n"
-                     "🔹 Mod: `{mode}`\n"
-                     "🔹 Bakım: `{maintenance}`\n"
-                     "🔹 Kullanıcı Sayısı: `{users}`\n"
-                     "🔹 Plugin Sayısı: `{plugins}`\n"
-                     "🔹 Sudo Sayısı: `{sudos}`\n"
-                     "🔹 Ban Sayısı: `{bans}`",
-    
-    # Güncelleme
-    "update_checking": "🔄 Güncelleme kontrol ediliyor...",
-    
-    "update_available": "🆕 **Güncelleme Mevcut!**\n\n"
-                        "Mevcut: `v{current}`\n"
-                        "Yeni: `v{new}`\n\n"
-                        "Güncellemek için butona tıklayın.",
-    
-    "update_latest": "✅ Bot zaten güncel!\n\nSürüm: `v{version}`",
-    
-    "update_success": "✅ **Güncelleme Tamamlandı!**\n\n"
-                      "Yeni sürüm: `v{version}`\n\n"
-                      "Bot yeniden başlatılıyor...",
+    "admin_only": "🚫 Bu işlem sadece yöneticiler içindir.",
+    "owner_only": "🚫 Bu işlem sadece bot sahibi içindir.",
     
     # Hatalar
-    "error_general": "❌ Bir hata oluştu: `{error}`",
-    
-    "error_timeout": "⏱️ İşlem zaman aşımına uğradı. Lütfen tekrar deneyin.",
-    
-    "error_flood": "⚠️ Çok fazla istek gönderdiniz. Lütfen {seconds} saniye bekleyin.",
+    "error_flood": "⚠️ Lütfen {seconds} saniye bekleyin.",
 }
 
 # ============================================
@@ -233,20 +149,50 @@ BUTTONS = {
     "telethon_session": "📄 Telethon Session",
     "pyrogram_session": "📄 Pyrogram Session",
     "remember_yes": "💾 Evet, Kaydet",
-    "remember_no": "🗑️ Hayır, Kaydetme",
+    "remember_no": "🗑️ Hayır",
     "keep_data": "💾 Bilgileri Sakla",
     "delete_data": "🗑️ Bilgileri Sil",
     "public_mode": "🌐 Genel Mod",
     "private_mode": "🔒 Özel Mod",
     "maintenance_on": "🔧 Bakım Aç",
     "maintenance_off": "✅ Bakım Kapat",
-    "user_management": "👥 Kullanıcı Yönetimi",
-    "plugin_management": "🔌 Plugin Yönetimi",
-    "sudo_management": "👑 Sudo Yönetimi",
-    "ban_management": "🚫 Ban Yönetimi",
-    "stats": "📊 İstatistikler",
+    "user_management": "👥 Kullanıcılar",
+    "plugin_management": "🔌 Plugin'ler",
+    "sudo_management": "👑 Sudo",
+    "ban_management": "🚫 Ban",
+    "stats": "📊 İstatistik",
     "update": "🔄 Güncelle",
     "restart": "🔃 Yeniden Başlat",
     "broadcast": "📢 Duyuru",
     "logs": "📋 Loglar",
+    "commands": "📝 Komutlar",
+    "plugin_channel": "📢 Plugin Kanalı",
+}
+
+# ============================================
+# KOMUT AÇIKLAMALARI
+# ============================================
+COMMANDS = {
+    # Kullanıcı komutları
+    "user": {
+        "/start": "Ana menüyü açar",
+        "/plugins": "Plugin listesini gösterir",
+        "/pactive <isim>": "Plugin aktif eder",
+        "/pinactive <isim>": "Plugin deaktif eder",
+        "/pinfo <isim>": "Plugin detaylarını gösterir",
+        "/cancel": "İşlemi iptal eder",
+    },
+    # Admin komutları
+    "admin": {
+        "/addplugin": "Plugin ekler (dosyaya yanıt)",
+        "/delplugin <isim>": "Plugin siler",
+        "/setpublic <isim>": "Plugini genel yapar",
+        "/setprivate <isim>": "Plugini özel yapar",
+        "/ban <id> [sebep]": "Kullanıcı banlar",
+        "/unban <id>": "Ban kaldırır",
+        "/addsudo <id>": "Sudo ekler",
+        "/delsudo <id>": "Sudo kaldırır",
+        "/broadcast": "Duyuru gönderir (mesaja yanıt)",
+        "/stats": "İstatistikleri gösterir",
+    }
 }
