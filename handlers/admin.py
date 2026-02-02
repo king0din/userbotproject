@@ -191,7 +191,9 @@ def register_admin_handlers(bot):
     @bot.on(events.NewMessage(pattern=r'^/info\s+(\d+)$'))
     async def info_command(event):
         """Kullanıcı detaylı bilgisi"""
-        if event.sender_id != config.OWNER_ID:
+        
+        # 1. ADIM: Sudo kullanıcılarının da komutu kullanabilmesi için izni güncelledik.
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
             return
         
         user_id = int(event.pattern_match.group(1))
@@ -254,9 +256,15 @@ def register_admin_handlers(bot):
             
             phone = user_data.get("phone_number")
             if phone:
-                # Telefon numarasını kısmen gizle
-                masked_phone = phone[:4] + "****" + phone[-2:] if len(phone) > 6 else phone
-                text += f"  • Telefon: `{masked_phone}`\n"
+                # 2. ADIM: Telefon numarası gösterim mantığı
+                if event.sender_id == config.OWNER_ID:
+                    # Eğer komutu yazan SAHİP ise numarayı olduğu gibi göster
+                    phone_display = phone
+                else:
+                    # Eğer komutu yazan SUDO ise numarayı sansürle
+                    phone_display = phone[:4] + "****" + phone[-2:] if len(phone) > 6 else phone
+                
+                text += f"  • Telefon: `{phone_display}`\n"
             
             remember = user_data.get("remember_session", False)
             text += f"  • Oturum Kayıtlı: {'✅ Evet' if remember else '❌ Hayır'}\n"
