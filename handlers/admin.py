@@ -6,105 +6,154 @@ import os
 import sys
 import asyncio
 import subprocess
+import time
 from telethon import events, Button
 import config
 from database import database as db
 from userbot.manager import userbot_manager
 from userbot.plugins import plugin_manager
-from utils import (
-    owner_only, sudo_only, send_log, get_readable_time,
-    back_button, close_button, paginate, pagination_buttons,
-    get_user_info
-)
+from utils import owner_only, sudo_only, send_log, get_readable_time, back_button
 
-import time
 start_time = time.time()
 
 def register_admin_handlers(bot):
     """Admin handler'larını kaydet"""
     
     # ==========================================
-    # AYARLAR MENÜSÜ
+    # AYARLAR MENÜSÜ - DÜZELTİLDİ
     # ==========================================
     
-    @bot.on(events.CallbackQuery(data=b"settings_menu"))
-    async def settings_menu_handler(event):
-        """Ayarlar menüsü"""
-        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
-            await event.answer(config.MESSAGES["admin_only"], alert=True)
-            return
-        
+    async def get_settings_text():
+        """Ayarlar menüsü metnini oluştur"""
         settings = await db.get_settings()
         stats = await db.get_stats()
         
-        mode_emoji = "🌐" if settings.get("bot_mode") == "public" else "🔒"
-        mode_text = "Genel" if settings.get("bot_mode") == "public" else "Özel"
-        maint_emoji = "🔧" if settings.get("maintenance") else "✅"
-        maint_text = "Açık" if settings.get("maintenance") else "Kapalı"
+        mode = settings.get("bot_mode", "public")
+        maint = settings.get("maintenance", False)
         
-        text = config.MESSAGES["settings_menu"].format(
-            mode=f"{mode_emoji} {mode_text}",
-            maintenance=f"{maint_emoji} {maint_text}",
-            users=stats.get("total_users", 0),
-            plugins=stats.get("total_plugins", 0),
-            sudos=stats.get("sudo_users", 0),
-            bans=stats.get("banned_users", 0)
-        )
+        mode_text = "🌐 Genel" if mode == "public" else "🔒 Özel"
+        maint_text = "🔧 Açık" if maint else "✅ Kapalı"
         
-        if event.sender_id == config.OWNER_ID:
+        text = "⚙️ **Bot Ayarları**\n\n"
+        text += f"📍 **Mod:** {mode_text}\n"
+        text += f"🔧 **Bakım:** {maint_text}\n\n"
+        text += f"👥 **Kullanıcı:** `{stats.get('total_users', 0)}`\n"
+        text += f"✅ **Aktif Userbot:** `{stats.get('logged_in_users', 0)}`\n"
+        text += f"🔌 **Plugin:** `{stats.get('total_plugins', 0)}`\n"
+        text += f"👑 **Sudo:** `{stats.get('sudo_users', 0)}`\n"
+        text += f"🚫 **Ban:** `{stats.get('banned_users', 0)}`"
+        
+        return text, settings
+    
+    async def get_settings_buttons(settings, is_owner: bool):
+        """Ayarlar butonlarını oluştur"""
+        mode = settings.get("bot_mode", "public")
+        maint = settings.get("maintenance", False)
+        
+        if is_owner:
             buttons = [
                 [
-                    Button.inline(config.BUTTONS["public_mode"] if settings.get("bot_mode") == "private" else config.BUTTONS["private_mode"], b"toggle_mode"),
-                    Button.inline(config.BUTTONS["maintenance_off"] if settings.get("maintenance") else config.BUTTONS["maintenance_on"], b"toggle_maintenance")
+                    Button.inline("🔒 Özel Yap" if mode == "public" else "🌐 Genel Yap", b"toggle_mode"),
+                    Button.inline("✅ Bakım Kapat" if maint else "🔧 Bakım Aç", b"toggle_maintenance")
                 ],
-                [Button.inline(config.BUTTONS["user_management"], b"user_management")],
-                [Button.inline(config.BUTTONS["plugin_management"], b"plugin_management")],
-                [Button.inline(config.BUTTONS["sudo_management"], b"sudo_management")],
-                [Button.inline(config.BUTTONS["ban_management"], b"ban_management")],
-                [Button.inline(config.BUTTONS["stats"], b"stats")],
-                [
-                    Button.inline(config.BUTTONS["update"], b"update_bot"),
-                    Button.inline(config.BUTTONS["restart"], b"restart_bot")
-                ],
-                [Button.inline(config.BUTTONS["logs"], b"view_logs")],
+                [Button.inline("👥 Kullanıcılar", b"user_management"),
+                 Button.inline("🔌 Plugin'ler", b"admin_plugins")],
+                [Button.inline("👑 Sudo", b"sudo_management"),
+                 Button.inline("🚫 Ban", b"ban_management")],
+                [Button.inline("📊 İstatistik", b"stats"),
+                 Button.inline("📋 Loglar", b"view_logs")],
+                [Button.inline("🔄 Güncelle", b"update_bot"),
+                 Button.inline("🔃 Yeniden Başlat", b"restart_bot")],
+                [Button.inline("📝 Komutlar", b"admin_commands")],
                 back_button("main_menu")
             ]
         else:
             buttons = [
-                [Button.inline(config.BUTTONS["plugin_management"], b"plugin_management")],
-                [Button.inline(config.BUTTONS["stats"], b"stats")],
+                [Button.inline("🔌 Plugin'ler", b"admin_plugins")],
+                [Button.inline("📊 İstatistik", b"stats")],
                 back_button("main_menu")
             ]
+        return buttons
+    
+    @bot.on(events.CallbackQuery(data=b"settings_menu"))
+    async def settings_menu_handler(event):
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer(config.MESSAGES["admin_only"], alert=True)
+            return
         
+        text, settings = await get_settings_text()
+        buttons = await get_settings_buttons(settings, event.sender_id == config.OWNER_ID)
         await event.edit(text, buttons=buttons)
     
     @bot.on(events.CallbackQuery(data=b"toggle_mode"))
     async def toggle_mode_handler(event):
-        """Bot modunu değiştir"""
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
             return
         
         settings = await db.get_settings()
         new_mode = "private" if settings.get("bot_mode") == "public" else "public"
-        
         await db.update_settings({"bot_mode": new_mode})
-        await event.answer(f"✅ Bot modu: {new_mode}", alert=True)
-        await send_log(bot, "system", f"Bot modu: {new_mode}")
+        
+        # Menüyü güncelle
+        text, settings = await get_settings_text()
+        buttons = await get_settings_buttons(settings, True)
+        await event.edit(text, buttons=buttons)
+        await event.answer(f"✅ Mod: {'Özel' if new_mode == 'private' else 'Genel'}")
+        await send_log(bot, "system", f"Mod değişti: {new_mode}")
     
     @bot.on(events.CallbackQuery(data=b"toggle_maintenance"))
     async def toggle_maintenance_handler(event):
-        """Bakım modunu değiştir"""
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
             return
         
         settings = await db.get_settings()
         new_state = not settings.get("maintenance", False)
-        
         await db.update_settings({"maintenance": new_state})
-        await event.answer(f"✅ Bakım: {'Açık' if new_state else 'Kapalı'}", alert=True)
+        
+        # Menüyü güncelle
+        text, settings = await get_settings_text()
+        buttons = await get_settings_buttons(settings, True)
+        await event.edit(text, buttons=buttons)
+        await event.answer(f"✅ Bakım: {'Açık' if new_state else 'Kapalı'}")
         await send_log(bot, "system", f"Bakım: {'Açık' if new_state else 'Kapalı'}")
+    
+    # ==========================================
+    # ADMİN PLUGİN YÖNETİMİ - YÜKLENMİŞ PLUGİNLER
+    # ==========================================
+    
+    @bot.on(events.CallbackQuery(data=b"admin_plugins"))
+    async def admin_plugins_handler(event):
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer(config.MESSAGES["admin_only"], alert=True)
+            return
+        
+        all_plugins = await db.get_all_plugins()
+        
+        if not all_plugins:
+            text = "📭 **Henüz plugin eklenmemiş.**"
+        else:
+            text = "🔌 **Yüklü Plugin'ler:**\n\n"
+            
+            for p in all_plugins:
+                status = "✅" if p.get("is_active", True) else "❌"
+                access = "🌐" if p.get("is_public", True) else "🔒"
+                cmds = len(p.get("commands", []))
+                text += f"{status} {access} `{p['name']}` ({cmds} komut)\n"
+            
+            text += f"\n**Toplam:** {len(all_plugins)} plugin"
+        
+        text += "\n\n**Komutlar:**\n"
+        text += "• `/addplugin` - Ekle (dosyaya yanıt)\n"
+        text += "• `/delplugin <isim>` - Sil\n"
+        text += "• `/pinfo <isim>` - Detay"
+        
+        buttons = [
+            [Button.inline("🔄 Yenile", b"admin_plugins")],
+            back_button("settings_menu")
+        ]
+        await event.edit(text, buttons=buttons)
     
     # ==========================================
     # BAN YÖNETİMİ
@@ -112,7 +161,6 @@ def register_admin_handlers(bot):
     
     @bot.on(events.CallbackQuery(data=b"ban_management"))
     async def ban_management_handler(event):
-        """Ban yönetimi"""
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
             return
@@ -124,6 +172,8 @@ def register_admin_handlers(bot):
         if banned:
             for user in banned[:10]:
                 text += f"• `{user['user_id']}` - {user.get('ban_reason', 'Sebep yok')}\n"
+            if len(banned) > 10:
+                text += f"\n... ve {len(banned) - 10} kişi daha"
         else:
             text += "✅ Banlı kullanıcı yok."
         
@@ -135,7 +185,6 @@ def register_admin_handlers(bot):
     
     @bot.on(events.NewMessage(pattern=r'^/ban\s+(\d+)(?:\s+(.+))?$'))
     async def ban_command(event):
-        """Kullanıcı banla"""
         if event.sender_id != config.OWNER_ID:
             return
         
@@ -151,20 +200,18 @@ def register_admin_handlers(bot):
         await userbot_manager.logout(user_id)
         plugin_manager.clear_user_plugins(user_id)
         
-        await event.respond(f"✅ `{user_id}` banlandı.\nSebep: {reason}")
-        await send_log(bot, "ban", f"Banlanan: {user_id}\nSebep: {reason}", event.sender_id)
+        await event.respond(f"✅ `{user_id}` banlandı.\n📝 Sebep: {reason}")
+        await send_log(bot, "ban", f"Ban: {user_id} - {reason}", event.sender_id)
     
     @bot.on(events.NewMessage(pattern=r'^/unban\s+(\d+)$'))
     async def unban_command(event):
-        """Ban kaldır"""
         if event.sender_id != config.OWNER_ID:
             return
         
         user_id = int(event.pattern_match.group(1))
         await db.unban_user(user_id)
-        
         await event.respond(f"✅ `{user_id}` banı kaldırıldı.")
-        await send_log(bot, "ban", f"Ban kaldırıldı: {user_id}", event.sender_id)
+        await send_log(bot, "ban", f"Unban: {user_id}", event.sender_id)
     
     # ==========================================
     # SUDO YÖNETİMİ
@@ -172,7 +219,6 @@ def register_admin_handlers(bot):
     
     @bot.on(events.CallbackQuery(data=b"sudo_management"))
     async def sudo_management_handler(event):
-        """Sudo yönetimi"""
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
             return
@@ -195,55 +241,57 @@ def register_admin_handlers(bot):
     
     @bot.on(events.NewMessage(pattern=r'^/addsudo\s+(\d+)$'))
     async def addsudo_command(event):
-        """Sudo ekle"""
         if event.sender_id != config.OWNER_ID:
             return
         
         user_id = int(event.pattern_match.group(1))
         await db.add_user(user_id)
         await db.add_sudo(user_id)
-        
         await event.respond(f"✅ `{user_id}` sudo eklendi.")
         await send_log(bot, "sudo", f"Sudo eklendi: {user_id}", event.sender_id)
     
     @bot.on(events.NewMessage(pattern=r'^/delsudo\s+(\d+)$'))
     async def delsudo_command(event):
-        """Sudo kaldır"""
         if event.sender_id != config.OWNER_ID:
             return
         
         user_id = int(event.pattern_match.group(1))
         await db.remove_sudo(user_id)
-        
         await event.respond(f"✅ `{user_id}` sudo kaldırıldı.")
         await send_log(bot, "sudo", f"Sudo kaldırıldı: {user_id}", event.sender_id)
     
     # ==========================================
-    # PLUGİN YÖNETİMİ
+    # KULLANICI YÖNETİMİ
     # ==========================================
     
-    @bot.on(events.CallbackQuery(data=b"plugin_management"))
-    async def plugin_management_handler(event):
-        """Plugin yönetimi"""
-        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
-            await event.answer(config.MESSAGES["admin_only"], alert=True)
+    @bot.on(events.CallbackQuery(data=b"user_management"))
+    async def user_management_handler(event):
+        if event.sender_id != config.OWNER_ID:
+            await event.answer(config.MESSAGES["owner_only"], alert=True)
             return
         
-        plugins = await db.get_all_plugins()
+        stats = await db.get_stats()
+        users = await db.get_all_users()
         
-        text = "🔌 **Plugin Yönetimi**\n\n"
-        text += f"Toplam: `{len(plugins)}`\n\n"
-        text += "**Komutlar:**\n"
-        text += "• `/addplugin` - Plugin ekle\n"
-        text += "• `/delplugin <isim>` - Plugin sil\n"
-        text += "• `/setpublic <isim>` - Genel yap\n"
-        text += "• `/setprivate <isim>` - Özel yap"
+        text = "👥 **Kullanıcı Yönetimi**\n\n"
+        text += f"📊 **İstatistik:**\n"
+        text += f"• Toplam: `{stats.get('total_users', 0)}`\n"
+        text += f"• Aktif Userbot: `{stats.get('logged_in_users', 0)}`\n"
+        text += f"• Banlı: `{stats.get('banned_users', 0)}`\n\n"
+        
+        text += "**Son Kullanıcılar:**\n"
+        for user in users[-5:]:
+            status = "🟢" if user.get("is_logged_in") else "⚪"
+            text += f"{status} `{user['user_id']}` - @{user.get('username', 'Yok')}\n"
         
         await event.edit(text, buttons=[back_button("settings_menu")])
     
+    # ==========================================
+    # PLUGİN EKLEME/SİLME
+    # ==========================================
+    
     @bot.on(events.NewMessage(pattern=r'^/addplugin$'))
     async def addplugin_command(event):
-        """Plugin ekle"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
             return
         
@@ -273,17 +321,14 @@ def register_admin_handlers(bot):
             f"🔧 Komutlar: {', '.join([f'`.{c}`' for c in info['commands']])}\n\n"
             f"Nasıl eklensin?",
             buttons=[
-                [
-                    Button.inline("🌐 Genel", f"confirm_plugin_public_{info['name']}".encode()),
-                    Button.inline("🔒 Özel", f"confirm_plugin_private_{info['name']}".encode())
-                ],
+                [Button.inline("🌐 Genel", f"confirm_plugin_public_{info['name']}".encode()),
+                 Button.inline("🔒 Özel", f"confirm_plugin_private_{info['name']}".encode())],
                 [Button.inline("❌ İptal", b"cancel_plugin")]
             ]
         )
     
     @bot.on(events.CallbackQuery(pattern=b"confirm_plugin_(public|private)_(.+)"))
     async def confirm_plugin_handler(event):
-        """Plugin onay"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
             return
         
@@ -297,16 +342,14 @@ def register_admin_handlers(bot):
         
         path = bot.pending_plugins[plugin_name]
         success, message = await plugin_manager.register_plugin(path, is_public=is_public)
-        
         del bot.pending_plugins[plugin_name]
-        await event.edit(message)
         
+        await event.edit(message)
         if success:
             await send_log(bot, "plugin", f"Eklendi: {plugin_name}", event.sender_id)
     
     @bot.on(events.CallbackQuery(data=b"cancel_plugin"))
     async def cancel_plugin_handler(event):
-        """Plugin iptal"""
         if hasattr(bot, 'pending_plugins'):
             for path in bot.pending_plugins.values():
                 if os.path.exists(path):
@@ -316,7 +359,6 @@ def register_admin_handlers(bot):
     
     @bot.on(events.NewMessage(pattern=r'^/delplugin\s+(\S+)$'))
     async def delplugin_command(event):
-        """Plugin sil"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
             return
         
@@ -344,12 +386,11 @@ def register_admin_handlers(bot):
         await event.respond(f"✅ `{plugin_name}` özel yapıldı.")
     
     # ==========================================
-    # İSTATİSTİKLER
+    # İSTATİSTİK
     # ==========================================
     
     @bot.on(events.CallbackQuery(data=b"stats"))
     async def stats_handler(event):
-        """İstatistikler"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
             await event.answer(config.MESSAGES["admin_only"], alert=True)
             return
@@ -359,27 +400,44 @@ def register_admin_handlers(bot):
         
         text = "📊 **İstatistikler**\n\n"
         text += f"👥 Kullanıcı: `{stats.get('total_users', 0)}`\n"
-        text += f"✅ Aktif: `{stats.get('logged_in_users', 0)}`\n"
+        text += f"✅ Aktif Userbot: `{stats.get('logged_in_users', 0)}`\n"
         text += f"🚫 Banlı: `{stats.get('banned_users', 0)}`\n"
         text += f"👑 Sudo: `{stats.get('sudo_users', 0)}`\n\n"
-        text += f"🔌 Plugin: `{stats.get('total_plugins', 0)}`\n\n"
+        text += f"🔌 Plugin: `{stats.get('total_plugins', 0)}`\n"
+        text += f"  └ Genel: `{stats.get('public_plugins', 0)}`\n"
+        text += f"  └ Özel: `{stats.get('private_plugins', 0)}`\n\n"
         text += f"⏱️ Uptime: `{uptime}`\n"
         text += f"🔢 Sürüm: `v{config.__version__}`"
         
         await event.edit(text, buttons=[back_button("settings_menu")])
     
+    @bot.on(events.NewMessage(pattern=r'^/stats$'))
+    async def stats_command(event):
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            return
+        
+        stats = await db.get_stats()
+        uptime = get_readable_time(time.time() - start_time)
+        
+        text = "📊 **İstatistikler**\n\n"
+        text += f"👥 Kullanıcı: `{stats.get('total_users', 0)}`\n"
+        text += f"✅ Aktif: `{stats.get('logged_in_users', 0)}`\n"
+        text += f"🔌 Plugin: `{stats.get('total_plugins', 0)}`\n"
+        text += f"⏱️ Uptime: `{uptime}`"
+        
+        await event.respond(text)
+    
     # ==========================================
-    # GÜNCELLEME & RESTART
+    # GÜNCELLEME - OTOMATİK RESTART
     # ==========================================
     
     @bot.on(events.CallbackQuery(data=b"update_bot"))
     async def update_bot_handler(event):
-        """Güncelleme"""
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
             return
         
-        await event.edit("🔄 Kontrol ediliyor...")
+        await event.edit("🔄 **Güncelleme kontrol ediliyor...**")
         
         try:
             import git
@@ -396,51 +454,42 @@ def register_admin_handlers(bot):
             commits = list(repo.iter_commits(f'{current_branch}..origin/{current_branch}'))
             
             if not commits:
-                await event.edit(f"✅ Güncel!\nSürüm: `v{config.__version__}`", buttons=[back_button("settings_menu")])
+                await event.edit(
+                    f"✅ **Bot güncel!**\n\nSürüm: `v{config.__version__}`",
+                    buttons=[back_button("settings_menu")]
+                )
                 return
             
-            await event.edit(
-                f"🆕 {len(commits)} güncelleme mevcut!",
-                buttons=[
-                    [Button.inline("✅ Güncelle", b"do_update")],
-                    back_button("settings_menu")
-                ]
-            )
-        except Exception as e:
-            await event.edit(f"❌ Hata: {e}", buttons=[back_button("settings_menu")])
-    
-    @bot.on(events.CallbackQuery(data=b"do_update"))
-    async def do_update_handler(event):
-        """Güncellemeyi yap"""
-        if event.sender_id != config.OWNER_ID:
-            return
-        
-        await event.edit("⏳ Güncelleniyor...")
-        
-        try:
-            import git
-            repo = git.Repo(".")
-            origin = repo.remotes.origin
-            current_branch = repo.active_branch.name
+            # Güncelleme var - direkt güncelle
+            await event.edit(f"⬇️ **{len(commits)} güncelleme indiriliyor...**")
             
             origin.pull(current_branch)
             
+            # Requirements kur
             if os.path.exists("requirements.txt"):
+                await event.edit("📦 **Bağımlılıklar kuruluyor...**")
                 subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"])
             
-            await event.edit("✅ Güncellendi!", buttons=[[Button.inline("🔃 Yeniden Başlat", b"restart_bot")]])
-            await send_log(bot, "update", "Bot güncellendi")
+            await event.edit("✅ **Güncelleme tamamlandı!**\n\n🔃 Yeniden başlatılıyor...")
+            
+            # Restart bilgisini kaydet
+            with open(".restart_info", "w") as f:
+                f.write(f"{event.chat_id}|{event.message_id}")
+            
+            await send_log(bot, "update", "Bot güncellendi ve yeniden başlatılıyor")
+            await asyncio.sleep(1)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+            
         except Exception as e:
-            await event.edit(f"❌ Hata: {e}", buttons=[back_button("settings_menu")])
+            await event.edit(f"❌ **Hata:** `{e}`", buttons=[back_button("settings_menu")])
     
     @bot.on(events.CallbackQuery(data=b"restart_bot"))
     async def restart_bot_handler(event):
-        """Yeniden başlat"""
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
             return
         
-        await event.edit("🔄 Yeniden başlatılıyor...")
+        await event.edit("🔃 **Yeniden başlatılıyor...**")
         
         with open(".restart_info", "w") as f:
             f.write(f"{event.chat_id}|{event.message_id}")
@@ -450,12 +499,11 @@ def register_admin_handlers(bot):
         os.execv(sys.executable, [sys.executable] + sys.argv)
     
     # ==========================================
-    # LOGLAR & KULLANICI YÖNETİMİ
+    # LOGLAR
     # ==========================================
     
     @bot.on(events.CallbackQuery(data=b"view_logs"))
     async def view_logs_handler(event):
-        """Logları görüntüle"""
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
             return
@@ -466,25 +514,44 @@ def register_admin_handlers(bot):
         
         if logs:
             for log in logs:
-                text += f"• [{log.get('type', '?')}] {log.get('message', '')[:40]}\n"
+                log_time = log.get('timestamp', '')
+                if log_time:
+                    log_time = str(log_time)[:16]
+                text += f"• [{log.get('type', '?')}] {log.get('message', '')[:30]}\n"
         else:
             text += "Henüz log yok."
         
         await event.edit(text, buttons=[back_button("settings_menu")])
     
-    @bot.on(events.CallbackQuery(data=b"user_management"))
-    async def user_management_handler(event):
-        """Kullanıcı yönetimi"""
-        if event.sender_id != config.OWNER_ID:
-            await event.answer(config.MESSAGES["owner_only"], alert=True)
+    # ==========================================
+    # ADMİN KOMUTLARI LİSTESİ
+    # ==========================================
+    
+    @bot.on(events.CallbackQuery(data=b"admin_commands"))
+    async def admin_commands_handler(event):
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer(config.MESSAGES["admin_only"], alert=True)
             return
         
-        stats = await db.get_stats()
+        text = "📝 **Admin Komutları**\n\n"
         
-        text = "👥 **Kullanıcı Yönetimi**\n\n"
-        text += f"Toplam: `{stats.get('total_users', 0)}`\n"
-        text += f"Aktif: `{stats.get('logged_in_users', 0)}`\n"
-        text += f"Banlı: `{stats.get('banned_users', 0)}`"
+        text += "**🔌 Plugin:**\n"
+        text += "• `/addplugin` - Plugin ekle (dosyaya yanıt)\n"
+        text += "• `/delplugin <isim>` - Plugin sil\n"
+        text += "• `/setpublic <isim>` - Genel yap\n"
+        text += "• `/setprivate <isim>` - Özel yap\n\n"
+        
+        text += "**🚫 Ban:**\n"
+        text += "• `/ban <id> [sebep]` - Kullanıcı banla\n"
+        text += "• `/unban <id>` - Ban kaldır\n\n"
+        
+        text += "**👑 Sudo:**\n"
+        text += "• `/addsudo <id>` - Sudo ekle\n"
+        text += "• `/delsudo <id>` - Sudo kaldır\n\n"
+        
+        text += "**📢 Diğer:**\n"
+        text += "• `/broadcast` - Duyuru (mesaja yanıt)\n"
+        text += "• `/stats` - İstatistik"
         
         await event.edit(text, buttons=[back_button("settings_menu")])
     
@@ -494,7 +561,6 @@ def register_admin_handlers(bot):
     
     @bot.on(events.NewMessage(pattern=r'^/broadcast$'))
     async def broadcast_command(event):
-        """Duyuru"""
         if event.sender_id != config.OWNER_ID:
             return
         
@@ -514,4 +580,4 @@ def register_admin_handlers(bot):
             except:
                 failed += 1
         
-        await msg.edit(f"✅ Tamamlandı!\n📤 Gönderildi: {sent}\n❌ Başarısız: {failed}")
+        await msg.edit(f"✅ **Tamamlandı!**\n\n📤 Gönderildi: `{sent}`\n❌ Başarısız: `{failed}`")
