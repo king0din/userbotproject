@@ -395,7 +395,7 @@ def register_user_handlers(bot):
             text += f"\n\n**Toplam:** {len(all_plugins)} plugin"
             text += f"\n**Aktif:** {len(active_plugins)} plugin"
         
-        text += "\n\n📌 Detay için: `/pinfo <isim>`"
+        text += "\n\n📌 Plugin detay için: `/pinfo` komutu ile plugin adı girin.\n⬇️Plugin aktif etmek için: `/pactive` komutu ile plugin adı girin"
         
         buttons = [
             [Button.inline(config.BUTTONS["my_plugins"], b"my_plugins")],
