@@ -6,7 +6,8 @@ from telethon import events, Button
 from telethon.tl.custom import Message
 import config
 from database import database as db
-from userbot import userbot_manager, plugin_manager
+from userbot.manager import userbot_manager
+from userbot.plugins import plugin_manager
 from utils import (
     check_ban, check_private_mode, check_maintenance, 
     register_user, send_log, get_readable_time,
@@ -39,7 +40,6 @@ def register_user_handlers(bot):
     @register_user
     async def start_handler(event):
         """Başlangıç komutu"""
-        # Kullanıcı state'ini temizle
         if event.sender_id in user_states:
             del user_states[event.sender_id]
         
@@ -108,7 +108,6 @@ def register_user_handlers(bot):
     @check_private_mode
     async def login_menu_handler(event):
         """Giriş yöntemi seçimi"""
-        # State temizle
         if event.sender_id in user_states:
             del user_states[event.sender_id]
         
@@ -132,7 +131,6 @@ def register_user_handlers(bot):
         """Telefon ile giriş başlat"""
         user_id = event.sender_id
         
-        # State ayarla
         user_states[user_id] = {
             "state": STATE_WAITING_PHONE,
             "message_id": event.message_id
@@ -158,7 +156,6 @@ def register_user_handlers(bot):
             )
             return
         
-        # Mesajı sil (gizlilik için)
         try:
             await event.delete()
         except:
@@ -184,7 +181,6 @@ def register_user_handlers(bot):
                 del user_states[user_id]
             return
         
-        # State güncelle
         user_states[user_id] = {
             "state": STATE_WAITING_CODE,
             "phone": phone,
@@ -201,7 +197,6 @@ def register_user_handlers(bot):
         user_id = event.sender_id
         code = event.text.strip().replace(" ", "").replace("-", "")
         
-        # Mesajı sil
         try:
             await event.delete()
         except:
@@ -212,7 +207,6 @@ def register_user_handlers(bot):
         result = await userbot_manager.verify_code(user_id, code)
         
         if result.get("stage") == "2fa":
-            # 2FA gerekli
             user_states[user_id]["state"] = STATE_WAITING_2FA
             user_states[user_id]["message_id"] = msg.id
             
@@ -232,7 +226,7 @@ def register_user_handlers(bot):
                 "no_pending_login": "Giriş işlemi bulunamadı. Baştan başlayın."
             }
             
-            if error == "code_expired" or error == "no_pending_login":
+            if error in ["code_expired", "no_pending_login"]:
                 if user_id in user_states:
                     del user_states[user_id]
                 await msg.edit(
@@ -250,7 +244,6 @@ def register_user_handlers(bot):
         user_id = event.sender_id
         password = event.text.strip()
         
-        # Mesajı sil
         try:
             await event.delete()
         except:
@@ -284,14 +277,12 @@ def register_user_handlers(bot):
         session_string = result["session_string"]
         phone = user_states.get(user_id, {}).get("phone")
         
-        # Veritabanı güncelle
         await db.update_user(user_id, {
             "is_logged_in": True,
             "userbot_id": user_info["id"],
             "userbot_username": user_info["username"]
         })
         
-        # Geçici session bilgisi
         if not hasattr(bot, 'session_temp'):
             bot.session_temp = {}
         
@@ -301,7 +292,6 @@ def register_user_handlers(bot):
             "type": user_states.get(user_id, {}).get("session_type", "phone")
         }
         
-        # State temizle
         if user_id in user_states:
             del user_states[user_id]
         
@@ -369,7 +359,6 @@ def register_user_handlers(bot):
         user_id = event.sender_id
         session_string = event.text.strip()
         
-        # Mesajı sil
         try:
             await event.delete()
         except:
@@ -397,7 +386,6 @@ def register_user_handlers(bot):
                 "type": session_type
             }
             
-            # State temizle
             if user_id in user_states:
                 del user_states[user_id]
             
@@ -427,7 +415,6 @@ def register_user_handlers(bot):
                 "account_banned": "Hesap yasaklı"
             }
             
-            # State temizle
             if user_id in user_states:
                 del user_states[user_id]
             
@@ -448,7 +435,6 @@ def register_user_handlers(bot):
         if user_id in user_states:
             del user_states[user_id]
             
-            # Pending login varsa temizle
             if user_id in userbot_manager.pending_logins:
                 try:
                     await userbot_manager.pending_logins[user_id]["client"].disconnect()
@@ -518,7 +504,7 @@ def register_user_handlers(bot):
         
         await event.edit(
             "✅ **Giriş tamamlandı!**\n\n"
-            "Session kaydedilmedi. Bir sonraki girişte tekrar bilgi girmeniz gerekecek.\n\n"
+            "Session kaydedilmedi.\n\n"
             "Artık plugin'leri kullanabilirsiniz.",
             buttons=[
                 [Button.inline(config.BUTTONS["plugins"], b"plugins_menu")],
@@ -558,7 +544,6 @@ def register_user_handlers(bot):
                 "userbot_username": user_info["username"]
             })
             
-            # Eski pluginleri geri yükle
             client = userbot_manager.get_client(user_id)
             restored = 0
             if client:
@@ -582,7 +567,6 @@ def register_user_handlers(bot):
             
             await send_log(bot, "login", f"Hızlı giriş\nUserbot: @{user_info['username']}", user_id)
         else:
-            # Session geçersiz
             await db.clear_session(user_id, keep_data=False)
             
             await event.edit(
@@ -620,18 +604,13 @@ def register_user_handlers(bot):
         
         await event.edit("⏳ Çıkış yapılıyor...")
         
-        # Userbot'u kapat
         await userbot_manager.logout(user_id)
-        
-        # Pluginleri temizle
         plugin_manager.clear_user_plugins(user_id)
-        
-        # Veritabanını güncelle
         await db.clear_session(user_id, keep_data=keep_data)
         
         text = config.MESSAGES["logout_success"]
         if keep_data:
-            text += "\n\n💾 Bilgileriniz saklandı. Hızlı giriş yapabilirsiniz."
+            text += "\n\n💾 Bilgileriniz saklandı."
         else:
             text += "\n\n🗑️ Tüm bilgileriniz silindi."
         
@@ -640,7 +619,7 @@ def register_user_handlers(bot):
             buttons=[[Button.inline("🏠 Ana Menü", b"main_menu")]]
         )
         
-        await send_log(bot, "logout", f"Çıkış yapıldı (Veri sakla: {keep_data})", user_id)
+        await send_log(bot, "logout", f"Çıkış (Veri sakla: {keep_data})", user_id)
     
     # ==========================================
     # PLUGİN MENÜSÜ
@@ -656,8 +635,8 @@ def register_user_handlers(bot):
             return
         
         text = await plugin_manager.get_all_plugins_formatted(event.sender_id)
-        text += "\n\n📌 Aktif etmek için: `/pactive <isim>`\n"
-        text += "📌 Deaktif etmek için: `/pinactive <isim>`"
+        text += "\n\n📌 `/pactive <isim>` - Aktif et\n"
+        text += "📌 `/pinactive <isim>` - Deaktif et"
         
         buttons = [
             [Button.inline(config.BUTTONS["my_plugins"], b"my_plugins")],
@@ -686,7 +665,7 @@ def register_user_handlers(bot):
                 if plugin:
                     cmds = ", ".join([f"`.{c}`" for c in plugin.get("commands", [])])
                     text += f"✅ `{name}` - {cmds}\n"
-            text += f"\n**Toplam:** {len(active_plugins)} aktif plugin"
+            text += f"\n**Toplam:** {len(active_plugins)}"
         
         buttons = [
             [Button.inline("🔌 Tüm Plugin'ler", b"plugins_menu")],
@@ -713,8 +692,10 @@ def register_user_handlers(bot):
         
         client = userbot_manager.get_client(event.sender_id)
         if not client:
-            await event.respond("❌ Userbot bağlantısı bulunamadı. Lütfen yeniden giriş yapın.")
+            await event.respond("❌ Userbot bağlantısı yok. Yeniden giriş yapın.")
             return
+        
+        msg = await event.respond("⏳ Plugin yükleniyor...")
         
         success, message = await plugin_manager.activate_plugin(
             event.sender_id, 
@@ -722,10 +703,10 @@ def register_user_handlers(bot):
             client
         )
         
-        await event.respond(message)
+        await msg.edit(message)
         
         if success:
-            await send_log(bot, "plugin", f"Plugin aktif: {plugin_name}", event.sender_id)
+            await send_log(bot, "plugin", f"Aktif: {plugin_name}", event.sender_id)
     
     @bot.on(events.NewMessage(pattern=r'^/pinactive\s+(\S+)$'))
     @check_ban
@@ -741,7 +722,7 @@ def register_user_handlers(bot):
         await event.respond(message)
         
         if success:
-            await send_log(bot, "plugin", f"Plugin deaktif: {plugin_name}", event.sender_id)
+            await send_log(bot, "plugin", f"Deaktif: {plugin_name}", event.sender_id)
     
     @bot.on(events.NewMessage(pattern=r'^/plugins$'))
     @check_ban
@@ -755,7 +736,7 @@ def register_user_handlers(bot):
         if user_data and user_data.get("is_logged_in"):
             active = user_data.get("active_plugins", [])
             if active:
-                text += f"\n\n✅ **Aktif plugin'leriniz:** {', '.join([f'`{p}`' for p in active])}"
+                text += f"\n\n✅ **Aktif:** {', '.join([f'`{p}`' for p in active])}"
         
         await event.respond(text)
     
@@ -766,7 +747,6 @@ def register_user_handlers(bot):
     @bot.on(events.CallbackQuery(data=b"main_menu"))
     async def main_menu_handler(event):
         """Ana menüye dön"""
-        # State temizle
         if event.sender_id in user_states:
             del user_states[event.sender_id]
         
@@ -804,16 +784,12 @@ def register_user_handlers(bot):
     async def help_handler(event):
         """Yardım menüsü"""
         text = "❓ **Yardım**\n\n"
-        text += "**Kullanıcı Komutları:**\n"
+        text += "**Komutlar:**\n"
         text += "• `/start` - Ana menü\n"
         text += "• `/plugins` - Plugin listesi\n"
         text += "• `/pactive <isim>` - Plugin aktif et\n"
         text += "• `/pinactive <isim>` - Plugin deaktif et\n"
         text += "• `/cancel` - İşlemi iptal et\n\n"
-        text += "**Giriş Yöntemleri:**\n"
-        text += "• 📱 Telefon numarası\n"
-        text += "• 📄 Telethon Session String\n"
-        text += "• 📄 Pyrogram Session String\n\n"
         text += f"**Destek:** @{config.OWNER_USERNAME}\n"
         text += f"**Sürüm:** `v{config.__version__}`"
         
@@ -821,10 +797,8 @@ def register_user_handlers(bot):
     
     @bot.on(events.CallbackQuery(data=b"close"))
     async def close_handler(event):
-        """Mesajı sil"""
         await event.delete()
     
     @bot.on(events.CallbackQuery(data=b"noop"))
     async def noop_handler(event):
-        """Hiçbir şey yapma"""
         await event.answer()
