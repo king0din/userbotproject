@@ -101,8 +101,12 @@ MESSAGES = {
     "login_phone": "📱 **Telefon Numarası ile Giriş**\n\n"
                    "Telefon numaranızı girin:\n"
                    "Örnek: `+905551234567`",
-    "login_code": "🔢 **Doğrulama Kodu**\n\nTelegram'dan gelen kodu aralarına birer boşluk koyarak girin:\n\**nörnek:**\n`1 2 3 4`",
-    "login_2fa": "🔑 **İki Faktörlü Doğrulama algılandı**\n\n2FA şifrenizi girin:",
+    "login_code": "🔢 **Doğrulama Kodu**\n\n"
+                  "Telegram'dan gelen kodu girin.\n\n"
+                  "⚠️ **ÖNEMLİ:** Kodu aralarında **boşluk** bırakarak yazın!\n"
+                  "Örnek: `1 2 3 4 5`\n\n"
+                  "🔒 Bu sayede Telegram kod paylaşımını engellemez.",
+    "login_2fa": "🔑 **İki Faktörlü Doğrulama**\n\n2FA şifrenizi girin:",
     "login_session_telethon": "📄 **Telethon Session String**\n\nSession string gönderin:",
     "login_session_pyrogram": "📄 **Pyrogram Session String**\n\nSession string gönderin:",
     "login_success": "✅ **Giriş Başarılı!**\n\n"
@@ -186,6 +190,7 @@ COMMANDS = {
     "admin": {
         "/addplugin": "Plugin ekler (dosyaya yanıt)",
         "/delplugin <isim>": "Plugin siler",
+        "/getplugin <isim>": "Plugin dosyasını indirir",
         "/setpublic <isim>": "Plugini genel yapar",
         "/setprivate <isim>": "Plugini özel yapar",
         "/ban <id> [sebep]": "Kullanıcı banlar",
