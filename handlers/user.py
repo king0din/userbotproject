@@ -20,6 +20,8 @@ STATE_WAITING_2FA = "waiting_2fa"
 STATE_WAITING_SESSION_TELETHON = "waiting_session_telethon"
 STATE_WAITING_SESSION_PYROGRAM = "waiting_session_pyrogram"
 
+PLUGINS_PER_PAGE = 8
+
 def register_user_handlers(bot):
     """Kullanıcı handler'larını kaydet"""
     
@@ -51,8 +53,8 @@ def register_user_handlers(bot):
         buttons = []
         
         if is_logged_in:
-            buttons.append([Button.inline(config.BUTTONS["plugins"], b"plugins_menu")])
-            buttons.append([Button.inline(config.BUTTONS["my_plugins"], b"my_plugins")])
+            buttons.append([Button.inline(config.BUTTONS["plugins"], b"plugins_page_0")])
+            buttons.append([Button.inline(config.BUTTONS["my_plugins"], b"my_plugins_0")])
             buttons.append([Button.inline(config.BUTTONS["logout"], b"logout_confirm")])
         else:
             session_data = await db.get_session(event.sender_id)
@@ -61,7 +63,7 @@ def register_user_handlers(bot):
             buttons.append([Button.inline(config.BUTTONS["login"], b"login_menu")])
         
         buttons.append([
-            Button.inline(config.BUTTONS["help"], b"help"),
+            Button.inline(config.BUTTONS["help"], b"help_main"),
             Button.inline(config.BUTTONS["commands"], b"commands")
         ])
         buttons.append([Button.url(config.BUTTONS["plugin_channel"], f"https://t.me/{config.PLUGIN_CHANNEL}")])
@@ -264,7 +266,7 @@ def register_user_handlers(bot):
         del bot.session_temp[user_id]
         
         await event.edit("✅ **Giriş tamamlandı!**\n\n💾 Session kaydedildi.", buttons=[
-            [Button.inline(config.BUTTONS["plugins"], b"plugins_menu")],
+            [Button.inline(config.BUTTONS["plugins"], b"plugins_page_0")],
             [Button.inline("🏠 Ana Menü", b"main_menu")]
         ])
     
@@ -277,7 +279,7 @@ def register_user_handlers(bot):
             del bot.session_temp[user_id]
         
         await event.edit("✅ **Giriş tamamlandı!**", buttons=[
-            [Button.inline(config.BUTTONS["plugins"], b"plugins_menu")],
+            [Button.inline(config.BUTTONS["plugins"], b"plugins_page_0")],
             [Button.inline("🏠 Ana Menü", b"main_menu")]
         ])
     
@@ -318,7 +320,7 @@ def register_user_handlers(bot):
                 text += f"\n🔌 {restored} plugin yüklendi"
             
             await event.edit(text, buttons=[
-                [Button.inline(config.BUTTONS["plugins"], b"plugins_menu")],
+                [Button.inline(config.BUTTONS["plugins"], b"plugins_page_0")],
                 [Button.inline("🏠 Ana Menü", b"main_menu")]
             ])
             await send_log(bot, "login", f"Hızlı giriş: @{user_info['username']}", user_id)
@@ -357,10 +359,10 @@ def register_user_handlers(bot):
         await send_log(bot, "logout", f"Çıkış (sakla: {keep_data})", user_id)
     
     # ==========================================
-    # PLUGİN MENÜSÜ - YENİLENDİ
+    # PLUGİN MENÜSÜ - SAYFALI
     # ==========================================
     
-    @bot.on(events.CallbackQuery(data=b"plugins_menu"))
+    @bot.on(events.CallbackQuery(pattern=b"plugins_page_(\d+)"))
     async def plugins_menu_handler(event):
         user_id = event.sender_id
         user_data = await db.get_user(user_id)
@@ -369,43 +371,74 @@ def register_user_handlers(bot):
             await event.answer("Önce giriş yapmalısınız", alert=True)
             return
         
+        page = int(event.data.decode().split("_")[-1])
         all_plugins = await db.get_all_plugins()
         active_plugins = user_data.get("active_plugins", [])
         
-        if not all_plugins:
+        # Kullanıcının erişebileceği pluginleri filtrele
+        accessible_plugins = []
+        for p in all_plugins:
+            if p.get("is_public", True) or user_id in p.get("allowed_users", []):
+                accessible_plugins.append(p)
+        
+        if not accessible_plugins:
             text = "📭 **Henüz plugin eklenmemiş.**\n\nPlugin duyuruları için kanalı takip edin."
-        else:
-            text = "🔌 **Mevcut Plugin'ler:**\n\n"
-            
-            for p in all_plugins:
-                if not p.get("is_public", True) and user_id not in p.get("allowed_users", []):
-                    continue
-                
-                name = p['name']
-                is_active = name in active_plugins
-                status = "🟢" if is_active else "⚪"
-                cmds = p.get("commands", [])[:2]
-                cmd_text = ", ".join([f"`.{c}`" for c in cmds])
-                if len(p.get("commands", [])) > 2:
-                    cmd_text += "..."
-                
-                text += f"{status} `{name}` - {cmd_text}\n"
-            
-            text += f"\n🟢 = Yüklü | ⚪ = Yüklü değil"
-            text += f"\n\n**Toplam:** {len(all_plugins)} plugin"
-            text += f"\n**Aktif:** {len(active_plugins)} plugin"
+            buttons = [
+                [Button.url(config.BUTTONS["plugin_channel"], f"https://t.me/{config.PLUGIN_CHANNEL}")],
+                back_button("main_menu")
+            ]
+            await event.edit(text, buttons=buttons)
+            return
         
-        text += "\n\n📌 **Plugin detay için:** `/pinfo` komutu ile plugin adı girin.\n**⬇️Plugin aktif etmek için:** `/pactive` komutu ile plugin adı girin\n-**örnek**`/pactive tag`. **Veya devredışı bırakmak için:** `/pinactive tag` kullanabilirsiniz"
+        total_pages = (len(accessible_plugins) + PLUGINS_PER_PAGE - 1) // PLUGINS_PER_PAGE
+        start_idx = page * PLUGINS_PER_PAGE
+        end_idx = start_idx + PLUGINS_PER_PAGE
+        page_plugins = accessible_plugins[start_idx:end_idx]
         
-        buttons = [
-            [Button.inline(config.BUTTONS["my_plugins"], b"my_plugins")],
-            [Button.url(config.BUTTONS["plugin_channel"], f"https://t.me/{config.PLUGIN_CHANNEL}")],
-            back_button("main_menu")
-        ]
+        text = f"🔌 **Plugin Listesi** (Sayfa {page + 1}/{total_pages})\n\n"
+        
+        for p in page_plugins:
+            name = p['name']
+            is_active = name in active_plugins
+            status = "🟢" if is_active else "⚪"
+            
+            # Komutları göster
+            cmds = p.get("commands", [])[:2]
+            cmd_text = ", ".join([f"`.{c}`" for c in cmds])
+            if len(p.get("commands", [])) > 2:
+                cmd_text += "..."
+            
+            text += f"{status} **{name}**\n"
+            text += f"   └ {cmd_text}\n"
+            text += f"   └ Yükle: `/pactive {name}`\n\n"
+        
+        text += f"━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"🟢 Yüklü | ⚪ Yüklü değil\n"
+        text += f"📊 Toplam: **{len(accessible_plugins)}** plugin\n"
+        text += f"✅ Aktif: **{len(active_plugins)}** plugin\n\n"
+        text += f"💡 **Detay için:** `/pinfo <isim>`"
+        
+        # Sayfalama butonları
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(Button.inline("⬅️ Önceki", f"plugins_page_{page - 1}".encode()))
+        if page < total_pages - 1:
+            nav_buttons.append(Button.inline("Sonraki ➡️", f"plugins_page_{page + 1}".encode()))
+        
+        buttons = []
+        if nav_buttons:
+            buttons.append(nav_buttons)
+        buttons.append([Button.inline(config.BUTTONS["my_plugins"], b"my_plugins_0")])
+        buttons.append([Button.url(config.BUTTONS["plugin_channel"], f"https://t.me/{config.PLUGIN_CHANNEL}")])
+        buttons.append(back_button("main_menu"))
         
         await event.edit(text, buttons=buttons)
     
-    @bot.on(events.CallbackQuery(data=b"my_plugins"))
+    # ==========================================
+    # PLUGİNLERİM - SAYFALI
+    # ==========================================
+    
+    @bot.on(events.CallbackQuery(pattern=b"my_plugins_(\d+)"))
     async def my_plugins_handler(event):
         user_data = await db.get_user(event.sender_id)
         
@@ -413,23 +446,52 @@ def register_user_handlers(bot):
             await event.answer("Önce giriş yapmalısınız", alert=True)
             return
         
+        page = int(event.data.decode().split("_")[-1])
         active_plugins = user_data.get("active_plugins", [])
         
         if not active_plugins:
             text = config.MESSAGES["no_active_plugins"]
-        else:
-            text = "📦 **Aktif Plugin'leriniz:**\n\n"
-            for name in active_plugins:
-                plugin = await db.get_plugin(name)
-                if plugin:
-                    cmds = ", ".join([f"`.{c}`" for c in plugin.get("commands", [])])
-                    text += f"✅ `{name}`\n   └ {cmds}\n"
-            text += f"\n**Toplam:** {len(active_plugins)}"
+            text += "\n\n💡 Plugin yüklemek için:\n"
+            text += "1️⃣ Plugin listesinden birini seçin\n"
+            text += "2️⃣ `/pactive <isim>` yazın"
+            buttons = [
+                [Button.inline("🔌 Plugin Listesi", b"plugins_page_0")],
+                back_button("main_menu")
+            ]
+            await event.edit(text, buttons=buttons)
+            return
         
-        buttons = [
-            [Button.inline("🔌 Tüm Plugin'ler", b"plugins_menu")],
-            back_button("main_menu")
-        ]
+        total_pages = (len(active_plugins) + PLUGINS_PER_PAGE - 1) // PLUGINS_PER_PAGE
+        start_idx = page * PLUGINS_PER_PAGE
+        end_idx = start_idx + PLUGINS_PER_PAGE
+        page_plugins = active_plugins[start_idx:end_idx]
+        
+        text = f"📦 **Aktif Plugin'leriniz** (Sayfa {page + 1}/{total_pages})\n\n"
+        
+        for name in page_plugins:
+            plugin = await db.get_plugin(name)
+            if plugin:
+                cmds = ", ".join([f"`.{c}`" for c in plugin.get("commands", [])])
+                text += f"✅ **{name}**\n"
+                text += f"   └ {cmds}\n"
+                text += f"   └ Kaldır: `/pinactive {name}`\n\n"
+        
+        text += f"━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"**Toplam:** {len(active_plugins)} aktif plugin"
+        
+        # Sayfalama butonları
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(Button.inline("⬅️ Önceki", f"my_plugins_{page - 1}".encode()))
+        if page < total_pages - 1:
+            nav_buttons.append(Button.inline("Sonraki ➡️", f"my_plugins_{page + 1}".encode()))
+        
+        buttons = []
+        if nav_buttons:
+            buttons.append(nav_buttons)
+        buttons.append([Button.inline("🔌 Tüm Plugin'ler", b"plugins_page_0")])
+        buttons.append(back_button("main_menu"))
+        
         await event.edit(text, buttons=buttons)
     
     # ==========================================
@@ -438,7 +500,6 @@ def register_user_handlers(bot):
     
     @bot.on(events.NewMessage(pattern=r'^/pinfo\s+(\S+)$'))
     async def pinfo_command(event):
-        """Plugin detaylarını göster"""
         plugin_name = event.pattern_match.group(1)
         plugin = await db.get_plugin(plugin_name)
         
@@ -451,7 +512,7 @@ def register_user_handlers(bot):
         is_active = plugin_name in active_plugins
         
         text = f"🔌 **Plugin: `{plugin_name}`**\n\n"
-        text += f"📝 **Açıklama:** {plugin.get('description') or 'Yok'}\n"
+        text += f"📝 **Açıklama:** {plugin.get('description') or 'Açıklama yok'}\n"
         text += f"🔓 **Erişim:** {'Genel' if plugin.get('is_public', True) else 'Özel'}\n"
         text += f"📊 **Durum:** {'🟢 Yüklü' if is_active else '⚪ Yüklü değil'}\n\n"
         
@@ -463,9 +524,12 @@ def register_user_handlers(bot):
         else:
             text += "🔧 **Komutlar:** Yok\n"
         
-        text += f"\n💡 **Kullanım:**\n"
-        text += f"  • Yükle: `/pactive {plugin_name}`\n"
-        text += f"  • Kaldır: `/pinactive {plugin_name}`"
+        text += f"\n━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"💡 **Hızlı Kullanım:**\n"
+        if is_active:
+            text += f"  • Kaldır: `/pinactive {plugin_name}`"
+        else:
+            text += f"  • Yükle: `/pactive {plugin_name}`"
         
         await event.respond(text)
     
@@ -513,12 +577,15 @@ def register_user_handlers(bot):
             return
         
         text = "🔌 **Plugin Listesi:**\n\n"
-        for p in all_plugins:
+        for p in all_plugins[:10]:
             status = "🟢" if p['name'] in active_plugins else "⚪"
-            text += f"{status} `{p['name']}`\n"
+            text += f"{status} `{p['name']}` → `/pactive {p['name']}`\n"
         
-        text += f"\n🟢 Yüklü | ⚪ Yüklü değil"
-        text += f"\n\nDetay: `/pinfo <isim>`"
+        if len(all_plugins) > 10:
+            text += f"\n... ve {len(all_plugins) - 10} plugin daha"
+        
+        text += f"\n\n🟢 Yüklü | ⚪ Yüklü değil"
+        text += f"\n📊 Detay: `/pinfo <isim>`"
         await event.respond(text)
     
     @bot.on(events.NewMessage(pattern=r'^/cancel$'))
@@ -535,7 +602,7 @@ def register_user_handlers(bot):
             await event.respond("ℹ️ İptal edilecek işlem yok.")
     
     # ==========================================
-    # ANA MENÜ, YARDIM, KOMUTLAR
+    # ANA MENÜ
     # ==========================================
     
     @bot.on(events.CallbackQuery(data=b"main_menu"))
@@ -557,8 +624,8 @@ def register_user_handlers(bot):
         
         buttons = []
         if is_logged_in:
-            buttons.append([Button.inline(config.BUTTONS["plugins"], b"plugins_menu")])
-            buttons.append([Button.inline(config.BUTTONS["my_plugins"], b"my_plugins")])
+            buttons.append([Button.inline(config.BUTTONS["plugins"], b"plugins_page_0")])
+            buttons.append([Button.inline(config.BUTTONS["my_plugins"], b"my_plugins_0")])
             buttons.append([Button.inline(config.BUTTONS["logout"], b"logout_confirm")])
         else:
             session_data = await db.get_session(event.sender_id)
@@ -566,7 +633,7 @@ def register_user_handlers(bot):
                 buttons.append([Button.inline("⚡ Hızlı Giriş", b"quick_login")])
             buttons.append([Button.inline(config.BUTTONS["login"], b"login_menu")])
         
-        buttons.append([Button.inline(config.BUTTONS["help"], b"help"), 
+        buttons.append([Button.inline(config.BUTTONS["help"], b"help_main"), 
                        Button.inline(config.BUTTONS["commands"], b"commands")])
         buttons.append([Button.url(config.BUTTONS["plugin_channel"], f"https://t.me/{config.PLUGIN_CHANNEL}")])
         
@@ -575,25 +642,175 @@ def register_user_handlers(bot):
         
         await event.edit(text, buttons=buttons)
     
-    @bot.on(events.CallbackQuery(data=b"help"))
-    async def help_handler(event):
-        text = "❓ **Yardım**\n\n"
-        text += "Bu bot ile Telegram hesabınıza userbot kurabilirsiniz.\n\n"
-        text += "**Nasıl Kullanılır:**\n"
-        text += "1️⃣ Giriş yapın (telefon veya session)\n"
-        text += "2️⃣ Plugin'ler menüsünden plugin seçin\n"
-        text += "3️⃣ Plugin'i aktif edin\n"
-        text += "4️⃣ Telegram'da komutları kullanın\n\n"
-        text += f"**Destek:** @{config.OWNER_USERNAME}\n"
-        text += f"**Sürüm:** `v{config.__version__}`"
+    # ==========================================
+    # YARDIM MENÜSÜ - DETAYLI
+    # ==========================================
+    
+    @bot.on(events.NewMessage(pattern=r'^/help$'))
+    @check_ban
+    async def help_command(event):
+        """Help komutu - yardım menüsünü açar"""
+        text, buttons = await get_help_main_content(event.sender_id)
+        await event.respond(text, buttons=buttons)
+    
+    async def get_help_main_content(user_id):
+        """Ana yardım menüsü içeriği"""
+        text = "❓ **Yardım Merkezi**\n\n"
+        text += "Hoş geldiniz! Bu bot ile Telegram hesabınıza\n"
+        text += "**Userbot** kurarak ek özellikler kazanabilirsiniz.\n\n"
+        text += "📚 **Konu Seçin:**"
         
-        await event.edit(text, buttons=[back_button("main_menu")])
+        buttons = [
+            [Button.inline("🤖 Userbot Nedir?", b"help_what")],
+            [Button.inline("🔐 Nasıl Giriş Yapılır?", b"help_login")],
+            [Button.inline("🔌 Plugin Nedir?", b"help_plugins")],
+            [Button.inline("⚙️ Komutlar Nasıl Kullanılır?", b"help_commands")],
+            [Button.inline("❓ Sıkça Sorulan Sorular", b"help_faq")],
+            back_button("main_menu")
+        ]
+        
+        return text, buttons
+    
+    @bot.on(events.CallbackQuery(data=b"help_main"))
+    async def help_main_handler(event):
+        text, buttons = await get_help_main_content(event.sender_id)
+        await event.edit(text, buttons=buttons)
+    
+    @bot.on(events.CallbackQuery(data=b"help_what"))
+    async def help_what_handler(event):
+        text = "🤖 **Userbot Nedir?**\n\n"
+        text += "Userbot, Telegram hesabınızda çalışan bir bottur.\n"
+        text += "Normal botlardan farklı olarak **sizin hesabınızla**\n"
+        text += "işlem yapar.\n\n"
+        
+        text += "📌 **Ne İşe Yarar?**\n"
+        text += "• Mesajları otomatik yanıtlama\n"
+        text += "• Medya indirme (YouTube, Instagram vb.)\n"
+        text += "• Çeviri yapma\n"
+        text += "• AFK (meşgul) modu\n"
+        text += "• Ve daha fazlası...\n\n"
+        
+        text += "⚠️ **Önemli:**\n"
+        text += "Userbot sizin hesabınızla çalıştığı için\n"
+        text += "komutları kendinize yazarsınız. Örneğin\n"
+        text += "`.afk` yazıp gönderdiğinizde AFK moduna geçersiniz."
+        
+        await event.edit(text, buttons=[[Button.inline("🔙 Geri", b"help_main")]])
+    
+    @bot.on(events.CallbackQuery(data=b"help_login"))
+    async def help_login_handler(event):
+        text = "🔐 **Nasıl Giriş Yapılır?**\n\n"
+        text += "Userbot kullanmak için hesabınızla giriş yapmalısınız.\n"
+        text += "3 farklı yöntem vardır:\n\n"
+        
+        text += "📱 **1. Telefon Numarası (Önerilen)**\n"
+        text += "• `🔐 Giriş Yap` butonuna tıklayın\n"
+        text += "• `📱 Telefon Numarası` seçin\n"
+        text += "• Numaranızı girin: `+905551234567`\n"
+        text += "• Telegram'dan gelen kodu girin\n"
+        text += "• 2FA varsa şifrenizi girin\n\n"
+        
+        text += "📄 **2. Session String**\n"
+        text += "• Daha önce oluşturduğunuz session'ı\n"
+        text += "  yapıştırarak giriş yapabilirsiniz\n"
+        text += "• Telethon veya Pyrogram desteklenir\n\n"
+        
+        text += "💾 **Oturum Kaydetme:**\n"
+        text += "Giriş sonrası oturumu kaydederseniz,\n"
+        text += "bir dahaki sefere tek tıkla giriş yapabilirsiniz."
+        
+        await event.edit(text, buttons=[[Button.inline("🔙 Geri", b"help_main")]])
+    
+    @bot.on(events.CallbackQuery(data=b"help_plugins"))
+    async def help_plugins_handler(event):
+        text = "🔌 **Plugin Nedir & Nasıl Yüklenir?**\n\n"
+        text += "Plugin'ler userbot'a özellik ekleyen eklentilerdir.\n"
+        text += "Her plugin farklı komutlar sunar.\n\n"
+        
+        text += "📥 **Plugin Yükleme:**\n"
+        text += "1️⃣ `🔌 Plugin'ler` menüsüne gidin\n"
+        text += "2️⃣ İstediğiniz plugini bulun\n"
+        text += "3️⃣ `/pactive <isim>` yazın\n"
+        text += "   Örnek: `/pactive ses`\n\n"
+        
+        text += "📤 **Plugin Kaldırma:**\n"
+        text += "• `/pinactive <isim>` yazın\n"
+        text += "   Örnek: `/pinactive ses`\n\n"
+        
+        text += "ℹ️ **Plugin Bilgisi:**\n"
+        text += "• `/pinfo <isim>` ile detayları görün\n"
+        text += "   Örnek: `/pinfo ses`\n\n"
+        
+        text += "📢 **Yeni Plugin'ler:**\n"
+        text += "Plugin kanalımızı takip ederek yeni\n"
+        text += "plugin duyurularından haberdar olun!"
+        
+        await event.edit(text, buttons=[
+            [Button.url("📢 Plugin Kanalı", f"https://t.me/{config.PLUGIN_CHANNEL}")],
+            [Button.inline("🔙 Geri", b"help_main")]
+        ])
+    
+    @bot.on(events.CallbackQuery(data=b"help_commands"))
+    async def help_commands_handler(event):
+        text = "⚙️ **Komutlar Nasıl Kullanılır?**\n\n"
+        
+        text += "🤖 **Bot Komutları (Bu botta):**\n"
+        text += "Bot komutları `/` ile başlar ve\n"
+        text += "bu bota yazılır.\n\n"
+        text += "Örnekler:\n"
+        text += "• `/start` - Ana menü\n"
+        text += "• `/pactive ses` - Plugin yükle\n"
+        text += "• `/pinfo afk` - Plugin bilgisi\n\n"
+        
+        text += "━━━━━━━━━━━━━━━━━━━━\n\n"
+        
+        text += "⚡ **Userbot Komutları (Telegram'da):**\n"
+        text += "Userbot komutları `.` ile başlar ve\n"
+        text += "**herhangi bir sohbete** yazılır.\n\n"
+        text += "Örnekler:\n"
+        text += "• `.afk Meşgulüm` - AFK modu aç\n"
+        text += "• `.tts Merhaba` - Sesli mesaj\n"
+        text += "• `.tr Hello` - Çeviri yap\n\n"
+        
+        text += "💡 **İpucu:**\n"
+        text += "Userbot komutlarını kendinize (Kayıtlı\n"
+        text += "Mesajlar) yazarak test edebilirsiniz."
+        
+        await event.edit(text, buttons=[[Button.inline("🔙 Geri", b"help_main")]])
+    
+    @bot.on(events.CallbackQuery(data=b"help_faq"))
+    async def help_faq_handler(event):
+        text = "❓ **Sıkça Sorulan Sorular**\n\n"
+        
+        text += "**S: Hesabım yasaklanır mı?**\n"
+        text += "C: Normal kullanımda risk düşüktür.\n"
+        text += "Spam yapmayın, çok hızlı mesaj atmayın.\n\n"
+        
+        text += "**S: Şifremi veriyor muyum?**\n"
+        text += "C: Hayır! Sadece Telegram'ın gönderdiği\n"
+        text += "doğrulama kodunu giriyorsunuz.\n\n"
+        
+        text += "**S: Birisi hesabıma erişebilir mi?**\n"
+        text += "C: Session'ınız şifreli saklanır.\n"
+        text += "Çıkış yapınca silinir.\n\n"
+        
+        text += "**S: Plugin çalışmıyor?**\n"
+        text += "C: Önce giriş yaptığınızdan emin olun.\n"
+        text += "Sonra plugini yeniden yükleyin.\n\n"
+        
+        text += "**S: Komut yazdım ama olmuyor?**\n"
+        text += "C: Userbot komutları `.` ile başlar\n"
+        text += "ve Telegram'da yazılır, bu botta değil.\n\n"
+        
+        text += f"📞 **Destek:** @{config.OWNER_USERNAME}"
+        
+        await event.edit(text, buttons=[[Button.inline("🔙 Geri", b"help_main")]])
     
     @bot.on(events.CallbackQuery(data=b"commands"))
     async def commands_handler(event):
-        text = "📝 **Komutlar**\n\n"
+        text = "📝 **Bot Komutları**\n\n"
         
-        text += "**👤 Kullanıcı Komutları:**\n"
+        text += "**👤 Genel Komutlar:**\n"
         for cmd, desc in config.COMMANDS["user"].items():
             text += f"• `{cmd}` - {desc}\n"
         
