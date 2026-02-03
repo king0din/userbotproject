@@ -466,6 +466,39 @@ def register_admin_handlers(bot):
         success, message = await plugin_manager.unregister_plugin(plugin_name)
         await event.respond(message)
     
+    @bot.on(events.NewMessage(pattern=r'^/getplugin\s+(\S+)$'))
+    async def getplugin_command(event):
+        """Plugin dosyasını gönder"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            return
+        
+        plugin_name = event.pattern_match.group(1)
+        plugin = await db.get_plugin(plugin_name)
+        
+        if not plugin:
+            await event.respond(f"❌ `{plugin_name}` bulunamadı.")
+            return
+        
+        file_path = os.path.join(config.PLUGINS_DIR, plugin.get("filename", f"{plugin_name}.py"))
+        
+        if not os.path.exists(file_path):
+            await event.respond(f"❌ Plugin dosyası bulunamadı: `{plugin.get('filename')}`")
+            return
+        
+        # Plugin bilgilerini hazırla
+        cmds = ", ".join([f"`.{c}`" for c in plugin.get("commands", [])])
+        caption = f"🔌 **Plugin: `{plugin_name}`**\n\n"
+        caption += f"📝 {plugin.get('description') or 'Açıklama yok'}\n"
+        caption += f"🔧 Komutlar: {cmds or 'Yok'}\n"
+        caption += f"🔓 Erişim: {'Genel' if plugin.get('is_public', True) else 'Özel'}"
+        
+        await bot.send_file(
+            event.chat_id,
+            file_path,
+            caption=caption,
+            force_document=True
+        )
+    
     @bot.on(events.NewMessage(pattern=r'^/setpublic\s+(\S+)$'))
     async def setpublic_command(event):
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
@@ -583,7 +616,7 @@ def register_admin_handlers(bot):
             return
         text = "📝 **Admin Komutları**\n\n"
         text += "**👥 Kullanıcı:**\n• `/users` - Liste\n• `/info <id>` - Detay\n\n"
-        text += "**🔌 Plugin:**\n• `/addplugin` - Ekle\n• `/delplugin <isim>` - Sil\n• `/setpublic <isim>`\n• `/setprivate <isim>`\n\n"
+        text += "**🔌 Plugin:**\n• `/addplugin` - Ekle\n• `/delplugin <isim>` - Sil\n• `/getplugin <isim>` - İndir\n• `/setpublic <isim>`\n• `/setprivate <isim>`\n\n"
         text += "**🚫 Ban:** `/ban <id>` `/unban <id>`\n"
         text += "**👑 Sudo:** `/addsudo <id>` `/delsudo <id>`\n\n"
         text += "**📢 Diğer:** `/broadcast` `/stats`"
