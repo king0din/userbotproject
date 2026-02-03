@@ -193,10 +193,9 @@ async def shutdown():
 
 if __name__ == '__main__':
     try:
-        asyncio.get_event_loop().run_until_complete(main())
+        asyncio.run(main())
     except KeyboardInterrupt:
         log("⚠️ Klavye kesintisi algılandı")
-        asyncio.get_event_loop().run_until_complete(shutdown())
     except Exception as e:
         log(f"❌ Kritik hata: {e}")
         import traceback
