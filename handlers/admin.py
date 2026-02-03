@@ -417,22 +417,179 @@ def register_admin_handlers(bot):
         if not reply or not reply.file or not reply.file.name.endswith('.py'):
             await event.respond("⚠️ Bir `.py` dosyasına yanıt verin.")
             return
-        path = await reply.download_media(file=config.PLUGINS_DIR + "/")
-        info = plugin_manager.extract_plugin_info(path)
+        
+        # Geçici olarak indir
+        temp_path = await reply.download_media(file=config.PLUGINS_DIR + "/temp_")
+        info = plugin_manager.extract_plugin_info(temp_path)
+        
+        # Aynı isimde plugin var mı kontrol et
+        existing_plugin = await db.get_plugin(info['name'])
+        
+        if existing_plugin:
+            # Plugin zaten var - güncelleme seçenekleri sun
+            if not hasattr(bot, 'pending_updates'):
+                bot.pending_updates = {}
+            bot.pending_updates[info['name']] = {
+                'temp_path': temp_path,
+                'info': info,
+                'existing': existing_plugin
+            }
+            
+            old_cmds = ", ".join([f"`.{c}`" for c in existing_plugin.get("commands", [])[:5]])
+            new_cmds = ", ".join([f"`.{c}`" for c in info.get("commands", [])[:5]])
+            
+            await event.respond(
+                f"⚠️ **`{info['name']}` zaten mevcut!**\n\n"
+                f"📦 **Mevcut:**\n"
+                f"   └ {old_cmds}\n\n"
+                f"📦 **Yeni:**\n"
+                f"   └ {new_cmds}\n\n"
+                f"Ne yapmak istiyorsunuz?",
+                buttons=[
+                    [Button.inline("🔄 Güncelle", f"update_plugin_{info['name']}".encode())],
+                    [Button.inline("🔄 Güncelle + 🔃 Restart", f"update_restart_{info['name']}".encode())],
+                    [Button.inline("❌ İptal", f"cancel_update_{info['name']}".encode())]
+                ]
+            )
+            return
+        
+        # Yeni plugin - komut çakışması kontrolü
         for cmd in info["commands"]:
             existing = await db.check_command_exists(cmd)
             if existing:
-                os.remove(path)
+                os.remove(temp_path)
                 await event.respond(f"❌ `.{cmd}` komutu `{existing}` plugininde mevcut!")
                 return
+        
+        # Dosyayı doğru isimle taşı
+        final_path = os.path.join(config.PLUGINS_DIR, f"{info['name']}.py")
+        os.rename(temp_path, final_path)
+        
         if not hasattr(bot, 'pending_plugins'):
             bot.pending_plugins = {}
-        bot.pending_plugins[info['name']] = path
+        bot.pending_plugins[info['name']] = final_path
+        
         await event.respond(
-            f"🔌 **Plugin: `{info['name']}`**\n\n📝 {info['description'] or 'Yok'}\n🔧 {', '.join([f'`.{c}`' for c in info['commands']])}",
-            buttons=[[Button.inline("🌐 Genel", f"confirm_plugin_public_{info['name']}".encode()),
-                     Button.inline("🔒 Özel", f"confirm_plugin_private_{info['name']}".encode())],
-                    [Button.inline("❌ İptal", b"cancel_plugin")]])
+            f"🔌 **Yeni Plugin: `{info['name']}`**\n\n"
+            f"📝 {info['description'] or 'Açıklama yok'}\n"
+            f"🔧 {', '.join([f'`.{c}`' for c in info['commands']])}\n\n"
+            f"Nasıl eklensin?",
+            buttons=[
+                [Button.inline("🌐 Genel", f"confirm_plugin_public_{info['name']}".encode()),
+                 Button.inline("🔒 Özel", f"confirm_plugin_private_{info['name']}".encode())],
+                [Button.inline("❌ İptal", b"cancel_plugin")]
+            ]
+        )
+    
+    @bot.on(events.CallbackQuery(pattern=rb"update_plugin_(.+)"))
+    async def update_plugin_handler(event):
+        """Plugini güncelle (restart yok)"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            return
+        
+        plugin_name = event.data.decode().split("_", 2)[-1]
+        
+        if not hasattr(bot, 'pending_updates') or plugin_name not in bot.pending_updates:
+            await event.answer("Güncelleme bilgisi bulunamadı", alert=True)
+            return
+        
+        update_data = bot.pending_updates[plugin_name]
+        temp_path = update_data['temp_path']
+        existing = update_data['existing']
+        
+        await event.edit("⏳ **Plugin güncelleniyor...**")
+        
+        try:
+            # Eski dosyayı sil
+            old_path = os.path.join(config.PLUGINS_DIR, existing.get("filename", f"{plugin_name}.py"))
+            if os.path.exists(old_path):
+                os.remove(old_path)
+            
+            # Yeni dosyayı taşı
+            new_path = os.path.join(config.PLUGINS_DIR, f"{plugin_name}.py")
+            os.rename(temp_path, new_path)
+            
+            # DB güncelle
+            await db.update_plugin(plugin_name, {
+                "filename": f"{plugin_name}.py",
+                "commands": update_data['info'].get("commands", []),
+                "description": update_data['info'].get("description", "")
+            })
+            
+            del bot.pending_updates[plugin_name]
+            
+            await event.edit(
+                f"✅ **`{plugin_name}` güncellendi!**\n\n"
+                f"⚠️ Aktif kullanıcıların plugini yeniden yüklemesi gerekiyor.\n"
+                f"💡 Tüm kullanıcılar için aktif etmek isterseniz botu yeniden başlatın."
+            )
+            await send_log(bot, "plugin", f"Güncellendi: {plugin_name}", event.sender_id)
+            
+        except Exception as e:
+            await event.edit(f"❌ Hata: `{e}`")
+    
+    @bot.on(events.CallbackQuery(pattern=rb"update_restart_(.+)"))
+    async def update_restart_handler(event):
+        """Plugini güncelle ve botu yeniden başlat"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            return
+        
+        plugin_name = event.data.decode().split("_", 2)[-1]
+        
+        if not hasattr(bot, 'pending_updates') or plugin_name not in bot.pending_updates:
+            await event.answer("Güncelleme bilgisi bulunamadı", alert=True)
+            return
+        
+        update_data = bot.pending_updates[plugin_name]
+        temp_path = update_data['temp_path']
+        existing = update_data['existing']
+        
+        await event.edit("⏳ **Plugin güncelleniyor...**")
+        
+        try:
+            # Eski dosyayı sil
+            old_path = os.path.join(config.PLUGINS_DIR, existing.get("filename", f"{plugin_name}.py"))
+            if os.path.exists(old_path):
+                os.remove(old_path)
+            
+            # Yeni dosyayı taşı
+            new_path = os.path.join(config.PLUGINS_DIR, f"{plugin_name}.py")
+            os.rename(temp_path, new_path)
+            
+            # DB güncelle
+            await db.update_plugin(plugin_name, {
+                "filename": f"{plugin_name}.py",
+                "commands": update_data['info'].get("commands", []),
+                "description": update_data['info'].get("description", "")
+            })
+            
+            del bot.pending_updates[plugin_name]
+            
+            await event.edit(f"✅ **`{plugin_name}` güncellendi!**\n\n🔃 Yeniden başlatılıyor...")
+            await send_log(bot, "plugin", f"Güncellendi + Restart: {plugin_name}", event.sender_id)
+            
+            # Restart
+            with open(".restart_info", "w") as f:
+                f.write(f"{event.chat_id}|{event.message_id}")
+            
+            await asyncio.sleep(1)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+            
+        except Exception as e:
+            await event.edit(f"❌ Hata: `{e}`")
+    
+    @bot.on(events.CallbackQuery(pattern=rb"cancel_update_(.+)"))
+    async def cancel_update_handler(event):
+        """Plugin güncellemeyi iptal et"""
+        plugin_name = event.data.decode().split("_", 2)[-1]
+        
+        if hasattr(bot, 'pending_updates') and plugin_name in bot.pending_updates:
+            temp_path = bot.pending_updates[plugin_name].get('temp_path')
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+            del bot.pending_updates[plugin_name]
+        
+        await event.edit("❌ Güncelleme iptal edildi.")
     
     @bot.on(events.CallbackQuery(pattern=b"confirm_plugin_(public|private)_(.+)"))
     async def confirm_plugin_handler(event):
