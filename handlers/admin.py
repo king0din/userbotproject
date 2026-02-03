@@ -122,7 +122,7 @@ def register_admin_handlers(bot):
         await event.edit(text, buttons=buttons)
         await event.answer(f"✅ Bakım: {'Açık' if new_state else 'Kapalı'}")
     
-    @bot.on(events.CallbackQuery(pattern=b"users_list_(\d+)"))
+    @bot.on(events.CallbackQuery(pattern=rb"users_list_(\d+)"))
     async def users_list_handler(event):
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
@@ -219,7 +219,7 @@ def register_admin_handlers(bot):
             buttons.append([Button.inline("🚪 Zorla Çıkış", f"force_logout_{user_id}".encode())])
         await event.respond(text, buttons=buttons, link_preview=False)
     
-    @bot.on(events.CallbackQuery(pattern=b"ban_user_(\d+)"))
+    @bot.on(events.CallbackQuery(pattern=rb"ban_user_(\d+)"))
     async def ban_user_button(event):
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
@@ -237,7 +237,7 @@ def register_admin_handlers(bot):
         except:
             pass
     
-    @bot.on(events.CallbackQuery(pattern=b"unban_user_(\d+)"))
+    @bot.on(events.CallbackQuery(pattern=rb"unban_user_(\d+)"))
     async def unban_user_button(event):
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
@@ -250,7 +250,7 @@ def register_admin_handlers(bot):
         except:
             pass
     
-    @bot.on(events.CallbackQuery(pattern=b"add_sudo_(\d+)"))
+    @bot.on(events.CallbackQuery(pattern=rb"add_sudo_(\d+)"))
     async def add_sudo_button(event):
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
@@ -263,7 +263,7 @@ def register_admin_handlers(bot):
         except:
             pass
     
-    @bot.on(events.CallbackQuery(pattern=b"del_sudo_(\d+)"))
+    @bot.on(events.CallbackQuery(pattern=rb"del_sudo_(\d+)"))
     async def del_sudo_button(event):
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
@@ -276,7 +276,7 @@ def register_admin_handlers(bot):
         except:
             pass
     
-    @bot.on(events.CallbackQuery(pattern=b"force_logout_(\d+)"))
+    @bot.on(events.CallbackQuery(pattern=rb"force_logout_(\d+)"))
     async def force_logout_button(event):
         if event.sender_id != config.OWNER_ID:
             await event.answer(config.MESSAGES["owner_only"], alert=True)
