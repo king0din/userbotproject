@@ -485,12 +485,14 @@ def register_admin_handlers(bot):
             await event.respond(f"❌ Plugin dosyası bulunamadı: `{plugin.get('filename')}`")
             return
         
-        # Plugin bilgilerini hazırla
-        cmds = ", ".join([f"`.{c}`" for c in plugin.get("commands", [])])
-        caption = f"🔌 **Plugin: `{plugin_name}`**\n\n"
-        caption += f"📝 {plugin.get('description') or 'Açıklama yok'}\n"
-        caption += f"🔧 Komutlar: {cmds or 'Yok'}\n"
-        caption += f"🔓 Erişim: {'Genel' if plugin.get('is_public', True) else 'Özel'}"
+        # Kısa caption (Telegram limiti 1024 karakter)
+        cmds = plugin.get("commands", [])[:5]
+        cmd_text = ", ".join([f".{c}" for c in cmds])
+        if len(plugin.get("commands", [])) > 5:
+            cmd_text += "..."
+        
+        caption = f"🔌 {plugin_name}\n"
+        caption += f"🔧 {cmd_text}" if cmd_text else ""
         
         await bot.send_file(
             event.chat_id,
