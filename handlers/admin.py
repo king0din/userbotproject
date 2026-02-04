@@ -159,65 +159,144 @@ def register_admin_handlers(bot):
         buttons.append(back_button("settings_menu"))
         await event.edit(text, buttons=buttons, link_preview=False)
     
+    # ==========================================
+    # KULLANICI BİLGİSİ - /info KOMUTU
+    # ==========================================
+    
     @bot.on(events.NewMessage(pattern=r'^/info\s+(\d+)$'))
     async def info_command(event):
-        if event.sender_id != config.OWNER_ID:
+        """Kullanıcı detaylı bilgisi"""
+        
+        # GÜNCELLEME 1: Komutu hem Sahip hem de Sudo kullanıcıları kullanabilsin
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
             return
+        
         user_id = int(event.pattern_match.group(1))
         user_data = await db.get_user(user_id)
+        
         if not user_data:
-            await event.respond(f"❌ `{user_id}` bulunamadı.")
+            await event.respond(f"❌ `{user_id}` ID'li kullanıcı bulunamadı.")
             return
+        
+        # Telegram'dan kullanıcı bilgisi al
         try:
             tg_user = await bot.get_entity(user_id)
             tg_username = tg_user.username
             tg_first_name = tg_user.first_name or ""
             tg_last_name = tg_user.last_name or ""
+            tg_phone = getattr(tg_user, 'phone', None)
         except:
             tg_username = user_data.get("username")
             tg_first_name = user_data.get("first_name", "")
             tg_last_name = ""
+            tg_phone = None
+        
+        # Durum
         is_logged_in = user_data.get("is_logged_in", False)
         is_banned = user_data.get("is_banned", False)
         is_sudo = user_data.get("is_sudo", False)
-        status = "🚫 Banlı" if is_banned else ("🟢 Aktif" if is_logged_in else "⚪ Pasif")
-        text = "👤 **Kullanıcı Bilgileri**\n\n━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"🆔 **ID:** `{user_id}`\n👤 **İsim:** {tg_first_name} {tg_last_name}\n"
+        
+        if is_banned:
+            status = "🚫 Banlı"
+        elif is_logged_in:
+            status = "🟢 Aktif"
+        else:
+            status = "⚪ Pasif"
+        
+        text = "👤 **Kullanıcı Bilgileri**\n\n"
+        text += "━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"🆔 **ID:** `{user_id}`\n"
+        text += f"👤 **İsim:** {tg_first_name} {tg_last_name}\n"
+        
         if tg_username:
             text += f"📧 **Username:** @{tg_username}\n"
-        text += f"🔗 **Profil:** [Tıkla](tg://user?id={user_id})\n📊 **Durum:** {status}\n"
+        
+        text += f"🔗 **Profil:** [Tıkla](tg://user?id={user_id})\n"
+        text += f"📊 **Durum:** {status}\n"
+        
         if is_sudo:
             text += f"👑 **Yetki:** Sudo\n"
+        
         text += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        # Userbot bilgileri
         if is_logged_in or user_data.get("userbot_id"):
-            text += "\n🤖 **Userbot:**\n"
+            text += "\n🤖 **Userbot Bilgileri:**\n"
             text += f"  • ID: `{user_data.get('userbot_id', 'Yok')}`\n"
             text += f"  • Username: @{user_data.get('userbot_username', 'Yok')}\n"
-            text += f"  • Session: `{user_data.get('session_type', '?')}`\n"
+            
+            # Session bilgileri
+            session_type = user_data.get("session_type", "Bilinmiyor")
+            text += f"  • Session: `{session_type}`\n"
+            
             phone = user_data.get("phone_number")
             if phone:
-                masked = phone[:4] + "****" + phone[-2:] if len(phone) > 6 else phone
-                text += f"  • Telefon: `{masked}`\n"
+                # GÜNCELLEME 2: Telefon numarası gösterim mantığı
+                if event.sender_id == config.OWNER_ID:
+                    # Eğer komutu kullanan SAHİP ise, numarayı açık göster
+                    display_phone = phone
+                else:
+                    # Eğer komutu kullanan SUDO veya başkası ise, numarayı sansürle
+                    display_phone = phone[:4] + "****" + phone[-2:] if len(phone) > 6 else phone
+                
+                text += f"  • Telefon: `{display_phone}`\n"
+            
+            remember = user_data.get("remember_session", False)
+            text += f"  • Oturum Kayıtlı: {'✅ Evet' if remember else '❌ Hayır'}\n"
+        
+        # Aktif pluginler
         active_plugins = user_data.get("active_plugins", [])
         if active_plugins:
-            text += f"\n🔌 **Plugin ({len(active_plugins)}):** {', '.join([f'`{p}`' for p in active_plugins[:5]])}"
+            text += f"\n🔌 **Aktif Plugin'ler ({len(active_plugins)}):**\n"
+            text += f"  {', '.join([f'`{p}`' for p in active_plugins[:5]])}"
             if len(active_plugins) > 5:
-                text += f" +{len(active_plugins) - 5}"
+                text += f" +{len(active_plugins) - 5} daha"
             text += "\n"
+        
+        # Tarihler
+        text += "\n📅 **Tarihler:**\n"
+        created = user_data.get("created_at", "")
+        if created:
+            try:
+                created_dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                text += f"  • Kayıt: `{created_dt.strftime('%d.%m.%Y %H:%M')}`\n"
+            except:
+                text += f"  • Kayıt: `{str(created)[:16]}`\n"
+        
+        last_active = user_data.get("last_active", "")
+        if last_active:
+            try:
+                active_dt = datetime.fromisoformat(last_active.replace('Z', '+00:00'))
+                text += f"  • Son Aktif: `{active_dt.strftime('%d.%m.%Y %H:%M')}`\n"
+            except:
+                text += f"  • Son Aktif: `{str(last_active)[:16]}`\n"
+        
+        # Ban bilgisi
         if is_banned:
-            text += f"\n🚫 **Ban:** {user_data.get('ban_reason', 'Sebep yok')}\n"
+            text += f"\n🚫 **Ban Bilgisi:**\n"
+            text += f"  • Sebep: {user_data.get('ban_reason', 'Belirtilmemiş')}\n"
+        
+        # Aksiyon butonları
         buttons = []
+        
         if is_banned:
             buttons.append([Button.inline("✅ Banı Kaldır", f"unban_user_{user_id}".encode())])
         else:
             buttons.append([Button.inline("🚫 Banla", f"ban_user_{user_id}".encode())])
-        if is_sudo:
-            buttons.append([Button.inline("👑 Sudo Kaldır", f"del_sudo_{user_id}".encode())])
-        else:
-            buttons.append([Button.inline("👑 Sudo Yap", f"add_sudo_{user_id}".encode())])
+        
+        # Sudo yönetimi butonları sadece SAHİP için görünmeli
+        if event.sender_id == config.OWNER_ID:
+            if is_sudo:
+                buttons.append([Button.inline("👑 Sudo Kaldır", f"del_sudo_{user_id}".encode())])
+            else:
+                buttons.append([Button.inline("👑 Sudo Yap", f"add_sudo_{user_id}".encode())])
+        
         if is_logged_in:
-            buttons.append([Button.inline("🚪 Zorla Çıkış", f"force_logout_{user_id}".encode())])
+            buttons.append([Button.inline("🚪 Zorla Çıkış Yap", f"force_logout_{user_id}".encode())])
+        
         await event.respond(text, buttons=buttons, link_preview=False)
+
+    
     
     @bot.on(events.CallbackQuery(pattern=rb"ban_user_(\d+)"))
     async def ban_user_button(event):
