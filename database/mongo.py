@@ -513,6 +513,40 @@ class MongoDB:
             "public_plugins": await self.db.plugins.count_documents({"is_public": True}),
             "private_plugins": await self.db.plugins.count_documents({"is_public": False}),
         }
+    
+    # ==========================================
+    # TEPKİ SİSTEMİ
+    # ==========================================
+    
+    async def get_user_reaction(self, reaction_key: str, user_id: int) -> Optional[str]:
+        """Kullanıcının tepkisini getir"""
+        if not self.connected:
+            return None
+        doc = await self.db.reactions.find_one({
+            "reaction_key": reaction_key,
+            "user_id": user_id
+        })
+        return doc.get("emoji") if doc else None
+    
+    async def set_user_reaction(self, reaction_key: str, user_id: int, emoji: Optional[str]) -> bool:
+        """Kullanıcının tepkisini kaydet veya sil"""
+        if not self.connected:
+            return False
+        
+        if emoji is None:
+            # Tepkiyi sil
+            await self.db.reactions.delete_one({
+                "reaction_key": reaction_key,
+                "user_id": user_id
+            })
+        else:
+            # Tepkiyi ekle veya güncelle
+            await self.db.reactions.update_one(
+                {"reaction_key": reaction_key, "user_id": user_id},
+                {"$set": {"emoji": emoji, "updated_at": datetime.utcnow()}},
+                upsert=True
+            )
+        return True
 
 
 # Global MongoDB instance
