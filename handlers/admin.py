@@ -1150,14 +1150,14 @@ def register_admin_handlers(bot):
                     content.media,
                     caption=content.text or content.message,
                     buttons=buttons,
-                    parse_mode='md'
+                    formatting_entities=content.entities
                 )
             else:
                 await bot.send_message(
                     user_id,
                     content.text or content.message,
                     buttons=buttons,
-                    parse_mode='md',
+                    formatting_entities=content.entities,
                     link_preview=False
                 )
             
@@ -1194,14 +1194,14 @@ def register_admin_handlers(bot):
                     content.media,
                     caption=content.text or content.message,
                     buttons=buttons,
-                    parse_mode='md'
+                    formatting_entities=content.entities
                 )
             else:
                 msg = await bot.send_message(
                     f"@{channel}",
                     content.text or content.message,
                     buttons=buttons,
-                    parse_mode='md',
+                    formatting_entities=content.entities,
                     link_preview=False
                 )
             
