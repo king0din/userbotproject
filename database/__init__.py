@@ -366,6 +366,32 @@ class Database:
     async def get_stats(self) -> Dict:
         """İstatistikleri getir"""
         return self.local.get_stats()
+    
+    # ==========================================
+    # TEPKİ SİSTEMİ
+    # ==========================================
+    
+    async def get_user_reaction(self, reaction_key: str, user_id: int) -> Optional[str]:
+        """Kullanıcının tepkisini getir"""
+        # Önce MongoDB'den dene (daha güncel)
+        if self.mongo.connected:
+            reaction = await self.mongo.get_user_reaction(reaction_key, user_id)
+            if reaction:
+                return reaction
+        
+        # Yerel dosyadan al
+        return self.local.get_user_reaction(reaction_key, user_id)
+    
+    async def set_user_reaction(self, reaction_key: str, user_id: int, emoji: Optional[str]) -> bool:
+        """Kullanıcının tepkisini kaydet veya sil"""
+        # Yerel dosyaya kaydet
+        local_result = self.local.set_user_reaction(reaction_key, user_id, emoji)
+        
+        # MongoDB'ye kaydet
+        if self.mongo.connected:
+            await self.mongo.set_user_reaction(reaction_key, user_id, emoji)
+        
+        return local_result
 
 
 # Global Database instance
