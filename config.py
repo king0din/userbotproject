@@ -104,7 +104,7 @@ MESSAGES = {
     "login_code": "🔢 **Doğrulama Kodu**\n\n"
                   "Telegram'dan gelen kodu girin.\n\n"
                   "⚠️ **ÖNEMLİ:** Kodu aralarında **boşluk** bırakarak yazın!\n"
-                  "Örnek: `1 2 3 4 5`\n\n"
+                  "Örnek: `1 2 3 4 5` veya `12 345`\n\n"
                   "🔒 Bu sayede Telegram kod paylaşımını engellemez.",
     "login_2fa": "🔑 **İki Faktörlü Doğrulama**\n\n2FA şifrenizi girin:",
     "login_session_telethon": "📄 **Telethon Session String**\n\nSession string gönderin:",
@@ -198,6 +198,7 @@ COMMANDS = {
         "/addsudo <id>": "Sudo ekler",
         "/delsudo <id>": "Sudo kaldırır",
         "/broadcast": "Duyuru gönderir (mesaja yanıt)",
+        "/post": "Plugin kanalına butonlu post oluşturur",
         "/stats": "İstatistikleri gösterir",
     }
 }
