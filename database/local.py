@@ -341,6 +341,30 @@ class LocalStorage:
             "public_plugins": len([p for p in plugins.values() if p.get("is_public")]),
             "private_plugins": len([p for p in plugins.values() if not p.get("is_public")]),
         }
+    
+    # ==========================================
+    # TEPKİ SİSTEMİ
+    # ==========================================
+    
+    def get_user_reaction(self, reaction_key: str, user_id: int) -> Optional[str]:
+        """Kullanıcının tepkisini getir"""
+        reactions_file = os.path.join(config.DATA_DIR, "reactions.json")
+        reactions = self._load_json(reactions_file) or {}
+        key = f"{reaction_key}_{user_id}"
+        return reactions.get(key)
+    
+    def set_user_reaction(self, reaction_key: str, user_id: int, emoji: Optional[str]) -> bool:
+        """Kullanıcının tepkisini kaydet veya sil"""
+        reactions_file = os.path.join(config.DATA_DIR, "reactions.json")
+        reactions = self._load_json(reactions_file) or {}
+        key = f"{reaction_key}_{user_id}"
+        
+        if emoji is None:
+            reactions.pop(key, None)
+        else:
+            reactions[key] = emoji
+        
+        return self._save_json(reactions_file, reactions)
 
 
 # Global LocalStorage instance
