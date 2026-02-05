@@ -159,144 +159,65 @@ def register_admin_handlers(bot):
         buttons.append(back_button("settings_menu"))
         await event.edit(text, buttons=buttons, link_preview=False)
     
-    # ==========================================
-    # KULLANICI BİLGİSİ - /info KOMUTU
-    # ==========================================
-    
     @bot.on(events.NewMessage(pattern=r'^/info\s+(\d+)$'))
     async def info_command(event):
-        """Kullanıcı detaylı bilgisi"""
-        
-        # GÜNCELLEME 1: Komutu hem Sahip hem de Sudo kullanıcıları kullanabilsin
-        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+        if event.sender_id != config.OWNER_ID:
             return
-        
         user_id = int(event.pattern_match.group(1))
         user_data = await db.get_user(user_id)
-        
         if not user_data:
-            await event.respond(f"❌ `{user_id}` ID'li kullanıcı bulunamadı.")
+            await event.respond(f"❌ `{user_id}` bulunamadı.")
             return
-        
-        # Telegram'dan kullanıcı bilgisi al
         try:
             tg_user = await bot.get_entity(user_id)
             tg_username = tg_user.username
             tg_first_name = tg_user.first_name or ""
             tg_last_name = tg_user.last_name or ""
-            tg_phone = getattr(tg_user, 'phone', None)
         except:
             tg_username = user_data.get("username")
             tg_first_name = user_data.get("first_name", "")
             tg_last_name = ""
-            tg_phone = None
-        
-        # Durum
         is_logged_in = user_data.get("is_logged_in", False)
         is_banned = user_data.get("is_banned", False)
         is_sudo = user_data.get("is_sudo", False)
-        
-        if is_banned:
-            status = "🚫 Banlı"
-        elif is_logged_in:
-            status = "🟢 Aktif"
-        else:
-            status = "⚪ Pasif"
-        
-        text = "👤 **Kullanıcı Bilgileri**\n\n"
-        text += "━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"🆔 **ID:** `{user_id}`\n"
-        text += f"👤 **İsim:** {tg_first_name} {tg_last_name}\n"
-        
+        status = "🚫 Banlı" if is_banned else ("🟢 Aktif" if is_logged_in else "⚪ Pasif")
+        text = "👤 **Kullanıcı Bilgileri**\n\n━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"🆔 **ID:** `{user_id}`\n👤 **İsim:** {tg_first_name} {tg_last_name}\n"
         if tg_username:
             text += f"📧 **Username:** @{tg_username}\n"
-        
-        text += f"🔗 **Profil:** [Tıkla](tg://user?id={user_id})\n"
-        text += f"📊 **Durum:** {status}\n"
-        
+        text += f"🔗 **Profil:** [Tıkla](tg://user?id={user_id})\n📊 **Durum:** {status}\n"
         if is_sudo:
             text += f"👑 **Yetki:** Sudo\n"
-        
         text += "━━━━━━━━━━━━━━━━━━━━\n"
-        
-        # Userbot bilgileri
         if is_logged_in or user_data.get("userbot_id"):
-            text += "\n🤖 **Userbot Bilgileri:**\n"
+            text += "\n🤖 **Userbot:**\n"
             text += f"  • ID: `{user_data.get('userbot_id', 'Yok')}`\n"
             text += f"  • Username: @{user_data.get('userbot_username', 'Yok')}\n"
-            
-            # Session bilgileri
-            session_type = user_data.get("session_type", "Bilinmiyor")
-            text += f"  • Session: `{session_type}`\n"
-            
+            text += f"  • Session: `{user_data.get('session_type', '?')}`\n"
             phone = user_data.get("phone_number")
             if phone:
-                # GÜNCELLEME 2: Telefon numarası gösterim mantığı
-                if event.sender_id == config.OWNER_ID:
-                    # Eğer komutu kullanan SAHİP ise, numarayı açık göster
-                    display_phone = phone
-                else:
-                    # Eğer komutu kullanan SUDO veya başkası ise, numarayı sansürle
-                    display_phone = phone[:4] + "****" + phone[-2:] if len(phone) > 6 else phone
-                
-                text += f"  • Telefon: `{display_phone}`\n"
-            
-            remember = user_data.get("remember_session", False)
-            text += f"  • Oturum Kayıtlı: {'✅ Evet' if remember else '❌ Hayır'}\n"
-        
-        # Aktif pluginler
+                masked = phone[:4] + "****" + phone[-2:] if len(phone) > 6 else phone
+                text += f"  • Telefon: `{masked}`\n"
         active_plugins = user_data.get("active_plugins", [])
         if active_plugins:
-            text += f"\n🔌 **Aktif Plugin'ler ({len(active_plugins)}):**\n"
-            text += f"  {', '.join([f'`{p}`' for p in active_plugins[:5]])}"
+            text += f"\n🔌 **Plugin ({len(active_plugins)}):** {', '.join([f'`{p}`' for p in active_plugins[:5]])}"
             if len(active_plugins) > 5:
-                text += f" +{len(active_plugins) - 5} daha"
+                text += f" +{len(active_plugins) - 5}"
             text += "\n"
-        
-        # Tarihler
-        text += "\n📅 **Tarihler:**\n"
-        created = user_data.get("created_at", "")
-        if created:
-            try:
-                created_dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
-                text += f"  • Kayıt: `{created_dt.strftime('%d.%m.%Y %H:%M')}`\n"
-            except:
-                text += f"  • Kayıt: `{str(created)[:16]}`\n"
-        
-        last_active = user_data.get("last_active", "")
-        if last_active:
-            try:
-                active_dt = datetime.fromisoformat(last_active.replace('Z', '+00:00'))
-                text += f"  • Son Aktif: `{active_dt.strftime('%d.%m.%Y %H:%M')}`\n"
-            except:
-                text += f"  • Son Aktif: `{str(last_active)[:16]}`\n"
-        
-        # Ban bilgisi
         if is_banned:
-            text += f"\n🚫 **Ban Bilgisi:**\n"
-            text += f"  • Sebep: {user_data.get('ban_reason', 'Belirtilmemiş')}\n"
-        
-        # Aksiyon butonları
+            text += f"\n🚫 **Ban:** {user_data.get('ban_reason', 'Sebep yok')}\n"
         buttons = []
-        
         if is_banned:
             buttons.append([Button.inline("✅ Banı Kaldır", f"unban_user_{user_id}".encode())])
         else:
             buttons.append([Button.inline("🚫 Banla", f"ban_user_{user_id}".encode())])
-        
-        # Sudo yönetimi butonları sadece SAHİP için görünmeli
-        if event.sender_id == config.OWNER_ID:
-            if is_sudo:
-                buttons.append([Button.inline("👑 Sudo Kaldır", f"del_sudo_{user_id}".encode())])
-            else:
-                buttons.append([Button.inline("👑 Sudo Yap", f"add_sudo_{user_id}".encode())])
-        
+        if is_sudo:
+            buttons.append([Button.inline("👑 Sudo Kaldır", f"del_sudo_{user_id}".encode())])
+        else:
+            buttons.append([Button.inline("👑 Sudo Yap", f"add_sudo_{user_id}".encode())])
         if is_logged_in:
-            buttons.append([Button.inline("🚪 Zorla Çıkış Yap", f"force_logout_{user_id}".encode())])
-        
+            buttons.append([Button.inline("🚪 Zorla Çıkış", f"force_logout_{user_id}".encode())])
         await event.respond(text, buttons=buttons, link_preview=False)
-
-    
     
     @bot.on(events.CallbackQuery(pattern=rb"ban_user_(\d+)"))
     async def ban_user_button(event):
@@ -934,3 +855,371 @@ def register_admin_handlers(bot):
             except:
                 failed += 1
         await msg.edit(f"✅ **Tamamlandı!**\n📤 Gönderildi: `{sent}`\n❌ Başarısız: `{failed}`")
+    
+    # ==========================================
+    # POST OLUŞTURMA SİSTEMİ
+    # ==========================================
+    
+    # Post state yönetimi
+    post_states = {}
+    
+    @bot.on(events.NewMessage(pattern=r'^/post$'))
+    async def post_command(event):
+        """Plugin kanalına post oluştur"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            return
+        
+        post_states[event.sender_id] = {
+            'stage': 'waiting_content',
+            'content': None,
+            'media': None,
+            'buttons': [],
+            'current_row': []
+        }
+        
+        await event.respond(
+            "📝 **Post Oluşturma**\n\n"
+            "Göndermek istediğiniz postu yazın veya medya gönderin.\n"
+            "Başka bir mesajı iletmek için mesajı **forward** edin.\n\n"
+            "⚠️ İptal: /cancelpost",
+            buttons=[[Button.inline("❌ İptal", b"cancel_post")]]
+        )
+    
+    @bot.on(events.NewMessage(pattern=r'^/cancelpost$'))
+    async def cancelpost_command(event):
+        if event.sender_id in post_states:
+            del post_states[event.sender_id]
+        await event.respond("❌ Post oluşturma iptal edildi.")
+    
+    @bot.on(events.NewMessage(func=lambda e: e.is_private and e.sender_id in post_states and not e.text.startswith('/')))
+    async def post_content_handler(event):
+        """Post içeriğini al"""
+        user_id = event.sender_id
+        state = post_states.get(user_id)
+        
+        if not state:
+            return
+        
+        stage = state.get('stage')
+        
+        if stage == 'waiting_content':
+            # İçeriği kaydet
+            state['content'] = event.message
+            state['text'] = event.text or event.message.message or ""
+            state['media'] = event.media
+            state['stage'] = 'adding_buttons'
+            
+            await event.respond(
+                "✅ **İçerik alındı!**\n\n"
+                "Şimdi buton ekleyebilirsiniz:",
+                buttons=[
+                    [Button.inline("🔗 Link Butonu", b"post_add_link")],
+                    [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
+                    [Button.inline("➡️ Aynı Satıra Ekle", b"post_same_row"),
+                     Button.inline("⬇️ Alt Satıra Geç", b"post_new_row")],
+                    [Button.inline("👁️ Önizleme", b"post_preview")],
+                    [Button.inline("✅ Gönder", b"post_confirm"),
+                     Button.inline("❌ İptal", b"cancel_post")]
+                ]
+            )
+        
+        elif stage == 'waiting_link_text':
+            state['temp_link_text'] = event.text
+            state['stage'] = 'waiting_link_url'
+            await event.respond("🔗 Şimdi **URL** girin:\nÖrnek: `https://t.me/KingTGPlugins`")
+        
+        elif stage == 'waiting_link_url':
+            url = event.text.strip()
+            if not url.startswith(('http://', 'https://')):
+                url = 'https://' + url
+            
+            btn = {'type': 'url', 'text': state['temp_link_text'], 'url': url}
+            
+            if state.get('add_to_current_row', True) and state['current_row']:
+                state['current_row'].append(btn)
+            else:
+                if state['current_row']:
+                    state['buttons'].append(state['current_row'])
+                state['current_row'] = [btn]
+            
+            state['stage'] = 'adding_buttons'
+            await event.respond(
+                f"✅ **Link butonu eklendi!**\n`{state['temp_link_text']}` → `{url}`",
+                buttons=[
+                    [Button.inline("🔗 Link Butonu", b"post_add_link")],
+                    [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
+                    [Button.inline("➡️ Aynı Satıra Ekle", b"post_same_row"),
+                     Button.inline("⬇️ Alt Satıra Geç", b"post_new_row")],
+                    [Button.inline("👁️ Önizleme", b"post_preview")],
+                    [Button.inline("✅ Gönder", b"post_confirm"),
+                     Button.inline("❌ İptal", b"cancel_post")]
+                ]
+            )
+        
+        elif stage == 'waiting_reactions':
+            # Emoji'leri al
+            import re
+            emojis = re.findall(r'[\U0001F300-\U0001F9FF]|[\u2600-\u26FF]|[\u2700-\u27BF]|[\U0001FA00-\U0001FA6F]|[\U0001FA70-\U0001FAFF]', event.text)
+            
+            if not emojis:
+                await event.respond("⚠️ Emoji bulunamadı. Tekrar deneyin:\nÖrnek: `👍❤️🔥`")
+                return
+            
+            state['temp_reactions'] = emojis
+            state['stage'] = 'waiting_reaction_layout'
+            
+            await event.respond(
+                f"✅ **Tepkiler:** {' '.join(emojis)}\n\n"
+                "Nasıl dizilsin?",
+                buttons=[
+                    [Button.inline("➡️ Yan Yana", b"reaction_horizontal")],
+                    [Button.inline("⬇️ Alt Alta", b"reaction_vertical")],
+                    [Button.inline("❌ İptal", b"post_back_to_buttons")]
+                ]
+            )
+    
+    @bot.on(events.CallbackQuery(data=b"post_add_link"))
+    async def post_add_link_handler(event):
+        user_id = event.sender_id
+        if user_id not in post_states:
+            await event.answer("Önce /post komutu kullanın", alert=True)
+            return
+        
+        post_states[user_id]['stage'] = 'waiting_link_text'
+        post_states[user_id]['add_to_current_row'] = False
+        await event.edit("🔗 **Link Butonu Ekle**\n\nButon **metnini** girin:\nÖrnek: `📢 Kanala Katıl`")
+    
+    @bot.on(events.CallbackQuery(data=b"post_add_reaction"))
+    async def post_add_reaction_handler(event):
+        user_id = event.sender_id
+        if user_id not in post_states:
+            await event.answer("Önce /post komutu kullanın", alert=True)
+            return
+        
+        post_states[user_id]['stage'] = 'waiting_reactions'
+        await event.edit(
+            "👍 **Tepki Butonu Ekle**\n\n"
+            "Eklemek istediğiniz emojileri gönderin:\n"
+            "Örnek: `👍❤️🔥😂👎`"
+        )
+    
+    @bot.on(events.CallbackQuery(data=b"reaction_horizontal"))
+    async def reaction_horizontal_handler(event):
+        user_id = event.sender_id
+        state = post_states.get(user_id)
+        if not state:
+            return
+        
+        # Yan yana tepki butonları
+        reactions = state.get('temp_reactions', [])
+        row = [{'type': 'reaction', 'emoji': e} for e in reactions]
+        
+        if state['current_row']:
+            state['buttons'].append(state['current_row'])
+        state['buttons'].append(row)
+        state['current_row'] = []
+        state['stage'] = 'adding_buttons'
+        
+        await event.edit(
+            f"✅ **Tepkiler eklendi (yan yana):** {' '.join(reactions)}",
+            buttons=[
+                [Button.inline("🔗 Link Butonu", b"post_add_link")],
+                [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
+                [Button.inline("➡️ Aynı Satıra Ekle", b"post_same_row"),
+                 Button.inline("⬇️ Alt Satıra Geç", b"post_new_row")],
+                [Button.inline("👁️ Önizleme", b"post_preview")],
+                [Button.inline("✅ Gönder", b"post_confirm"),
+                 Button.inline("❌ İptal", b"cancel_post")]
+            ]
+        )
+    
+    @bot.on(events.CallbackQuery(data=b"reaction_vertical"))
+    async def reaction_vertical_handler(event):
+        user_id = event.sender_id
+        state = post_states.get(user_id)
+        if not state:
+            return
+        
+        # Alt alta tepki butonları
+        reactions = state.get('temp_reactions', [])
+        
+        if state['current_row']:
+            state['buttons'].append(state['current_row'])
+            state['current_row'] = []
+        
+        for e in reactions:
+            state['buttons'].append([{'type': 'reaction', 'emoji': e}])
+        
+        state['stage'] = 'adding_buttons'
+        
+        await event.edit(
+            f"✅ **Tepkiler eklendi (alt alta):** {' '.join(reactions)}",
+            buttons=[
+                [Button.inline("🔗 Link Butonu", b"post_add_link")],
+                [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
+                [Button.inline("➡️ Aynı Satıra Ekle", b"post_same_row"),
+                 Button.inline("⬇️ Alt Satıra Geç", b"post_new_row")],
+                [Button.inline("👁️ Önizleme", b"post_preview")],
+                [Button.inline("✅ Gönder", b"post_confirm"),
+                 Button.inline("❌ İptal", b"cancel_post")]
+            ]
+        )
+    
+    @bot.on(events.CallbackQuery(data=b"post_same_row"))
+    async def post_same_row_handler(event):
+        user_id = event.sender_id
+        state = post_states.get(user_id)
+        if not state:
+            return
+        
+        state['add_to_current_row'] = True
+        await event.answer("➡️ Sonraki buton aynı satıra eklenecek")
+    
+    @bot.on(events.CallbackQuery(data=b"post_new_row"))
+    async def post_new_row_handler(event):
+        user_id = event.sender_id
+        state = post_states.get(user_id)
+        if not state:
+            return
+        
+        if state['current_row']:
+            state['buttons'].append(state['current_row'])
+            state['current_row'] = []
+        
+        state['add_to_current_row'] = False
+        await event.answer("⬇️ Sonraki buton yeni satıra eklenecek")
+    
+    @bot.on(events.CallbackQuery(data=b"post_back_to_buttons"))
+    async def post_back_to_buttons_handler(event):
+        user_id = event.sender_id
+        state = post_states.get(user_id)
+        if not state:
+            return
+        
+        state['stage'] = 'adding_buttons'
+        await event.edit(
+            "📝 **Buton Ekleme**",
+            buttons=[
+                [Button.inline("🔗 Link Butonu", b"post_add_link")],
+                [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
+                [Button.inline("➡️ Aynı Satıra Ekle", b"post_same_row"),
+                 Button.inline("⬇️ Alt Satıra Geç", b"post_new_row")],
+                [Button.inline("👁️ Önizleme", b"post_preview")],
+                [Button.inline("✅ Gönder", b"post_confirm"),
+                 Button.inline("❌ İptal", b"cancel_post")]
+            ]
+        )
+    
+    def build_post_buttons(state):
+        """State'den Telethon butonları oluştur"""
+        all_buttons = state['buttons'].copy()
+        if state['current_row']:
+            all_buttons.append(state['current_row'])
+        
+        telethon_buttons = []
+        for row in all_buttons:
+            btn_row = []
+            for btn in row:
+                if btn['type'] == 'url':
+                    btn_row.append(Button.url(btn['text'], btn['url']))
+                elif btn['type'] == 'reaction':
+                    # Tepki butonları için callback
+                    btn_row.append(Button.inline(btn['emoji'], f"react_{btn['emoji']}".encode()))
+            if btn_row:
+                telethon_buttons.append(btn_row)
+        
+        return telethon_buttons if telethon_buttons else None
+    
+    @bot.on(events.CallbackQuery(data=b"post_preview"))
+    async def post_preview_handler(event):
+        user_id = event.sender_id
+        state = post_states.get(user_id)
+        if not state or not state.get('content'):
+            await event.answer("İçerik bulunamadı", alert=True)
+            return
+        
+        await event.answer("👁️ Önizleme gönderiliyor...")
+        
+        buttons = build_post_buttons(state)
+        content = state['content']
+        
+        try:
+            if content.media:
+                await bot.send_file(
+                    user_id,
+                    content.media,
+                    caption=content.text or content.message,
+                    buttons=buttons,
+                    parse_mode='md'
+                )
+            else:
+                await bot.send_message(
+                    user_id,
+                    content.text or content.message,
+                    buttons=buttons,
+                    parse_mode='md',
+                    link_preview=False
+                )
+            
+            await bot.send_message(
+                user_id,
+                "👆 **Önizleme**\n\nBu şekilde gönderilecek.",
+                buttons=[
+                    [Button.inline("✅ Onayla ve Gönder", b"post_confirm")],
+                    [Button.inline("✏️ Buton Düzenle", b"post_back_to_buttons")],
+                    [Button.inline("❌ İptal", b"cancel_post")]
+                ]
+            )
+        except Exception as e:
+            await event.respond(f"❌ Önizleme hatası: `{e}`")
+    
+    @bot.on(events.CallbackQuery(data=b"post_confirm"))
+    async def post_confirm_handler(event):
+        user_id = event.sender_id
+        state = post_states.get(user_id)
+        if not state or not state.get('content'):
+            await event.answer("İçerik bulunamadı", alert=True)
+            return
+        
+        await event.edit("⏳ **Gönderiliyor...**")
+        
+        buttons = build_post_buttons(state)
+        content = state['content']
+        channel = config.PLUGIN_CHANNEL
+        
+        try:
+            if content.media:
+                msg = await bot.send_file(
+                    f"@{channel}",
+                    content.media,
+                    caption=content.text or content.message,
+                    buttons=buttons,
+                    parse_mode='md'
+                )
+            else:
+                msg = await bot.send_message(
+                    f"@{channel}",
+                    content.text or content.message,
+                    buttons=buttons,
+                    parse_mode='md',
+                    link_preview=False
+                )
+            
+            del post_states[user_id]
+            
+            await event.edit(
+                f"✅ **Post gönderildi!**\n\n"
+                f"📢 Kanal: @{channel}\n"
+                f"🔗 [Gönderiye Git](https://t.me/{channel}/{msg.id})"
+            )
+            await send_log(bot, "post", f"Plugin kanalına post gönderildi", user_id)
+            
+        except Exception as e:
+            await event.edit(f"❌ **Hata:** `{e}`\n\nBot'un kanala mesaj atma yetkisi var mı kontrol edin.")
+    
+    @bot.on(events.CallbackQuery(data=b"cancel_post"))
+    async def cancel_post_handler(event):
+        user_id = event.sender_id
+        if user_id in post_states:
+            del post_states[user_id]
+        await event.edit("❌ Post oluşturma iptal edildi.")
