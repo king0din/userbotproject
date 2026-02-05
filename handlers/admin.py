@@ -903,10 +903,8 @@ def register_admin_handlers(bot):
         stage = state.get('stage')
         
         if stage == 'waiting_content':
-            # İçeriği kaydet
+            # Orijinal mesajı tamamen kaydet
             state['content'] = event.message
-            state['text'] = event.text or event.message.message or ""
-            state['media'] = event.media
             state['stage'] = 'adding_buttons'
             
             await event.respond(
@@ -1144,22 +1142,25 @@ def register_admin_handlers(bot):
         content = state['content']
         
         try:
+            # Mesajı butonlarla birlikte gönder
             if content.media:
-                await bot.send_file(
+                preview = await bot.send_file(
                     user_id,
-                    content.media,
-                    caption=content.text or content.message,
+                    file=content.media,
+                    caption=content.message,
                     buttons=buttons,
                     formatting_entities=content.entities
                 )
             else:
-                await bot.send_message(
+                preview = await bot.send_message(
                     user_id,
-                    content.text or content.message,
+                    content.message,
                     buttons=buttons,
                     formatting_entities=content.entities,
                     link_preview=False
                 )
+            
+            state['preview_id'] = preview.id
             
             await bot.send_message(
                 user_id,
@@ -1188,18 +1189,19 @@ def register_admin_handlers(bot):
         channel = config.PLUGIN_CHANNEL
         
         try:
+            # Kanala gönder
             if content.media:
                 msg = await bot.send_file(
                     f"@{channel}",
-                    content.media,
-                    caption=content.text or content.message,
+                    file=content.media,
+                    caption=content.message,
                     buttons=buttons,
                     formatting_entities=content.entities
                 )
             else:
                 msg = await bot.send_message(
                     f"@{channel}",
-                    content.text or content.message,
+                    content.message,
                     buttons=buttons,
                     formatting_entities=content.entities,
                     link_preview=False
