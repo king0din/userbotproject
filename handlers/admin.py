@@ -1121,12 +1121,94 @@ def register_admin_handlers(bot):
                 if btn['type'] == 'url':
                     btn_row.append(Button.url(btn['text'], btn['url']))
                 elif btn['type'] == 'reaction':
-                    # Tepki butonları için callback
-                    btn_row.append(Button.inline(btn['emoji'], f"react_{btn['emoji']}".encode()))
+                    # Tepki butonları - başlangıçta 0
+                    btn_row.append(Button.inline(f"{btn['emoji']} 0", f"react_{btn['emoji']}_0".encode()))
             if btn_row:
                 telethon_buttons.append(btn_row)
         
         return telethon_buttons if telethon_buttons else None
+    
+    @bot.on(events.CallbackQuery(pattern=rb"react_(.+)_(\d+)"))
+    async def reaction_handler(event):
+        """Tepki butonuna tıklandığında"""
+        user_id = event.sender_id
+        data = event.data.decode()
+        
+        # Emoji'yi çıkar (react_👍_5 -> 👍)
+        parts = data.split("_")
+        emoji = parts[1]
+        
+        # Mesaj ID ve Chat ID
+        msg_id = event.message_id
+        chat_id = event.chat_id
+        
+        # Kullanıcının tepkisini veritabanından kontrol et
+        reaction_key = f"reaction_{chat_id}_{msg_id}"
+        user_reactions = await db.get_user_reaction(reaction_key, user_id)
+        
+        # Mevcut butonları al
+        current_buttons = event.message.buttons
+        if not current_buttons:
+            await event.answer("Hata!")
+            return
+        
+        new_buttons = []
+        for row in current_buttons:
+            new_row = []
+            for btn in row:
+                btn_data = btn.data.decode() if btn.data else ""
+                btn_text = btn.text
+                
+                if btn_data.startswith("react_"):
+                    # Bu bir tepki butonu
+                    btn_parts = btn_data.split("_")
+                    btn_emoji = btn_parts[1]
+                    
+                    # Mevcut sayıyı al
+                    try:
+                        current_count = int(btn_text.split()[-1])
+                    except:
+                        current_count = 0
+                    
+                    if btn_emoji == emoji:
+                        # Tıklanan buton
+                        if user_reactions == emoji:
+                            # Aynı tepkiye tekrar tıkladı - geri al
+                            new_count = max(0, current_count - 1)
+                            await db.set_user_reaction(reaction_key, user_id, None)
+                            await event.answer(f"{emoji} geri alındı")
+                        else:
+                            # Yeni tepki veya değiştirme
+                            if user_reactions:
+                                # Önceki tepkiyi geri al (sayısını düşür)
+                                pass  # Bu aşağıda ele alınacak
+                            new_count = current_count + 1
+                            await db.set_user_reaction(reaction_key, user_id, emoji)
+                            await event.answer(f"{emoji} eklendi!")
+                    else:
+                        # Tıklanmayan buton
+                        if user_reactions == btn_emoji:
+                            # Kullanıcı bu tepkiden vazgeçti
+                            new_count = max(0, current_count - 1)
+                        else:
+                            new_count = current_count
+                    
+                    new_row.append(Button.inline(f"{btn_emoji} {new_count}", f"react_{btn_emoji}_{new_count}".encode()))
+                else:
+                    # URL butonu - olduğu gibi bırak
+                    if btn.url:
+                        new_row.append(Button.url(btn_text, btn.url))
+                    else:
+                        new_row.append(Button.inline(btn_text, btn.data))
+            
+            if new_row:
+                new_buttons.append(new_row)
+        
+        # Mesajı güncelle
+        try:
+            await event.edit(buttons=new_buttons)
+        except:
+            pass  # Aynı butonlarsa hata verebilir
     
     @bot.on(events.CallbackQuery(data=b"post_preview"))
     async def post_preview_handler(event):
