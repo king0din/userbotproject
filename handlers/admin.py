@@ -1142,14 +1142,24 @@ def register_admin_handlers(bot):
         msg_id = event.message_id
         chat_id = event.chat_id
         
+        # Mesajı al
+        try:
+            message = await event.get_message()
+            if not message:
+                await event.answer("Mesaj bulunamadı!")
+                return
+        except:
+            await event.answer("Hata!")
+            return
+        
         # Kullanıcının tepkisini veritabanından kontrol et
         reaction_key = f"reaction_{chat_id}_{msg_id}"
         user_reactions = await db.get_user_reaction(reaction_key, user_id)
         
         # Mevcut butonları al
-        current_buttons = event.message.buttons
+        current_buttons = message.buttons
         if not current_buttons:
-            await event.answer("Hata!")
+            await event.answer("Buton bulunamadı!")
             return
         
         new_buttons = []
@@ -1178,17 +1188,14 @@ def register_admin_handlers(bot):
                             await db.set_user_reaction(reaction_key, user_id, None)
                             await event.answer(f"{emoji} geri alındı")
                         else:
-                            # Yeni tepki veya değiştirme
-                            if user_reactions:
-                                # Önceki tepkiyi geri al (sayısını düşür)
-                                pass  # Bu aşağıda ele alınacak
+                            # Yeni tepki
                             new_count = current_count + 1
                             await db.set_user_reaction(reaction_key, user_id, emoji)
-                            await event.answer(f"{emoji} eklendi!")
+                            await event.answer(f"{emoji}")
                     else:
                         # Tıklanmayan buton
                         if user_reactions == btn_emoji:
-                            # Kullanıcı bu tepkiden vazgeçti
+                            # Kullanıcı bu tepkiden vazgeçti (başka tepkiye geçti)
                             new_count = max(0, current_count - 1)
                         else:
                             new_count = current_count
@@ -1207,8 +1214,9 @@ def register_admin_handlers(bot):
         # Mesajı güncelle
         try:
             await event.edit(buttons=new_buttons)
-        except:
-            pass  # Aynı butonlarsa hata verebilir
+        except Exception as e:
+            # Aynı butonlarsa veya başka hata
+            pass
     
     @bot.on(events.CallbackQuery(data=b"post_preview"))
     async def post_preview_handler(event):
