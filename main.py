@@ -136,6 +136,10 @@ async def main():
     # Userbot manager callback'ini ayarla
     userbot_manager.set_session_terminated_callback(on_session_terminated)
     
+    # Plugin bağımlılıklarını önceden kur
+    log("🔄 Plugin bağımlılıkları kontrol ediliyor...")
+    await plugin_manager.preinstall_all_dependencies()
+    
     # Kaydedilmiş session'ları geri yükle
     log("🔄 Kaydedilmiş session'lar yükleniyor...")
     restored = await userbot_manager.restore_sessions()
