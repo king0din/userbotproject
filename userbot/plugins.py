@@ -10,7 +10,8 @@ import importlib.util
 import subprocess
 import sys
 import tempfile
-from typing import Optional, Dict, List, Tuple
+import asyncio
+from typing import Optional, Dict, List, Tuple, Set
 from telethon import TelegramClient
 import config
 from database import database as db
@@ -23,6 +24,115 @@ class PluginManager:
         self.user_active_plugins: Dict[int, Dict[str, any]] = {}
         self._retry_count: Dict[str, int] = {}
         self._compat_installed = False
+        self._installed_packages: Set[str] = set()  # Kurulu paket cache
+        self._packages_checked = False
+    
+    async def preinstall_all_dependencies(self):
+        """Tüm pluginlerin bağımlılıklarını önceden kur"""
+        print("[PLUGIN] 📦 Bağımlılıklar kontrol ediliyor...")
+        
+        all_plugins = await db.get_all_plugins()
+        if not all_plugins:
+            return
+        
+        all_imports = set()
+        
+        # Tüm pluginlerin import'larını topla
+        for plugin in all_plugins:
+            filename = plugin.get("filename", f"{plugin['name']}.py")
+            filepath = os.path.join(config.PLUGINS_DIR, filename)
+            
+            if not os.path.exists(filepath):
+                continue
+            
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                tree = ast.parse(content)
+                
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            module_name = alias.name.split('.')[0]
+                            all_imports.add(module_name)
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.module:
+                            module_name = node.module.split('.')[0]
+                            all_imports.add(module_name)
+            except:
+                continue
+        
+        # Standart kütüphaneler ve zaten kurulu olanları atla
+        skip_modules = {
+            'os', 'sys', 'time', 'datetime', 'json', 'random', 'math', 're',
+            'asyncio', 'subprocess', 'shutil', 'glob', 'pathlib', 'tempfile',
+            'base64', 'hashlib', 'uuid', 'io', 'collections', 'itertools',
+            'functools', 'typing', 'abc', 'copy', 'pickle', 'sqlite3',
+            'urllib', 'http', 'html', 'xml', 'email', 'mimetypes',
+            'logging', 'traceback', 'inspect', 'importlib', 'ast',
+            'struct', 'codecs', 'string', 'textwrap', 'difflib',
+            'threading', 'multiprocessing', 'concurrent', 'queue',
+            'socket', 'ssl', 'select', 'selectors', 'signal',
+            'contextlib', 'weakref', 'gc', 'platform', 'locale',
+            'getpass', 'gettext', 'argparse', 'configparser',
+            'csv', 'zipfile', 'tarfile', 'gzip', 'bz2', 'lzma',
+            'secrets', 'statistics', 'decimal', 'fractions',
+            'numbers', 'cmath', 'array', 'bisect', 'heapq',
+            'enum', 'graphlib', 'dataclasses', 'contextvars',
+            '__future__', 'builtins', 'warnings', 'atexit',
+            'telethon', 'pyrogram', 'motor', 'pymongo', 'dotenv', 'git',
+            'userbot', 'userbot_compat', 'config', 'database', 'utils',
+            'seduserbot', 'asena'
+        }
+        
+        package_mapping = {
+            'cv2': 'opencv-python',
+            'PIL': 'Pillow',
+            'sklearn': 'scikit-learn',
+            'yaml': 'pyyaml',
+            'bs4': 'beautifulsoup4',
+        }
+        
+        to_install = []
+        
+        for module in all_imports:
+            if module in skip_modules:
+                continue
+            
+            # Zaten kurulu mu kontrol et
+            try:
+                importlib.import_module(module)
+                self._installed_packages.add(module)
+            except ImportError:
+                package_name = package_mapping.get(module, module)
+                to_install.append(package_name)
+        
+        # Eksik paketleri toplu kur
+        if to_install:
+            unique_packages = list(set(to_install))
+            print(f"[PLUGIN] 📦 {len(unique_packages)} paket kuruluyor: {', '.join(unique_packages)}")
+            
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install"] + unique_packages + ["-q", "--disable-pip-version-check"],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                
+                if result.returncode == 0:
+                    print(f"[PLUGIN] ✅ Tüm bağımlılıklar kuruldu")
+                    for pkg in unique_packages:
+                        self._installed_packages.add(pkg)
+                else:
+                    print(f"[PLUGIN] ⚠️ Bazı paketler kurulamadı")
+            except Exception as e:
+                print(f"[PLUGIN] ⚠️ Paket kurulum hatası: {e}")
+        else:
+            print("[PLUGIN] ✅ Tüm bağımlılıklar mevcut")
+        
+        self._packages_checked = True
     
     def _setup_compatibility(self):
         """Eski userbot pluginleri için uyumluluk katmanını kur"""
@@ -514,22 +624,30 @@ class PluginManager:
         }
     
     async def restore_user_plugins(self, user_id: int, client: TelegramClient) -> int:
-        """Kullanıcının pluginlerini geri yükle"""
+        """Kullanıcının pluginlerini geri yükle - PARALEL"""
         user = await db.get_user(user_id)
         if not user:
             return 0
         
         active_plugins = user.get("active_plugins", [])
-        restored = 0
+        if not active_plugins:
+            return 0
         
-        for plugin_name in active_plugins:
-            success, msg = await self.activate_plugin(user_id, plugin_name, client)
-            if success:
-                restored += 1
-                print(f"[PLUGIN] ✅ {plugin_name} geri yüklendi (user={user_id})")
-            else:
-                print(f"[PLUGIN] ❌ {plugin_name} yüklenemedi: {msg}")
+        async def load_single_plugin(plugin_name):
+            """Tek bir plugini yükle"""
+            try:
+                success, msg = await self.activate_plugin(user_id, plugin_name, client)
+                if success:
+                    return plugin_name
+            except:
+                pass
+            return None
         
+        # Tüm pluginleri paralel yükle
+        tasks = [load_single_plugin(p) for p in active_plugins]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        restored = sum(1 for r in results if r is not None and not isinstance(r, Exception))
         return restored
     
     async def get_all_plugins_formatted(self, user_id: int = None) -> str:
