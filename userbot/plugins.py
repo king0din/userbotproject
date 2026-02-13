@@ -194,6 +194,18 @@ class PluginManager:
             if clean_name.lower() in ['userbot', 'userbot_compat']:
                 return True, "userbot uyumluluk katmanı mevcut"
             
+            # Cache kontrolü - zaten kuruluysa atla
+            if clean_name in self._installed_packages:
+                return True, f"{clean_name} zaten kurulu"
+            
+            # Import ile kontrol et
+            try:
+                importlib.import_module(clean_name)
+                self._installed_packages.add(clean_name)
+                return True, f"{clean_name} zaten kurulu"
+            except ImportError:
+                pass
+            
             print(f"[PLUGIN] 📦 {clean_name} kuruluyor...")
             
             result = subprocess.run(
@@ -205,6 +217,7 @@ class PluginManager:
             
             if result.returncode == 0:
                 print(f"[PLUGIN] ✅ {clean_name} kuruldu")
+                self._installed_packages.add(clean_name)
                 return True, f"{clean_name} kuruldu"
             else:
                 print(f"[PLUGIN] ❌ {clean_name} kurulamadı: {result.stderr}")
