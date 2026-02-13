@@ -314,52 +314,67 @@ class UserbotManager:
         self.on_session_terminated_callback = callback
     
     async def restore_sessions(self) -> int:
-        """Kaydedilmiş session'ları geri yükle ve pluginleri aktif et"""
-        print("[USERBOT] Session'lar geri yükleniyor...")
+        """Kaydedilmiş session'ları geri yükle ve pluginleri aktif et - PARALEL"""
+        print("[USERBOT] Session'lar geri yükleniyor (paralel)...")
         
-        restored = 0
         users = await db.get_logged_in_users()
-        
         print(f"[USERBOT] {len(users)} giriş yapmış kullanıcı bulundu")
         
-        for user in users:
+        if not users:
+            return 0
+        
+        async def restore_single_session(user):
+            """Tek bir kullanıcının session'ını geri yükle"""
             user_id = user.get("user_id")
             
-            session_data = user.get("session_data")
-            session_type = user.get("session_type", "telethon")
-            
-            if not session_data:
-                session_info = await db.get_session(user_id)
-                if session_info:
-                    session_data = session_info.get("data")
-                    session_type = session_info.get("type", "telethon")
-            
-            if not session_data:
-                print(f"[USERBOT] Session bulunamadı: user={user_id}")
-                await db.update_user(user_id, {"is_logged_in": False})
-                continue
-            
-            print(f"[USERBOT] Session yükleniyor: user={user_id}, type={session_type}")
-            
-            result = await self.login_with_session(user_id, session_data, session_type)
-            
-            if result.get("success"):
-                restored += 1
-                print(f"[USERBOT] ✅ Session geri yüklendi: user={user_id}")
+            try:
+                session_data = user.get("session_data")
+                session_type = user.get("session_type", "telethon")
                 
-                # ÖNEMLİ: Kullanıcının pluginlerini geri yükle
-                client = self.get_client(user_id)
-                if client:
-                    active_plugins = user.get("active_plugins", [])
-                    if active_plugins:
-                        print(f"[USERBOT] 🔌 {len(active_plugins)} plugin yükleniyor: user={user_id}")
-                        plugin_count = await self.plugin_manager.restore_user_plugins(user_id, client)
-                        print(f"[USERBOT] ✅ {plugin_count} plugin yüklendi: user={user_id}")
-            else:
+                if not session_data:
+                    session_info = await db.get_session(user_id)
+                    if session_info:
+                        session_data = session_info.get("data")
+                        session_type = session_info.get("type", "telethon")
+                
+                if not session_data:
+                    print(f"[USERBOT] Session bulunamadı: user={user_id}")
+                    await db.update_user(user_id, {"is_logged_in": False})
+                    return False
+                
+                print(f"[USERBOT] Session yükleniyor: user={user_id}")
+                
+                result = await self.login_with_session(user_id, session_data, session_type)
+                
+                if result.get("success"):
+                    print(f"[USERBOT] ✅ Session OK: user={user_id}")
+                    
+                    # Kullanıcının pluginlerini geri yükle
+                    client = self.get_client(user_id)
+                    if client:
+                        active_plugins = user.get("active_plugins", [])
+                        if active_plugins:
+                            plugin_count = await self.plugin_manager.restore_user_plugins(user_id, client)
+                            print(f"[USERBOT] 🔌 {plugin_count} plugin: user={user_id}")
+                    return True
+                else:
+                    await db.update_user(user_id, {"is_logged_in": False})
+                    print(f"[USERBOT] ❌ Session geçersiz: user={user_id}")
+                    return False
+                    
+            except Exception as e:
+                print(f"[USERBOT] ❌ Hata: user={user_id} - {e}")
                 await db.update_user(user_id, {"is_logged_in": False})
-                print(f"[USERBOT] ❌ Session geçersiz: user={user_id} - {result.get('error')}")
+                return False
         
-        print(f"[USERBOT] Toplam {restored} session geri yüklendi")
+        # Tüm session'ları paralel olarak başlat
+        tasks = [restore_single_session(user) for user in users]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Başarılı olanları say
+        restored = sum(1 for r in results if r is True)
+        
+        print(f"[USERBOT] ✅ Toplam {restored}/{len(users)} session geri yüklendi (paralel)")
         return restored
     
     async def shutdown(self):
