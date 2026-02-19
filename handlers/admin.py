@@ -15,6 +15,7 @@ from database import database as db
 from userbot.manager import userbot_manager
 from userbot.plugins import plugin_manager
 from utils import send_log, get_readable_time, back_button
+from utils.bot_api import bot_api, btn, ButtonBuilder
 
 start_time = time.time()
 USERS_PER_PAGE = 10
@@ -69,7 +70,55 @@ def register_admin_handlers(bot):
         text += f"🚫 **Ban:** `{stats.get('banned_users', 0)}`"
         return text, settings
     
+    def get_settings_buttons_api(settings, is_owner):
+        """Bot API için renkli butonlar"""
+        mode = settings.get("bot_mode", "public")
+        maint = settings.get("maintenance", False)
+        
+        if is_owner:
+            rows = [
+                # Mod ve Bakım toggle butonları
+                [
+                    btn.callback("🔒 Özel Yap" if mode == "public" else "🌐 Genel Yap", "toggle_mode",
+                                style=ButtonBuilder.STYLE_PRIMARY if mode == "public" else ButtonBuilder.STYLE_SUCCESS),
+                    btn.callback("✅ Bakım Kapat" if maint else "🔧 Bakım Aç", "toggle_maintenance",
+                                style=ButtonBuilder.STYLE_SUCCESS if maint else ButtonBuilder.STYLE_DANGER)
+                ],
+                # Kullanıcılar ve Pluginler
+                [
+                    btn.callback("👥 Kullanıcılar", "users_list_0", style=ButtonBuilder.STYLE_PRIMARY),
+                    btn.callback("🔌 Plugin'ler", "admin_plugins", style=ButtonBuilder.STYLE_PRIMARY)
+                ],
+                # Sudo ve Ban
+                [
+                    btn.callback("👑 Sudo", "sudo_management", style=ButtonBuilder.STYLE_SUCCESS),
+                    btn.callback("🚫 Ban", "ban_management", style=ButtonBuilder.STYLE_DANGER)
+                ],
+                # İstatistik ve Loglar
+                [
+                    btn.callback("📊 İstatistik", "stats", style=ButtonBuilder.STYLE_PRIMARY),
+                    btn.callback("📋 Loglar", "view_logs", style=ButtonBuilder.STYLE_PRIMARY)
+                ],
+                # Güncelle ve Restart
+                [
+                    btn.callback("🔄 Güncelle", "update_bot", style=ButtonBuilder.STYLE_SUCCESS),
+                    btn.callback("🔃 Restart", "restart_bot", style=ButtonBuilder.STYLE_DANGER)
+                ],
+                # Komutlar
+                [btn.callback("📝 Komutlar", "admin_commands", style=ButtonBuilder.STYLE_PRIMARY)],
+                # Geri
+                [btn.callback("◀️ Ana Menü", "main_menu", icon_custom_emoji_id=5237707207794498594)]
+            ]
+        else:
+            rows = [
+                [btn.callback("🔌 Plugin'ler", "admin_plugins", style=ButtonBuilder.STYLE_PRIMARY)],
+                [btn.callback("📊 İstatistik", "stats", style=ButtonBuilder.STYLE_PRIMARY)],
+                [btn.callback("◀️ Ana Menü", "main_menu", icon_custom_emoji_id=5237707207794498594)]
+            ]
+        return rows
+    
     async def get_settings_buttons(settings, is_owner):
+        """Telethon için eski butonlar (fallback)"""
         mode = settings.get("bot_mode", "public")
         maint = settings.get("maintenance", False)
         if is_owner:
@@ -93,8 +142,15 @@ def register_admin_handlers(bot):
             await event.answer(config.MESSAGES["admin_only"], alert=True)
             return
         text, settings = await get_settings_text()
-        buttons = await get_settings_buttons(settings, event.sender_id == config.OWNER_ID)
-        await event.edit(text, buttons=buttons)
+        rows = get_settings_buttons_api(settings, event.sender_id == config.OWNER_ID)
+        
+        await bot_api.edit_message_text(
+            chat_id=event.sender_id,
+            message_id=event.message_id,
+            text=text,
+            reply_markup=btn.inline_keyboard(rows)
+        )
+        await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"toggle_mode"))
     async def toggle_mode_handler(event):
@@ -105,8 +161,14 @@ def register_admin_handlers(bot):
         new_mode = "private" if settings.get("bot_mode") == "public" else "public"
         await db.update_settings({"bot_mode": new_mode})
         text, settings = await get_settings_text()
-        buttons = await get_settings_buttons(settings, True)
-        await event.edit(text, buttons=buttons)
+        rows = get_settings_buttons_api(settings, True)
+        
+        await bot_api.edit_message_text(
+            chat_id=event.sender_id,
+            message_id=event.message_id,
+            text=text,
+            reply_markup=btn.inline_keyboard(rows)
+        )
         await event.answer(f"✅ Mod: {'Özel' if new_mode == 'private' else 'Genel'}")
     
     @bot.on(events.CallbackQuery(data=b"toggle_maintenance"))
@@ -118,8 +180,14 @@ def register_admin_handlers(bot):
         new_state = not settings.get("maintenance", False)
         await db.update_settings({"maintenance": new_state})
         text, settings = await get_settings_text()
-        buttons = await get_settings_buttons(settings, True)
-        await event.edit(text, buttons=buttons)
+        rows = get_settings_buttons_api(settings, True)
+        
+        await bot_api.edit_message_text(
+            chat_id=event.sender_id,
+            message_id=event.message_id,
+            text=text,
+            reply_markup=btn.inline_keyboard(rows)
+        )
         await event.answer(f"✅ Bakım: {'Açık' if new_state else 'Kapalı'}")
     
     @bot.on(events.CallbackQuery(pattern=rb"users_list_(\d+)"))
