@@ -6,9 +6,26 @@
 # ============================================
 
 import aiohttp
-import json
+import re
 from typing import Optional, List, Dict, Any, Union
 import config
+
+def md_to_html(text: str) -> str:
+    """Markdown'ı HTML'e çevir"""
+    if not text:
+        return text
+    
+    # **bold** -> <b>bold</b>
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    # `code` -> <code>code</code>
+    text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
+    # __italic__ -> <i>italic</i>
+    text = re.sub(r'__(.+?)__', r'<i>\1</i>', text)
+    # ~~strike~~ -> <s>strike</s>
+    text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
+    
+    return text
+
 
 class BotAPI:
     """Bot API HTTP wrapper for colored buttons and premium emoji"""
@@ -34,6 +51,10 @@ class BotAPI:
         disable_web_page_preview: bool = True
     ) -> Dict:
         """Mesaj gönder"""
+        # Markdown'ı HTML'e çevir
+        if parse_mode == "HTML":
+            text = md_to_html(text)
+        
         data = {
             "chat_id": chat_id,
             "text": text,
@@ -56,6 +77,10 @@ class BotAPI:
         disable_web_page_preview: bool = True
     ) -> Dict:
         """Mesajı düzenle"""
+        # Markdown'ı HTML'e çevir
+        if parse_mode == "HTML":
+            text = md_to_html(text)
+        
         data = {
             "chat_id": chat_id,
             "message_id": message_id,
