@@ -44,12 +44,12 @@ def register_user_handlers(bot):
         is_logged_in = user_data.get("is_logged_in", False) if user_data else False
         
         text = config.MESSAGES["welcome"]
-        text += f"\n\n👋 Merhaba <b>{user.first_name}</b>!"
+        text += f"\n\n👋 Merhaba **{user.first_name}**!"
         
         if is_logged_in:
             active_count = len(user_data.get("active_plugins", []))
-            text += f"\n✅ Userbot aktif: <code>{user_data.get('userbot_username', '?')}</code>"
-            text += f"\n🔌 Aktif plugin: <code>{active_count}</code>"
+            text += f"\n✅ Userbot aktif: `{user_data.get('userbot_username', '?')}`"
+            text += f"\n🔌 Aktif plugin: `{active_count}`"
         
         rows = []
         
@@ -160,7 +160,7 @@ def register_user_handlers(bot):
         await bot_api.edit_message_text(
             chat_id=event.sender_id,
             message_id=event.message_id,
-            text=config.MESSAGES["login_method"].replace("**", "<b>").replace("`", "<code>").replace("**", "</b>").replace("`", "</code>"),
+            text=config.MESSAGES["login_method"],
             reply_markup=btn.inline_keyboard(rows)
         )
         await event.answer()
@@ -665,13 +665,13 @@ def register_user_handlers(bot):
         user_data = await db.get_user(event.sender_id)
         is_logged_in = user_data.get("is_logged_in", False) if user_data else False
         
-        text = config.MESSAGES["welcome"].replace("**", "<b>").replace("**", "</b>").replace("`", "<code>").replace("`", "</code>")
-        text += f"\n\n👋 Merhaba <b>{user.first_name}</b>!"
+        text = config.MESSAGES["welcome"]
+        text += f"\n\n👋 Merhaba **{user.first_name}**!"
         
         if is_logged_in:
             active_count = len(user_data.get("active_plugins", []))
-            text += f"\n✅ Userbot: <code>{user_data.get('userbot_username', '?')}</code>"
-            text += f"\n🔌 Aktif: <code>{active_count}</code> plugin"
+            text += f"\n✅ Userbot: `{user_data.get('userbot_username', '?')}`"
+            text += f"\n🔌 Aktif: `{active_count}` plugin"
         
         rows = []
         
