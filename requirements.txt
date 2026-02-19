@@ -10,10 +10,15 @@ motor>=3.0.0
 
 # Ortam değişkenleri
 python-dotenv>=1.0.0
-psutil
 
 # Git işlemleri
 GitPython>=3.1.0
+
+# HTTP istekleri (Bot API için)
+aiohttp>=3.8.0
+
+# Sistem istatistikleri
+psutil>=5.9.0
 
 # Opsiyonel: Pyrogram desteği için
 # pyrogram>=2.0.0
