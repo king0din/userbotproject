@@ -257,7 +257,7 @@ def register_chess_handlers(bot):
         gid = event.pattern_match.group(1)
         game = CHESS_GAMES.get(gid)
         if not game:
-            await event.respond("❌ Oyun bulunamadı!")
+            await event.respond("❌ Oyun bulunamadı veya süresi doldu!")
             return
         
         uid = event.sender_id
@@ -283,6 +283,44 @@ def register_chess_handlers(bot):
             await update_user(game['wid'], game['wmsg'], gid, game, True)
         
         await event.respond("✅ Oyuna katıldın! Yukarıdaki mesajdan oyna.")
+    
+    @bot.on(events.CallbackQuery(pattern=rb"chess_accept_([a-f0-9]+)"))
+    async def chess_accept(event):
+        """Oyun davetini kabul et"""
+        gid = event.pattern_match.group(1).decode()
+        game = CHESS_GAMES.get(gid)
+        
+        if not game:
+            await event.answer("❌ Oyun bulunamadı!", alert=True)
+            return
+        
+        uid = event.sender_id
+        if uid != game['bid']:
+            await event.answer("❌ Bu oyun sana ait değil!", alert=True)
+            return
+        
+        if game['b_started']:
+            await event.answer("✅ Zaten katıldın!")
+            return
+        
+        game['b_started'] = True
+        
+        # Siyahın mesajını güncelle - tahta göster
+        txt = f"♟️ **Satranç**\n\nSen: ⚫ Siyah\nRakip: {game['wname']}\nSıra: Rakip\n\n{build_text(game['board'], True)}"
+        kb = create_buttons(gid, game['board'], flipped=True)
+        
+        await bot_api.edit_message_text(
+            chat_id=uid,
+            message_id=event.message_id,
+            text=txt,
+            reply_markup=kb
+        )
+        
+        # Beyazı güncelle
+        if game['wmsg']:
+            await update_user(game['wid'], game['wmsg'], gid, game, True)
+        
+        await event.answer("✅ Oyun başladı!")
     
     @bot.on(events.CallbackQuery(pattern=rb"ch_([a-f0-9]+)_(\d)_(\d)"))
     async def chess_click(event):
