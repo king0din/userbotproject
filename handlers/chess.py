@@ -43,7 +43,7 @@ PIECES_FALLBACK = {
 
 
 def get_piece_char(piece):
-    """Taş karakterini döndür (premium emoji için)"""
+    """Taş karakterini döndür"""
     if piece in PREMIUM_PIECES:
         return PREMIUM_PIECES[piece][0]
     return PIECES_FALLBACK.get(piece, '')
@@ -250,6 +250,34 @@ def build_board_text(board, selected=None, valid_moves=None, flipped=False, high
     return text
 
 
+async def edit_with_premium(event, text_prefix, board, buttons, 
+                            selected=None, valid_moves=None, 
+                            flipped=False, highlight=None):
+    """Premium emoji entity'leri ile mesaj düzenle"""
+    board_text, board_entities = build_board_text_with_entities(
+        board, selected, valid_moves, flipped, highlight
+    )
+    
+    full_text = text_prefix + board_text
+    
+    # Entity offset'lerini prefix uzunluğu kadar kaydır
+    prefix_len = utf16_len(text_prefix)
+    for entity in board_entities:
+        entity.offset += prefix_len
+    
+    try:
+        if board_entities:
+            await event.edit(full_text, buttons=buttons, formatting_entities=board_entities)
+        else:
+            await event.edit(full_text, buttons=buttons)
+    except Exception:
+        # Fallback - entity'siz dene
+        try:
+            await event.edit(full_text, buttons=buttons)
+        except:
+            pass
+
+
 def create_board_buttons(game_id, board, selected=None, valid_moves=None,
                          flipped=False, highlight=None, status='active'):
     valid_moves = valid_moves or []
@@ -342,6 +370,7 @@ def register_chess_handlers(bot):
         turn_name = game['white_name'] if game['turn'] == 'w' else game['black_name']
         turn_emoji = "⚪" if game['turn'] == 'w' else "⚫"
         
+        # Inline query'de entity desteklenmez - düz metin
         board_text = build_board_text(game['board'])
         
         text = (
@@ -410,7 +439,7 @@ def register_chess_handlers(bot):
                 board[row][col] = moved[0] + 'q'
             
             notation = (
-                f"{PIECES.get(moved, '')}"
+                f"{PIECES_FALLBACK.get(moved, '')}"
                 f"{pos_to_notation(sr, sc)}"
                 f"{'x' if captured else '-'}"
                 f"{pos_to_notation(row, col)}"
@@ -439,25 +468,18 @@ def register_chess_handlers(bot):
             turn_name = game['white_name'] if game['turn'] == 'w' else game['black_name']
             turn_emoji = "⚪" if game['turn'] == 'w' else "⚫"
             
-            board_text = build_board_text(board, flipped=new_flipped)
-            
-            text = f"♟️ **Satranç**\n\n"
-            text += f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
+            text_prefix = f"♟️ **Satranç**\n\n"
+            text_prefix += f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
             
             if game['status'] == 'active':
-                text += f"Sıra: {turn_emoji} **{turn_name}**"
+                text_prefix += f"Sıra: {turn_emoji} **{turn_name}**"
             
-            text += status_text
-            text += f"\n📝 {game['last_move']}\n\n"
-            text += board_text
+            text_prefix += status_text
+            text_prefix += f"\n📝 {game['last_move']}\n\n"
             
             buttons = create_board_buttons(game_id, board, flipped=new_flipped, status=game['status'])
             
-            try:
-                await event.edit(text, buttons=buttons)
-            except:
-                pass
-            
+            await edit_with_premium(event, text_prefix, board, buttons, flipped=new_flipped)
             await event.answer(f"✅ {notation}")
             return
         
@@ -471,24 +493,18 @@ def register_chess_handlers(bot):
                 turn_name = game['white_name'] if game['turn'] == 'w' else game['black_name']
                 turn_emoji = "⚪" if game['turn'] == 'w' else "⚫"
                 
-                board_text = build_board_text(board, selected=(row, col), valid_moves=moves, flipped=flipped)
-                
-                text = (
+                text_prefix = (
                     f"♟️ **Satranç**\n\n"
                     f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
                     f"Sıra: {turn_emoji} **{turn_name}**\n"
-                    f"Seçili: {PIECES.get(piece, '')} `{pos_to_notation(row, col)}`\n\n"
-                    f"{board_text}"
+                    f"Seçili: {PIECES_FALLBACK.get(piece, '')} `{pos_to_notation(row, col)}`\n\n"
                 )
                 
                 buttons = create_board_buttons(game_id, board, (row, col), moves, flipped)
                 
-                try:
-                    await event.edit(text, buttons=buttons)
-                except:
-                    pass
-                
-                await event.answer(f"{PIECES.get(piece, '')} seçildi")
+                await edit_with_premium(event, text_prefix, board, buttons, 
+                                        selected=(row, col), valid_moves=moves, flipped=flipped)
+                await event.answer(f"{PIECES_FALLBACK.get(piece, '')} seçildi")
             else:
                 await event.answer("❌ Bu taş hareket edemiyor!", alert=True)
         
@@ -503,22 +519,15 @@ def register_chess_handlers(bot):
                 turn_name = game['white_name'] if game['turn'] == 'w' else game['black_name']
                 turn_emoji = "⚪" if game['turn'] == 'w' else "⚫"
                 
-                board_text = build_board_text(board, flipped=flipped)
-                
-                text = (
+                text_prefix = (
                     f"♟️ **Satranç**\n\n"
                     f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
                     f"Sıra: {turn_emoji} **{turn_name}**\n\n"
-                    f"{board_text}"
                 )
                 
                 buttons = create_board_buttons(game_id, board, flipped=flipped)
                 
-                try:
-                    await event.edit(text, buttons=buttons)
-                except:
-                    pass
-                
+                await edit_with_premium(event, text_prefix, board, buttons, flipped=flipped)
                 await event.answer("İptal")
     
     @bot.on(events.CallbackQuery(pattern=rb"chesslast_([a-f0-9]+)"))
@@ -545,22 +554,15 @@ def register_chess_handlers(bot):
         
         highlight = [lm['from'], lm['to']]
         
-        board_text = build_board_text(temp, flipped=flipped, highlight=highlight)
-        
-        text = (
+        text_prefix = (
             f"♟️ **Satranç** ⏮️\n\n"
             f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
             f"📝 Son hamle: **{game['last_move']}**\n\n"
-            f"{board_text}"
         )
         
         buttons = create_board_buttons(game_id, temp, flipped=flipped, highlight=highlight, status=game['status'])
         
-        try:
-            await event.edit(text, buttons=buttons)
-        except:
-            pass
-        
+        await edit_with_premium(event, text_prefix, temp, buttons, flipped=flipped, highlight=highlight)
         await event.answer(f"⏮️ {game['last_move']}")
         
         await asyncio.sleep(2)
@@ -568,30 +570,25 @@ def register_chess_handlers(bot):
         turn_name = game['white_name'] if game['turn'] == 'w' else game['black_name']
         turn_emoji = "⚪" if game['turn'] == 'w' else "⚫"
         
-        board_text = build_board_text(board, flipped=flipped)
-        
-        text = f"♟️ **Satranç**\n\n"
-        text += f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
+        text_prefix = f"♟️ **Satranç**\n\n"
+        text_prefix += f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
         
         if game['status'] == 'active':
-            text += f"Sıra: {turn_emoji} **{turn_name}**"
+            text_prefix += f"Sıra: {turn_emoji} **{turn_name}**"
         elif game['status'] == 'checkmate':
             winner = game['white_name'] if game['turn'] == 'b' else game['black_name']
-            text += f"\n🏆 **ŞAH MAT!** {winner} kazandı!"
+            text_prefix += f"\n🏆 **ŞAH MAT!** {winner} kazandı!"
         elif game['status'] == 'stalemate':
-            text += "\n🤝 **PAT!** Berabere!"
+            text_prefix += "\n🤝 **PAT!** Berabere!"
         
         if game['last_move']:
-            text += f"\n📝 {game['last_move']}"
+            text_prefix += f"\n📝 {game['last_move']}"
         
-        text += f"\n\n{board_text}"
+        text_prefix += "\n\n"
         
         buttons = create_board_buttons(game_id, board, flipped=flipped, status=game['status'])
         
-        try:
-            await event.edit(text, buttons=buttons)
-        except:
-            pass
+        await edit_with_premium(event, text_prefix, board, buttons, flipped=flipped)
     
     @bot.on(events.CallbackQuery(pattern=rb"chessres_([a-f0-9]+)"))
     async def chess_resign_handler(event):
@@ -652,22 +649,15 @@ def register_chess_handlers(bot):
         game['status'] = 'active'
         game['moves'] = []
         
-        board_text = build_board_text(game['board'])
-        
-        text = (
+        text_prefix = (
             f"♟️ **Satranç** (Rövanş)\n\n"
             f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
             f"Sıra: ⚪ **{game['white_name']}**\n\n"
-            f"{board_text}"
         )
         
         buttons = create_board_buttons(game_id, game['board'])
         
-        try:
-            await event.edit(text, buttons=buttons)
-        except:
-            pass
-        
+        await edit_with_premium(event, text_prefix, game['board'], buttons)
         await event.answer("🔄 Rövanş başladı!", alert=True)
     
-    print("[CHESS] ✅ Satranç handler'ları yüklendi")
+    print("[CHESS] ✅ Satranç handler'ları yüklendi (Premium Emoji)")
