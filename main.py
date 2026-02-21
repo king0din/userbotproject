@@ -131,6 +131,11 @@ async def main():
     log("🔄 Handler'lar yükleniyor...")
     register_user_handlers(bot)
     register_admin_handlers(bot)
+    
+    # Chess handler'larını kaydet
+    from handlers.chess import register_chess_handlers
+    register_chess_handlers(bot)
+    
     log("✅ Handler'lar yüklendi")
     
     # Userbot manager callback'ini ayarla
