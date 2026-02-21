@@ -1,57 +1,53 @@
 # ============================================
 # KingTG UserBot Service - Chess Game Handler
 # ============================================
-# Bot tarafında çalışan satranç oyunu
+# Bot API ile premium emoji butonlar
 # Tüm kullanıcılar için çalışır
-# Premium Emoji destekli
 # ============================================
 
 from telethon import events, Button
-from telethon.tl.types import MessageEntityCustomEmoji
 import hashlib
 import time
 import asyncio
+import uuid
 
-# Global oyun deposu - TÜM KULLANICILAR İÇİN
+# Bot API import
+from utils.bot_api import bot_api, btn, ButtonBuilder
+
+# Global oyun deposu
 CHESS_GAMES = {}
 
 # ============================================
-# PREMIUM EMOJİ ID'LERİ
+# PREMIUM EMOJİ ID'LERİ - SATRANÇ TAŞLARI
 # ============================================
-PREMIUM_PIECES = {
+PIECE_EMOJI_IDS = {
     # Beyaz taşlar
-    'wk': ('♔', 5823405294604000011),  # Beyaz Şah
-    'wq': ('♕', 5823399745506253558),  # Beyaz Vezir
-    'wr': ('♖', 5823328878545870632),  # Beyaz Kale
-    'wb': ('♗', 5823419592550129283),  # Beyaz Fil
-    'wn': ('♘', 5823545752919481487),  # Beyaz At
-    'wp': ('♙', 5823625845469617580),  # Beyaz Piyon
+    'wk': 5823405294604000011,  # Beyaz Şah
+    'wq': 5823399745506253558,  # Beyaz Vezir
+    'wr': 5823328878545870632,  # Beyaz Kale
+    'wb': 5823419592550129283,  # Beyaz Fil
+    'wn': 5823545752919481487,  # Beyaz At
+    'wp': 5823625845469617580,  # Beyaz Piyon
     # Siyah taşlar
-    'bk': ('♚', 5823157556595399802),  # Siyah Şah
-    'bq': ('♛', 5823186789498896270),  # Siyah Vezir
-    'br': ('♜', 5821463801882484808),  # Siyah Kale
-    'bb': ('♝', 5823429286291315461),  # Siyah Fil
-    'bn': ('♞', 5823310096653885214),  # Siyah At
-    'bp': ('♟', 5821369273947266395),  # Siyah Piyon
+    'bk': 5823157556595399802,  # Siyah Şah
+    'bq': 5823186789498896270,  # Siyah Vezir
+    'br': 5821463801882484808,  # Siyah Kale
+    'bb': 5823429286291315461,  # Siyah Fil
+    'bn': 5823310096653885214,  # Siyah At
+    'bp': 5821369273947266395,  # Siyah Piyon
 }
 
-# Fallback (premium yoksa)
-PIECES_FALLBACK = {
-    'wr': '♖', 'wn': '♘', 'wb': '♗', 'wq': '♕', 'wk': '♔', 'wp': '♙',
-    'br': '♜', 'bn': '♞', 'bb': '♝', 'bq': '♛', 'bk': '♚', 'bp': '♟'
+# Buton metinleri (premium emoji olmadan görünecek fallback)
+PIECE_CHARS = {
+    'wk': '♔', 'wq': '♕', 'wr': '♖', 'wb': '♗', 'wn': '♘', 'wp': '♙',
+    'bk': '♚', 'bq': '♛', 'br': '♜', 'bb': '♝', 'bn': '♞', 'bp': '♟'
 }
 
-
-def get_piece_char(piece):
-    """Taş karakterini döndür"""
-    if piece in PREMIUM_PIECES:
-        return PREMIUM_PIECES[piece][0]
-    return PIECES_FALLBACK.get(piece, '')
-
-
-def utf16_len(s):
-    """UTF-16 uzunluğunu hesapla (entity offset için)"""
-    return len(s.encode('utf-16-le')) // 2
+# Özel buton emoji ID'leri
+EMOJI_SELECTED = 5368324170671202286    # Seçili (mavi daire)
+EMOJI_VALID_MOVE = 5367807941110988498  # Geçerli hamle (yeşil)
+EMOJI_CAPTURE = 5368493603028498956     # Yeme hamlesi (kırmızı)
+EMOJI_EMPTY = 5367617745632470555       # Boş kare
 
 
 def create_board():
@@ -192,130 +188,90 @@ def is_stalemate(board, color):
 
 
 # ============================================
-# TAHTA GÖRÜNTÜLEME
+# BOT API BUTONLARI
 # ============================================
 
-def build_board_text_with_entities(board, selected=None, valid_moves=None, flipped=False, highlight=None):
-    """Tahta metnini ve premium emoji entity'lerini oluştur"""
+def create_board_buttons_api(game_id, board, selected=None, valid_moves=None,
+                              flipped=False, highlight=None, status='active'):
+    """Bot API için premium emoji butonları oluştur"""
     valid_moves = valid_moves or []
     highlight = highlight or []
-    text = ""
-    entities = []
+    rows = []
     
-    rows = range(7, -1, -1) if flipped else range(8)
-    cols = range(7, -1, -1) if flipped else range(8)
+    row_range = range(7, -1, -1) if flipped else range(8)
+    col_range = range(7, -1, -1) if flipped else range(8)
     
-    for row in rows:
-        for col in cols:
+    for row in row_range:
+        row_buttons = []
+        for col in col_range:
             piece = board[row][col]
+            callback_data = f"chess_{game_id}_{row}_{col}"
             
-            if highlight and (row, col) in highlight:
-                symbol = get_piece_char(piece) if piece else "·"
-                if piece and piece in PREMIUM_PIECES:
-                    offset = utf16_len(text)
-                    length = utf16_len(symbol)
-                    entities.append(MessageEntityCustomEmoji(
-                        offset=offset, length=length, 
-                        document_id=PREMIUM_PIECES[piece][1]
-                    ))
-                text += symbol
-            elif (row, col) == selected:
-                text += "🔵"
+            if (row, col) == selected:
+                # Seçili kare - mavi
+                row_buttons.append(btn.callback(
+                    "🔵", callback_data,
+                    icon_custom_emoji_id=EMOJI_SELECTED
+                ))
             elif (row, col) in valid_moves:
                 if piece:
-                    text += "🔴"
-                else:
-                    text += "🟢"
-            elif piece:
-                symbol = get_piece_char(piece)
-                # Premium emoji entity ekle
-                if piece in PREMIUM_PIECES:
-                    offset = utf16_len(text)
-                    length = utf16_len(symbol)
-                    entities.append(MessageEntityCustomEmoji(
-                        offset=offset, length=length,
-                        document_id=PREMIUM_PIECES[piece][1]
+                    # Yeme hamlesi - kırmızı
+                    row_buttons.append(btn.callback(
+                        "🔴", callback_data,
+                        icon_custom_emoji_id=EMOJI_CAPTURE
                     ))
-                text += symbol
+                else:
+                    # Boş kareye hamle - yeşil
+                    row_buttons.append(btn.callback(
+                        "🟢", callback_data,
+                        icon_custom_emoji_id=EMOJI_VALID_MOVE
+                    ))
+            elif piece:
+                # Taş var - premium emoji
+                char = PIECE_CHARS.get(piece, '·')
+                emoji_id = PIECE_EMOJI_IDS.get(piece)
+                row_buttons.append(btn.callback(
+                    char, callback_data,
+                    icon_custom_emoji_id=emoji_id
+                ))
+            else:
+                # Boş kare
+                row_buttons.append(btn.callback(
+                    "·", callback_data,
+                    icon_custom_emoji_id=EMOJI_EMPTY
+                ))
+        
+        rows.append(row_buttons)
+    
+    # Kontrol butonları
+    if status == 'active':
+        rows.append([
+            btn.callback("⏮ Son", f"chesslast_{game_id}"),
+            btn.callback("🏳️ Pes", f"chessres_{game_id}"),
+            btn.callback("🔄 Yeni", f"chessnew_{game_id}"),
+        ])
+    else:
+        rows.append([btn.callback("🔄 Rövanş", f"chessnew_{game_id}")])
+    
+    return btn.inline_keyboard(rows)
+
+
+def build_board_text(board, flipped=False):
+    """Mesaj için tahta metni (premium emoji entity'ler ile)"""
+    text = ""
+    row_range = range(7, -1, -1) if flipped else range(8)
+    col_range = range(7, -1, -1) if flipped else range(8)
+    
+    for row in row_range:
+        for col in col_range:
+            piece = board[row][col]
+            if piece:
+                text += PIECE_CHARS.get(piece, '·')
             else:
                 text += "·"
         text += "\n"
     
-    return text, entities
-
-
-def build_board_text(board, selected=None, valid_moves=None, flipped=False, highlight=None):
-    """Sadece metin döndür (entity'siz - inline query için)"""
-    text, _ = build_board_text_with_entities(board, selected, valid_moves, flipped, highlight)
     return text
-
-
-async def edit_with_premium(event, text_prefix, board, buttons, 
-                            selected=None, valid_moves=None, 
-                            flipped=False, highlight=None):
-    """Premium emoji entity'leri ile mesaj düzenle"""
-    board_text, board_entities = build_board_text_with_entities(
-        board, selected, valid_moves, flipped, highlight
-    )
-    
-    full_text = text_prefix + board_text
-    
-    # Entity offset'lerini prefix uzunluğu kadar kaydır
-    prefix_len = utf16_len(text_prefix)
-    for entity in board_entities:
-        entity.offset += prefix_len
-    
-    try:
-        if board_entities:
-            await event.edit(full_text, buttons=buttons, formatting_entities=board_entities)
-        else:
-            await event.edit(full_text, buttons=buttons)
-    except Exception:
-        # Fallback - entity'siz dene
-        try:
-            await event.edit(full_text, buttons=buttons)
-        except:
-            pass
-
-
-def create_board_buttons(game_id, board, selected=None, valid_moves=None,
-                         flipped=False, highlight=None, status='active'):
-    valid_moves = valid_moves or []
-    highlight = highlight or []
-    buttons = []
-    
-    rows = range(7, -1, -1) if flipped else range(8)
-    cols = range(7, -1, -1) if flipped else range(8)
-    
-    for row in rows:
-        row_buttons = []
-        for col in cols:
-            piece = board[row][col]
-            
-            if highlight and (row, col) in highlight:
-                symbol = get_piece_char(piece) if piece else "·"
-            elif (row, col) == selected:
-                symbol = "🔵"
-            elif (row, col) in valid_moves:
-                symbol = "🔴" if piece else "🟢"
-            elif piece:
-                symbol = get_piece_char(piece)
-            else:
-                symbol = "·"
-            
-            row_buttons.append(Button.inline(symbol, f"chess_{game_id}_{row}_{col}"))
-        buttons.append(row_buttons)
-    
-    if status == 'active':
-        buttons.append([
-            Button.inline("⏮ Son", f"chesslast_{game_id}"),
-            Button.inline("🏳️ Pes", f"chessres_{game_id}"),
-            Button.inline("🔄 Yeni", f"chessnew_{game_id}"),
-        ])
-    else:
-        buttons.append([Button.inline("🔄 Rövanş", f"chessnew_{game_id}")])
-    
-    return buttons
 
 
 # ============================================
@@ -328,6 +284,8 @@ def create_chess_game(white_id, white_name, black_id, black_name, chat_id):
     
     CHESS_GAMES[game_id] = {
         'chat_id': chat_id,
+        'message_id': None,
+        'inline_message_id': None,
         'white_id': white_id,
         'black_id': black_id,
         'white_name': white_name,
@@ -346,7 +304,6 @@ def create_chess_game(white_id, white_name, black_id, black_name, chat_id):
 
 
 def get_chess_game(game_id):
-    """Oyunu getir"""
     return CHESS_GAMES.get(game_id)
 
 
@@ -359,7 +316,7 @@ def register_chess_handlers(bot):
     
     @bot.on(events.InlineQuery(pattern=r'^chess_([a-f0-9]+)$'))
     async def chess_inline_handler(event):
-        """Inline query handler - tüm kullanıcılar için çalışır"""
+        """Inline query handler"""
         game_id = event.pattern_match.group(1)
         game = CHESS_GAMES.get(game_id)
         
@@ -370,7 +327,6 @@ def register_chess_handlers(bot):
         turn_name = game['white_name'] if game['turn'] == 'w' else game['black_name']
         turn_emoji = "⚪" if game['turn'] == 'w' else "⚫"
         
-        # Inline query'de entity desteklenmez - düz metin
         board_text = build_board_text(game['board'])
         
         text = (
@@ -380,20 +336,37 @@ def register_chess_handlers(bot):
             f"{board_text}"
         )
         
-        buttons = create_board_buttons(game_id, game['board'])
+        # Telethon inline result (ilk gönderim için)
+        buttons_telethon = []
+        row_range = range(8)
+        col_range = range(8)
+        
+        for row in row_range:
+            row_buttons = []
+            for col in col_range:
+                piece = game['board'][row][col]
+                char = PIECE_CHARS.get(piece, '·') if piece else '·'
+                row_buttons.append(Button.inline(char, f"chess_{game_id}_{row}_{col}"))
+            buttons_telethon.append(row_buttons)
+        
+        buttons_telethon.append([
+            Button.inline("⏮ Son", f"chesslast_{game_id}"),
+            Button.inline("🏳️ Pes", f"chessres_{game_id}"),
+            Button.inline("🔄 Yeni", f"chessnew_{game_id}"),
+        ])
         
         result = event.builder.article(
             title="♟️ Satranç",
             description=f"⚪ {game['white_name']} vs ⚫ {game['black_name']}",
             text=text,
-            buttons=buttons
+            buttons=buttons_telethon
         )
         
         await event.answer([result], cache_time=0)
     
     @bot.on(events.CallbackQuery(pattern=rb"chess_([a-f0-9]+)_(\d)_(\d)"))
     async def chess_click_handler(event):
-        """Tahta tıklama handler"""
+        """Tahta tıklama - Bot API ile premium emoji güncelleme"""
         match = event.pattern_match
         game_id = match.group(1).decode()
         row, col = int(match.group(2)), int(match.group(3))
@@ -418,6 +391,14 @@ def register_chess_handlers(bot):
         selected = game['selected']
         valid_moves = game['valid_moves']
         
+        # Inline message ID'yi kaydet
+        if hasattr(event, 'inline_message_id') and event.inline_message_id:
+            game['inline_message_id'] = event.inline_message_id
+        
+        # Chat ve message ID'yi kaydet
+        chat_id = event.chat_id
+        message_id = event.message_id
+        
         # --- Hamle Yap ---
         if selected and (row, col) in valid_moves:
             sr, sc = selected
@@ -439,7 +420,7 @@ def register_chess_handlers(bot):
                 board[row][col] = moved[0] + 'q'
             
             notation = (
-                f"{PIECES_FALLBACK.get(moved, '')}"
+                f"{PIECE_CHARS.get(moved, '')}"
                 f"{pos_to_notation(sr, sc)}"
                 f"{'x' if captured else '-'}"
                 f"{pos_to_notation(row, col)}"
@@ -468,18 +449,35 @@ def register_chess_handlers(bot):
             turn_name = game['white_name'] if game['turn'] == 'w' else game['black_name']
             turn_emoji = "⚪" if game['turn'] == 'w' else "⚫"
             
-            text_prefix = f"♟️ **Satranç**\n\n"
-            text_prefix += f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
+            board_text = build_board_text(board, flipped=new_flipped)
+            
+            text = f"♟️ **Satranç**\n\n"
+            text += f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
             
             if game['status'] == 'active':
-                text_prefix += f"Sıra: {turn_emoji} **{turn_name}**"
+                text += f"Sıra: {turn_emoji} **{turn_name}**"
             
-            text_prefix += status_text
-            text_prefix += f"\n📝 {game['last_move']}\n\n"
+            text += status_text
+            text += f"\n📝 {game['last_move']}\n\n"
+            text += board_text
             
-            buttons = create_board_buttons(game_id, board, flipped=new_flipped, status=game['status'])
+            keyboard = create_board_buttons_api(game_id, board, flipped=new_flipped, status=game['status'])
             
-            await edit_with_premium(event, text_prefix, board, buttons, flipped=new_flipped)
+            # Bot API ile güncelle (premium emoji butonlar için)
+            if game.get('inline_message_id'):
+                await bot_api.edit_inline_message_text(
+                    inline_message_id=game['inline_message_id'],
+                    text=text,
+                    reply_markup=keyboard
+                )
+            else:
+                await bot_api.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=text,
+                    reply_markup=keyboard
+                )
+            
             await event.answer(f"✅ {notation}")
             return
         
@@ -493,18 +491,33 @@ def register_chess_handlers(bot):
                 turn_name = game['white_name'] if game['turn'] == 'w' else game['black_name']
                 turn_emoji = "⚪" if game['turn'] == 'w' else "⚫"
                 
-                text_prefix = (
+                board_text = build_board_text(board, flipped=flipped)
+                
+                text = (
                     f"♟️ **Satranç**\n\n"
                     f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
                     f"Sıra: {turn_emoji} **{turn_name}**\n"
-                    f"Seçili: {PIECES_FALLBACK.get(piece, '')} `{pos_to_notation(row, col)}`\n\n"
+                    f"Seçili: {PIECE_CHARS.get(piece, '')} `{pos_to_notation(row, col)}`\n\n"
+                    f"{board_text}"
                 )
                 
-                buttons = create_board_buttons(game_id, board, (row, col), moves, flipped)
+                keyboard = create_board_buttons_api(game_id, board, (row, col), moves, flipped)
                 
-                await edit_with_premium(event, text_prefix, board, buttons, 
-                                        selected=(row, col), valid_moves=moves, flipped=flipped)
-                await event.answer(f"{PIECES_FALLBACK.get(piece, '')} seçildi")
+                if game.get('inline_message_id'):
+                    await bot_api.edit_inline_message_text(
+                        inline_message_id=game['inline_message_id'],
+                        text=text,
+                        reply_markup=keyboard
+                    )
+                else:
+                    await bot_api.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=text,
+                        reply_markup=keyboard
+                    )
+                
+                await event.answer(f"{PIECE_CHARS.get(piece, '')} seçildi")
             else:
                 await event.answer("❌ Bu taş hareket edemiyor!", alert=True)
         
@@ -519,15 +532,31 @@ def register_chess_handlers(bot):
                 turn_name = game['white_name'] if game['turn'] == 'w' else game['black_name']
                 turn_emoji = "⚪" if game['turn'] == 'w' else "⚫"
                 
-                text_prefix = (
+                board_text = build_board_text(board, flipped=flipped)
+                
+                text = (
                     f"♟️ **Satranç**\n\n"
                     f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
                     f"Sıra: {turn_emoji} **{turn_name}**\n\n"
+                    f"{board_text}"
                 )
                 
-                buttons = create_board_buttons(game_id, board, flipped=flipped)
+                keyboard = create_board_buttons_api(game_id, board, flipped=flipped)
                 
-                await edit_with_premium(event, text_prefix, board, buttons, flipped=flipped)
+                if game.get('inline_message_id'):
+                    await bot_api.edit_inline_message_text(
+                        inline_message_id=game['inline_message_id'],
+                        text=text,
+                        reply_markup=keyboard
+                    )
+                else:
+                    await bot_api.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=text,
+                        reply_markup=keyboard
+                    )
+                
                 await event.answer("İptal")
     
     @bot.on(events.CallbackQuery(pattern=rb"chesslast_([a-f0-9]+)"))
@@ -544,6 +573,12 @@ def register_chess_handlers(bot):
             await event.answer("Henüz hamle yapılmadı!", alert=True)
             return
         
+        chat_id = event.chat_id
+        message_id = event.message_id
+        
+        if hasattr(event, 'inline_message_id') and event.inline_message_id:
+            game['inline_message_id'] = event.inline_message_id
+        
         lm = game['last_move_data']
         board = game['board']
         flipped = game['turn'] == 'b'
@@ -554,15 +589,31 @@ def register_chess_handlers(bot):
         
         highlight = [lm['from'], lm['to']]
         
-        text_prefix = (
+        board_text = build_board_text(temp, flipped=flipped)
+        
+        text = (
             f"♟️ **Satranç** ⏮️\n\n"
             f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
             f"📝 Son hamle: **{game['last_move']}**\n\n"
+            f"{board_text}"
         )
         
-        buttons = create_board_buttons(game_id, temp, flipped=flipped, highlight=highlight, status=game['status'])
+        keyboard = create_board_buttons_api(game_id, temp, flipped=flipped, highlight=highlight, status=game['status'])
         
-        await edit_with_premium(event, text_prefix, temp, buttons, flipped=flipped, highlight=highlight)
+        if game.get('inline_message_id'):
+            await bot_api.edit_inline_message_text(
+                inline_message_id=game['inline_message_id'],
+                text=text,
+                reply_markup=keyboard
+            )
+        else:
+            await bot_api.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=keyboard
+            )
+        
         await event.answer(f"⏮️ {game['last_move']}")
         
         await asyncio.sleep(2)
@@ -570,25 +621,39 @@ def register_chess_handlers(bot):
         turn_name = game['white_name'] if game['turn'] == 'w' else game['black_name']
         turn_emoji = "⚪" if game['turn'] == 'w' else "⚫"
         
-        text_prefix = f"♟️ **Satranç**\n\n"
-        text_prefix += f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
+        board_text = build_board_text(board, flipped=flipped)
+        
+        text = f"♟️ **Satranç**\n\n"
+        text += f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
         
         if game['status'] == 'active':
-            text_prefix += f"Sıra: {turn_emoji} **{turn_name}**"
+            text += f"Sıra: {turn_emoji} **{turn_name}**"
         elif game['status'] == 'checkmate':
             winner = game['white_name'] if game['turn'] == 'b' else game['black_name']
-            text_prefix += f"\n🏆 **ŞAH MAT!** {winner} kazandı!"
+            text += f"\n🏆 **ŞAH MAT!** {winner} kazandı!"
         elif game['status'] == 'stalemate':
-            text_prefix += "\n🤝 **PAT!** Berabere!"
+            text += "\n🤝 **PAT!** Berabere!"
         
         if game['last_move']:
-            text_prefix += f"\n📝 {game['last_move']}"
+            text += f"\n📝 {game['last_move']}"
         
-        text_prefix += "\n\n"
+        text += f"\n\n{board_text}"
         
-        buttons = create_board_buttons(game_id, board, flipped=flipped, status=game['status'])
+        keyboard = create_board_buttons_api(game_id, board, flipped=flipped, status=game['status'])
         
-        await edit_with_premium(event, text_prefix, board, buttons, flipped=flipped)
+        if game.get('inline_message_id'):
+            await bot_api.edit_inline_message_text(
+                inline_message_id=game['inline_message_id'],
+                text=text,
+                reply_markup=keyboard
+            )
+        else:
+            await bot_api.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=keyboard
+            )
     
     @bot.on(events.CallbackQuery(pattern=rb"chessres_([a-f0-9]+)"))
     async def chess_resign_handler(event):
@@ -605,19 +670,37 @@ def register_chess_handlers(bot):
             await event.answer("❌ Bu oyunda değilsin!", alert=True)
             return
         
+        chat_id = event.chat_id
+        message_id = event.message_id
+        
+        if hasattr(event, 'inline_message_id') and event.inline_message_id:
+            game['inline_message_id'] = event.inline_message_id
+        
         game['status'] = 'resigned'
         loser = game['white_name'] if user_id == game['white_id'] else game['black_name']
         winner = game['black_name'] if user_id == game['white_id'] else game['white_name']
         
-        try:
-            await event.edit(
-                f"♟️ **Satranç**\n\n"
-                f"🏳️ **{loser}** pes etti!\n"
-                f"🏆 **{winner}** kazandı!",
-                buttons=[[Button.inline("🔄 Rövanş", f"chessnew_{game_id}")]]
+        text = (
+            f"♟️ **Satranç**\n\n"
+            f"🏳️ **{loser}** pes etti!\n"
+            f"🏆 **{winner}** kazandı!"
+        )
+        
+        keyboard = btn.inline_keyboard([[btn.callback("🔄 Rövanş", f"chessnew_{game_id}")]])
+        
+        if game.get('inline_message_id'):
+            await bot_api.edit_inline_message_text(
+                inline_message_id=game['inline_message_id'],
+                text=text,
+                reply_markup=keyboard
             )
-        except:
-            pass
+        else:
+            await bot_api.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=keyboard
+            )
         
         await event.answer("🏳️ Pes ettin!", alert=True)
     
@@ -636,6 +719,12 @@ def register_chess_handlers(bot):
             await event.answer("❌ Bu oyunda değilsin!", alert=True)
             return
         
+        chat_id = event.chat_id
+        message_id = event.message_id
+        
+        if hasattr(event, 'inline_message_id') and event.inline_message_id:
+            game['inline_message_id'] = event.inline_message_id
+        
         # Tarafları değiştir
         game['white_id'], game['black_id'] = game['black_id'], game['white_id']
         game['white_name'], game['black_name'] = game['black_name'], game['white_name']
@@ -649,15 +738,31 @@ def register_chess_handlers(bot):
         game['status'] = 'active'
         game['moves'] = []
         
-        text_prefix = (
+        board_text = build_board_text(game['board'])
+        
+        text = (
             f"♟️ **Satranç** (Rövanş)\n\n"
             f"⚪ {game['white_name']} vs ⚫ {game['black_name']}\n"
             f"Sıra: ⚪ **{game['white_name']}**\n\n"
+            f"{board_text}"
         )
         
-        buttons = create_board_buttons(game_id, game['board'])
+        keyboard = create_board_buttons_api(game_id, game['board'])
         
-        await edit_with_premium(event, text_prefix, game['board'], buttons)
+        if game.get('inline_message_id'):
+            await bot_api.edit_inline_message_text(
+                inline_message_id=game['inline_message_id'],
+                text=text,
+                reply_markup=keyboard
+            )
+        else:
+            await bot_api.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=keyboard
+            )
+        
         await event.answer("🔄 Rövanş başladı!", alert=True)
     
-    print("[CHESS] ✅ Satranç handler'ları yüklendi (Premium Emoji)")
+    print("[CHESS] ✅ Satranç handler'ları yüklendi (Bot API + Premium Emoji)")
