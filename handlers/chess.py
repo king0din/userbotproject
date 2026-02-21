@@ -3,9 +3,11 @@
 # ============================================
 # Bot tarafında çalışan satranç oyunu
 # Tüm kullanıcılar için çalışır
+# Premium Emoji destekli
 # ============================================
 
 from telethon import events, Button
+from telethon.tl.types import MessageEntityCustomEmoji
 import hashlib
 import time
 import asyncio
@@ -14,16 +16,42 @@ import asyncio
 CHESS_GAMES = {}
 
 # ============================================
-# TAŞ KARAKTERLERİ
+# PREMIUM EMOJİ ID'LERİ
 # ============================================
-PIECES = {
+PREMIUM_PIECES = {
+    # Beyaz taşlar
+    'wk': ('♔', 5823405294604000011),  # Beyaz Şah
+    'wq': ('♕', 5823399745506253558),  # Beyaz Vezir
+    'wr': ('♖', 5823328878545870632),  # Beyaz Kale
+    'wb': ('♗', 5823419592550129283),  # Beyaz Fil
+    'wn': ('♘', 5823545752919481487),  # Beyaz At
+    'wp': ('♙', 5823625845469617580),  # Beyaz Piyon
+    # Siyah taşlar
+    'bk': ('♚', 5823157556595399802),  # Siyah Şah
+    'bq': ('♛', 5823186789498896270),  # Siyah Vezir
+    'br': ('♜', 5821463801882484808),  # Siyah Kale
+    'bb': ('♝', 5823429286291315461),  # Siyah Fil
+    'bn': ('♞', 5823310096653885214),  # Siyah At
+    'bp': ('♟', 5821369273947266395),  # Siyah Piyon
+}
+
+# Fallback (premium yoksa)
+PIECES_FALLBACK = {
     'wr': '♖', 'wn': '♘', 'wb': '♗', 'wq': '♕', 'wk': '♔', 'wp': '♙',
     'br': '♜', 'bn': '♞', 'bb': '♝', 'bq': '♛', 'bk': '♚', 'bp': '♟'
 }
 
 
 def get_piece_char(piece):
-    return PIECES.get(piece, '')
+    """Taş karakterini döndür (premium emoji için)"""
+    if piece in PREMIUM_PIECES:
+        return PREMIUM_PIECES[piece][0]
+    return PIECES_FALLBACK.get(piece, '')
+
+
+def utf16_len(s):
+    """UTF-16 uzunluğunu hesapla (entity offset için)"""
+    return len(s.encode('utf-16-le')) // 2
 
 
 def create_board():
@@ -167,10 +195,12 @@ def is_stalemate(board, color):
 # TAHTA GÖRÜNTÜLEME
 # ============================================
 
-def build_board_text(board, selected=None, valid_moves=None, flipped=False, highlight=None):
+def build_board_text_with_entities(board, selected=None, valid_moves=None, flipped=False, highlight=None):
+    """Tahta metnini ve premium emoji entity'lerini oluştur"""
     valid_moves = valid_moves or []
     highlight = highlight or []
     text = ""
+    entities = []
     
     rows = range(7, -1, -1) if flipped else range(8)
     cols = range(7, -1, -1) if flipped else range(8)
@@ -180,17 +210,43 @@ def build_board_text(board, selected=None, valid_moves=None, flipped=False, high
             piece = board[row][col]
             
             if highlight and (row, col) in highlight:
-                text += get_piece_char(piece) if piece else "·"
+                symbol = get_piece_char(piece) if piece else "·"
+                if piece and piece in PREMIUM_PIECES:
+                    offset = utf16_len(text)
+                    length = utf16_len(symbol)
+                    entities.append(MessageEntityCustomEmoji(
+                        offset=offset, length=length, 
+                        document_id=PREMIUM_PIECES[piece][1]
+                    ))
+                text += symbol
             elif (row, col) == selected:
                 text += "🔵"
             elif (row, col) in valid_moves:
-                text += "🟢" if not piece else "🔴"
+                if piece:
+                    text += "🔴"
+                else:
+                    text += "🟢"
             elif piece:
-                text += get_piece_char(piece)
+                symbol = get_piece_char(piece)
+                # Premium emoji entity ekle
+                if piece in PREMIUM_PIECES:
+                    offset = utf16_len(text)
+                    length = utf16_len(symbol)
+                    entities.append(MessageEntityCustomEmoji(
+                        offset=offset, length=length,
+                        document_id=PREMIUM_PIECES[piece][1]
+                    ))
+                text += symbol
             else:
                 text += "·"
         text += "\n"
     
+    return text, entities
+
+
+def build_board_text(board, selected=None, valid_moves=None, flipped=False, highlight=None):
+    """Sadece metin döndür (entity'siz - inline query için)"""
+    text, _ = build_board_text_with_entities(board, selected, valid_moves, flipped, highlight)
     return text
 
 
