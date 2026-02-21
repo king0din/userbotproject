@@ -116,6 +116,63 @@ class BotAPI:
             "chat_id": chat_id,
             "message_id": message_id
         })
+    
+    async def edit_message_reply_markup(
+        self,
+        chat_id: int = None,
+        message_id: int = None,
+        inline_message_id: str = None,
+        reply_markup: Dict = None
+    ) -> Dict:
+        """Sadece butonları düzenle"""
+        data = {}
+        if chat_id:
+            data["chat_id"] = chat_id
+        if message_id:
+            data["message_id"] = message_id
+        if inline_message_id:
+            data["inline_message_id"] = inline_message_id
+        if reply_markup:
+            data["reply_markup"] = reply_markup
+        
+        return await self._request("editMessageReplyMarkup", data)
+    
+    async def answer_inline_query(
+        self,
+        inline_query_id: str,
+        results: List[Dict],
+        cache_time: int = 0
+    ) -> Dict:
+        """Inline query yanıtla"""
+        return await self._request("answerInlineQuery", {
+            "inline_query_id": inline_query_id,
+            "results": results,
+            "cache_time": cache_time
+        })
+    
+    async def edit_inline_message_text(
+        self,
+        inline_message_id: str,
+        text: str,
+        parse_mode: str = "HTML",
+        reply_markup: Dict = None,
+        disable_web_page_preview: bool = True
+    ) -> Dict:
+        """Inline mesajı düzenle"""
+        if parse_mode == "HTML":
+            text = md_to_html(text)
+        
+        data = {
+            "inline_message_id": inline_message_id,
+            "text": text,
+            "parse_mode": parse_mode,
+            "disable_web_page_preview": disable_web_page_preview
+        }
+        
+        if reply_markup:
+            data["reply_markup"] = reply_markup
+        
+        return await self._request("editMessageText", data)
 
 
 class ButtonBuilder:
