@@ -61,16 +61,17 @@ def register_user_handlers(bot):
             rows.append([
                 btn.callback("🔌 Pluginler", "plugins_page_0", 
                             style=ButtonBuilder.STYLE_PRIMARY,
-                            icon_custom_emoji_id=5237699328843200584)
+                            icon_custom_emoji_id=5830184853236097449)
             ])
             rows.append([
                 btn.callback("📦 Pluginlerim", "my_plugins_0",
-                            style=ButtonBuilder.STYLE_PRIMARY)
+                            style=ButtonBuilder.STYLE_PRIMARY,
+                             icon_custom_emoji_id=5832711694165483426)
             ])
             rows.append([
                 btn.callback("🚪 Çıkış Yap", "logout_confirm",
                             style=ButtonBuilder.STYLE_DANGER,
-                            icon_custom_emoji_id=5237758235143248994)
+                            icon_custom_emoji_id=5832183129720233237)
             ])
         else:
             # Giriş yapılmamış
@@ -79,26 +80,27 @@ def register_user_handlers(bot):
                 rows.append([
                     btn.callback("⚡ Hızlı Giriş", "quick_login",
                                 style=ButtonBuilder.STYLE_SUCCESS,
-                                icon_custom_emoji_id=5233408828313192030)
+                                icon_custom_emoji_id=5832277107899636698)
                 ])
             rows.append([
                 btn.callback("🔐 Giriş Yap", "login_menu",
                             style=ButtonBuilder.STYLE_SUCCESS,
-                            icon_custom_emoji_id=5233408828313192030)
+                            icon_custom_emoji_id=5832668083067559171)
             ])
         
         # Yardım ve Komutlar
         rows.append([
             btn.callback("❓ Yardım", "help_main",
-                        icon_custom_emoji_id=5238091390690068061),
+                        icon_custom_emoji_id=5832628878606082111),
             btn.callback("📝 Komutlar", "commands",
-                        icon_custom_emoji_id=5962952497197748583)
+                        icon_custom_emoji_id=5832365506916523096)
         ])
         
         # Plugin Kanalı
         rows.append([
             btn.url(f"📢 {config.PLUGIN_CHANNEL}", f"https://t.me/{config.PLUGIN_CHANNEL}",
-                   style=ButtonBuilder.STYLE_PRIMARY)
+                   style=ButtonBuilder.STYLE_PRIMARY,
+                    icon_custom_emoji_id=5832328832190784454)
         ])
         
         # Admin butonu
@@ -106,7 +108,7 @@ def register_user_handlers(bot):
             rows.append([
                 btn.callback("⚙️ Yönetim Paneli", "settings_menu",
                             style=ButtonBuilder.STYLE_DANGER,
-                            icon_custom_emoji_id=5237830824684428925)
+                            icon_custom_emoji_id=5832502928690127854)
             ])
         
         # Bot API ile gönder
@@ -152,13 +154,16 @@ def register_user_handlers(bot):
         rows = [
             [btn.callback("📱 Telefon Numarası", "login_phone",
                          style=ButtonBuilder.STYLE_SUCCESS,
-                         icon_custom_emoji_id=5233408828313192030)],
+                         icon_custom_emoji_id=5832225314889015431)],
             [btn.callback("🔑 Telethon Session", "login_telethon",
-                         style=ButtonBuilder.STYLE_PRIMARY)],
+                         style=ButtonBuilder.STYLE_PRIMARY,
+                         icon_custom_emoji_id=5832345561088400364)],
             [btn.callback("🔑 Pyrogram Session", "login_pyrogram",
-                         style=ButtonBuilder.STYLE_PRIMARY)],
+                         style=ButtonBuilder.STYLE_PRIMARY,
+                         icon_custom_emoji_id=5832345561088400364)],
             [btn.callback("◀️ Geri", "main_menu",
-                         icon_custom_emoji_id=5237707207794498594)]
+                          style=ButtonBuilder.STYLE_DANGER,
+                          icon_custom_emoji_id=5832646161554480591)]
         ]
         
         await bot_api.edit_message_text(
