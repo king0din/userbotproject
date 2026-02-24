@@ -671,13 +671,24 @@ class PluginManager:
         }
     
     async def restore_user_plugins(self, user_id: int, client: TelegramClient) -> int:
-        """Kullanıcının pluginlerini geri yükle - PARALEL"""
+        """Kullanıcının pluginlerini geri yükle - PARALEL + Varsayılan aktif pluginler"""
         user = await db.get_user(user_id)
         if not user:
             return 0
         
         active_plugins = user.get("active_plugins", [])
-        if not active_plugins:
+        
+        # Varsayılan aktif pluginleri ekle
+        all_plugins = await db.get_all_plugins()
+        default_active_plugins = [
+            p["name"] for p in all_plugins 
+            if p.get("default_active", False) and not p.get("is_disabled", False)
+        ]
+        
+        # Varsayılan aktif pluginleri kullanıcının listesine ekle (yoksa)
+        plugins_to_load = list(set(active_plugins + default_active_plugins))
+        
+        if not plugins_to_load:
             return 0
         
         async def load_single_plugin(plugin_name):
@@ -691,11 +702,33 @@ class PluginManager:
             return None
         
         # Tüm pluginleri paralel yükle
-        tasks = [load_single_plugin(p) for p in active_plugins]
+        tasks = [load_single_plugin(p) for p in plugins_to_load]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         restored = sum(1 for r in results if r is not None and not isinstance(r, Exception))
         return restored
+    
+    async def activate_default_plugins(self, user_id: int, client: TelegramClient) -> int:
+        """Yeni kullanıcı için varsayılan aktif pluginleri aktif et"""
+        all_plugins = await db.get_all_plugins()
+        default_plugins = [
+            p["name"] for p in all_plugins 
+            if p.get("default_active", False) and not p.get("is_disabled", False)
+        ]
+        
+        if not default_plugins:
+            return 0
+        
+        activated = 0
+        for plugin_name in default_plugins:
+            try:
+                success, _ = await self.activate_plugin(user_id, plugin_name, client)
+                if success:
+                    activated += 1
+            except:
+                pass
+        
+        return activated
     
     async def get_all_plugins_formatted(self, user_id: int = None) -> str:
         """Tüm pluginleri formatla"""
