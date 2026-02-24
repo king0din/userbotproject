@@ -1717,7 +1717,33 @@ def register_admin_handlers(bot):
         default_active = default == "on"
         await db.update_plugin(plugin_name, {"default_active": default_active})
         
-        await event.answer(f"✅ Varsayılan {'aktif' if default_active else 'pasif'} yapıldı!", alert=True)
+        if default_active:
+            # Tüm giriş yapmış kullanıcılarda bu plugin'i aktif et
+            users = await db.get_logged_in_users()
+            activated_count = 0
+            
+            for user in users:
+                user_id = user.get("user_id")
+                active_plugins = user.get("active_plugins", [])
+                
+                # Zaten aktif değilse ekle
+                if plugin_name not in active_plugins:
+                    active_plugins.append(plugin_name)
+                    await db.update_user(user_id, {"active_plugins": active_plugins})
+                    
+                    # Eğer client aktifse plugin'i yükle
+                    client = smart_session_manager.get_client(user_id)
+                    if client:
+                        try:
+                            await plugin_manager.activate_plugin(user_id, plugin_name, client)
+                            activated_count += 1
+                        except:
+                            pass
+            
+            await event.answer(f"✅ Varsayılan aktif! {activated_count} kullanıcıda yüklendi.", alert=True)
+        else:
+            await event.answer(f"✅ Varsayılan pasif yapıldı!", alert=True)
+        
         await show_plugin_settings(event, plugin_name)
     
     @bot.on(events.CallbackQuery(pattern=rb"psetallow_([a-zA-Z0-9_]+)$"))
