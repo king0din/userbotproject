@@ -1673,7 +1673,45 @@ def register_admin_handlers(bot):
         is_public = access == "public"
         await db.update_plugin(plugin_name, {"is_public": is_public})
         
-        await event.answer(f"✅ {'Genel' if is_public else 'Özel'} yapıldı!", alert=True)
+        deactivated_count = 0
+        
+        # Özel yapıldığında izinsiz kullanıcılarda deaktif et
+        if not is_public:
+            plugin = await db.get_plugin(plugin_name)
+            allowed_users = plugin.get("allowed_users", []) if plugin else []
+            
+            users = await db.get_all_users()
+            for user in users:
+                user_id = user.get("user_id")
+                
+                # İzinli kullanıcıları atla
+                if user_id in allowed_users:
+                    continue
+                
+                # Owner ve sudo'ları atla
+                if user_id == config.OWNER_ID or await db.is_sudo(user_id):
+                    continue
+                
+                active = user.get("active_plugins", [])
+                if plugin_name in active:
+                    active.remove(plugin_name)
+                    await db.update_user(user_id, {"active_plugins": active})
+                    
+                    # Handler'ları kaldır
+                    try:
+                        success, _ = await plugin_manager.deactivate_plugin(user_id, plugin_name)
+                        if success:
+                            deactivated_count += 1
+                    except:
+                        pass
+            
+            if deactivated_count > 0:
+                await event.answer(f"✅ Özel yapıldı! {deactivated_count} kullanıcıda kaldırıldı.", alert=True)
+            else:
+                await event.answer(f"✅ Özel yapıldı!", alert=True)
+        else:
+            await event.answer(f"✅ Genel yapıldı!", alert=True)
+        
         await show_plugin_settings(event, plugin_name)
     
     @bot.on(events.CallbackQuery(pattern=rb"pset_status_([a-zA-Z0-9_]+)_(enable|disable)"))
