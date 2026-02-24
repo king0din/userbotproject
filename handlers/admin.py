@@ -1386,3 +1386,522 @@ def register_admin_handlers(bot):
         if user_id in post_states:
             del post_states[user_id]
         await event.edit("❌ Post oluşturma iptal edildi.")
+    
+    # ==========================================
+    # PLUGİN AYARLARI (/psettings)
+    # ==========================================
+    
+    PSETTINGS_PER_PAGE = 6
+    
+    @bot.on(events.NewMessage(pattern=r'^/psettings$'))
+    async def psettings_command(event):
+        """Plugin ayarları ana menüsü"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            return
+        
+        await show_psettings_menu(event, edit=False)
+    
+    async def show_psettings_menu(event, edit=True, page=0):
+        """Plugin ayarları menüsünü göster"""
+        plugins = await db.get_all_plugins()
+        
+        if not plugins:
+            text = "📭 Henüz plugin eklenmemiş."
+            if edit:
+                await event.edit(text)
+            else:
+                await event.respond(text)
+            return
+        
+        total = len(plugins)
+        total_pages = (total + PSETTINGS_PER_PAGE - 1) // PSETTINGS_PER_PAGE
+        page = max(0, min(page, total_pages - 1))
+        
+        start = page * PSETTINGS_PER_PAGE
+        end = start + PSETTINGS_PER_PAGE
+        page_plugins = plugins[start:end]
+        
+        text = "⚙️ **Plugin Ayarları**\n\n"
+        text += "Ayarlamak istediğiniz plugin'i seçin:\n\n"
+        
+        # İstatistikler
+        public_count = sum(1 for p in plugins if p.get("is_public", True))
+        private_count = total - public_count
+        disabled_count = sum(1 for p in plugins if p.get("is_disabled", False))
+        default_count = sum(1 for p in plugins if p.get("default_active", False))
+        
+        text += f"📊 **İstatistikler:**\n"
+        text += f"├ Toplam: `{total}` plugin\n"
+        text += f"├ 🌐 Genel: `{public_count}`\n"
+        text += f"├ 🔒 Özel: `{private_count}`\n"
+        text += f"├ ⛔ Devre Dışı: `{disabled_count}`\n"
+        text += f"└ ⭐ Varsayılan Aktif: `{default_count}`\n"
+        
+        rows = []
+        
+        # Plugin listesi
+        for p in page_plugins:
+            name = p.get("name", "?")
+            status_icons = ""
+            
+            if p.get("is_disabled"):
+                status_icons += "⛔"
+            elif p.get("is_public", True):
+                status_icons += "🌐"
+            else:
+                status_icons += "🔒"
+            
+            if p.get("default_active"):
+                status_icons += "⭐"
+            
+            rows.append([
+                btn.callback(f"{status_icons} {name}", f"pset_{name}")
+            ])
+        
+        # Sayfalama
+        nav_row = []
+        if page > 0:
+            nav_row.append(btn.callback("◀️ Önceki", f"psettings_page_{page-1}"))
+        nav_row.append(btn.callback(f"📄 {page+1}/{total_pages}", "noop"))
+        if page < total_pages - 1:
+            nav_row.append(btn.callback("Sonraki ▶️", f"psettings_page_{page+1}"))
+        
+        if nav_row:
+            rows.append(nav_row)
+        
+        # Toplu işlemler
+        rows.append([
+            btn.callback("🌐 Hepsini Genel Yap", "pset_bulk_public"),
+            btn.callback("🔒 Hepsini Özel Yap", "pset_bulk_private")
+        ])
+        
+        rows.append([
+            btn.callback("🔙 Admin Panel", "admin_panel")
+        ])
+        
+        keyboard = btn.inline_keyboard(rows)
+        
+        if edit:
+            await event.edit(text, buttons=keyboard)
+        else:
+            await event.respond(text, buttons=keyboard)
+    
+    @bot.on(events.CallbackQuery(pattern=rb"psettings_page_(\d+)"))
+    async def psettings_page_handler(event):
+        """Plugin ayarları sayfalama"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer("❌ Yetkiniz yok!", alert=True)
+            return
+        
+        page = int(event.pattern_match.group(1).decode())
+        await show_psettings_menu(event, edit=True, page=page)
+    
+    @bot.on(events.CallbackQuery(pattern=rb"pset_bulk_(public|private)"))
+    async def pset_bulk_handler(event):
+        """Toplu plugin ayarı"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer("❌ Yetkiniz yok!", alert=True)
+            return
+        
+        action = event.pattern_match.group(1).decode()
+        is_public = action == "public"
+        
+        plugins = await db.get_all_plugins()
+        for p in plugins:
+            await db.update_plugin(p["name"], {"is_public": is_public})
+        
+        await event.answer(f"✅ Tüm plugin'ler {'genel' if is_public else 'özel'} yapıldı!", alert=True)
+        await show_psettings_menu(event, edit=True)
+    
+    @bot.on(events.CallbackQuery(pattern=rb"pset_([a-zA-Z0-9_]+)$"))
+    async def pset_plugin_handler(event):
+        """Tek plugin ayar menüsü"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer("❌ Yetkiniz yok!", alert=True)
+            return
+        
+        plugin_name = event.pattern_match.group(1).decode()
+        
+        # bulk işlemlerini atla
+        if plugin_name in ["bulk"]:
+            return
+        
+        plugin = await db.get_plugin(plugin_name)
+        
+        if not plugin:
+            await event.answer("❌ Plugin bulunamadı!", alert=True)
+            return
+        
+        await show_plugin_settings(event, plugin_name)
+    
+    async def show_plugin_settings(event, plugin_name):
+        """Tek plugin'in ayar menüsünü göster"""
+        plugin = await db.get_plugin(plugin_name)
+        
+        if not plugin:
+            await event.edit("❌ Plugin bulunamadı.")
+            return
+        
+        # Durum bilgileri
+        is_public = plugin.get("is_public", True)
+        is_disabled = plugin.get("is_disabled", False)
+        default_active = plugin.get("default_active", False)
+        allowed_users = plugin.get("allowed_users", [])
+        restricted_users = plugin.get("restricted_users", [])
+        
+        text = f"⚙️ **{plugin_name}** Ayarları\n\n"
+        text += f"📝 {plugin.get('description', 'Açıklama yok')[:100]}\n\n"
+        
+        text += "**Mevcut Durum:**\n"
+        text += f"├ Erişim: {'🌐 Genel' if is_public else '🔒 Özel'}\n"
+        text += f"├ Durum: {'⛔ Devre Dışı' if is_disabled else '✅ Aktif'}\n"
+        text += f"├ Varsayılan: {'⭐ Aktif' if default_active else '◽ Pasif'}\n"
+        text += f"├ İzinli Kullanıcı: `{len(allowed_users)}`\n"
+        text += f"└ Engelli Kullanıcı: `{len(restricted_users)}`\n"
+        
+        # Komutlar
+        commands = plugin.get("commands", [])
+        if commands:
+            cmd_text = ", ".join([f"`.{c}`" for c in commands[:5]])
+            if len(commands) > 5:
+                cmd_text += f" +{len(commands)-5}"
+            text += f"\n🔧 Komutlar: {cmd_text}\n"
+        
+        rows = []
+        
+        # Erişim ayarı
+        if is_public:
+            rows.append([
+                btn.callback("🔒 Özel Yap", f"pset_access_{plugin_name}_private",
+                            style=ButtonBuilder.STYLE_SECONDARY)
+            ])
+        else:
+            rows.append([
+                btn.callback("🌐 Genel Yap", f"pset_access_{plugin_name}_public",
+                            style=ButtonBuilder.STYLE_PRIMARY)
+            ])
+        
+        # Devre dışı/aktif
+        if is_disabled:
+            rows.append([
+                btn.callback("✅ Aktif Et", f"pset_status_{plugin_name}_enable",
+                            style=ButtonBuilder.STYLE_SUCCESS)
+            ])
+        else:
+            rows.append([
+                btn.callback("⛔ Devre Dışı Bırak", f"pset_status_{plugin_name}_disable",
+                            style=ButtonBuilder.STYLE_DANGER)
+            ])
+        
+        # Varsayılan aktif
+        if default_active:
+            rows.append([
+                btn.callback("◽ Varsayılan Pasif", f"pset_default_{plugin_name}_off")
+            ])
+        else:
+            rows.append([
+                btn.callback("⭐ Varsayılan Aktif", f"pset_default_{plugin_name}_on")
+            ])
+        
+        # Kullanıcı yönetimi
+        rows.append([
+            btn.callback("👤 İzin Ver", f"pset_allow_{plugin_name}"),
+            btn.callback("🚫 Engelle", f"pset_restrict_{plugin_name}")
+        ])
+        
+        rows.append([
+            btn.callback("📋 İzinli Liste", f"pset_allowlist_{plugin_name}"),
+            btn.callback("📋 Engelli Liste", f"pset_restrictlist_{plugin_name}")
+        ])
+        
+        # Aktif kullanıcıları göster
+        rows.append([
+            btn.callback("👥 Kullananlar", f"pset_users_{plugin_name}")
+        ])
+        
+        # Geri
+        rows.append([
+            btn.callback("🔙 Geri", "psettings_page_0")
+        ])
+        
+        keyboard = btn.inline_keyboard(rows)
+        await event.edit(text, buttons=keyboard)
+    
+    @bot.on(events.CallbackQuery(pattern=rb"pset_access_([a-zA-Z0-9_]+)_(public|private)"))
+    async def pset_access_handler(event):
+        """Plugin erişim ayarı"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer("❌ Yetkiniz yok!", alert=True)
+            return
+        
+        match = event.pattern_match
+        plugin_name = match.group(1).decode()
+        access = match.group(2).decode()
+        
+        is_public = access == "public"
+        await db.update_plugin(plugin_name, {"is_public": is_public})
+        
+        await event.answer(f"✅ {'Genel' if is_public else 'Özel'} yapıldı!", alert=True)
+        await show_plugin_settings(event, plugin_name)
+    
+    @bot.on(events.CallbackQuery(pattern=rb"pset_status_([a-zA-Z0-9_]+)_(enable|disable)"))
+    async def pset_status_handler(event):
+        """Plugin aktif/devre dışı"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer("❌ Yetkiniz yok!", alert=True)
+            return
+        
+        match = event.pattern_match
+        plugin_name = match.group(1).decode()
+        status = match.group(2).decode()
+        
+        is_disabled = status == "disable"
+        await db.update_plugin(plugin_name, {"is_disabled": is_disabled})
+        
+        if is_disabled:
+            # Tüm kullanıcılarda deaktif et
+            users = await db.get_all_users()
+            for user in users:
+                active = user.get("active_plugins", [])
+                if plugin_name in active:
+                    active.remove(plugin_name)
+                    await db.update_user(user["user_id"], {"active_plugins": active})
+                    await plugin_manager.deactivate_plugin(user["user_id"], plugin_name)
+        
+        await event.answer(f"✅ {'Devre dışı bırakıldı' if is_disabled else 'Aktif edildi'}!", alert=True)
+        await show_plugin_settings(event, plugin_name)
+    
+    @bot.on(events.CallbackQuery(pattern=rb"pset_default_([a-zA-Z0-9_]+)_(on|off)"))
+    async def pset_default_handler(event):
+        """Plugin varsayılan aktif ayarı"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer("❌ Yetkiniz yok!", alert=True)
+            return
+        
+        match = event.pattern_match
+        plugin_name = match.group(1).decode()
+        default = match.group(2).decode()
+        
+        default_active = default == "on"
+        await db.update_plugin(plugin_name, {"default_active": default_active})
+        
+        await event.answer(f"✅ Varsayılan {'aktif' if default_active else 'pasif'} yapıldı!", alert=True)
+        await show_plugin_settings(event, plugin_name)
+    
+    @bot.on(events.CallbackQuery(pattern=rb"pset_allow_([a-zA-Z0-9_]+)$"))
+    async def pset_allow_prompt(event):
+        """Kullanıcıya izin ver - ID iste"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer("❌ Yetkiniz yok!", alert=True)
+            return
+        
+        plugin_name = event.pattern_match.group(1).decode()
+        
+        text = f"👤 **{plugin_name}** için İzin Ver\n\n"
+        text += "Kullanıcı ID'sini yazın:\n"
+        text += "Örnek: `/pallow tag 123456789`"
+        
+        await event.edit(text, buttons=[
+            [btn.callback("🔙 Geri", f"pset_{plugin_name}")]
+        ])
+    
+    @bot.on(events.NewMessage(pattern=r'^/pallow\s+(\S+)\s+(\d+)$'))
+    async def pallow_command(event):
+        """Plugin'e kullanıcı izni ver"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            return
+        
+        plugin_name = event.pattern_match.group(1)
+        user_id = int(event.pattern_match.group(2))
+        
+        plugin = await db.get_plugin(plugin_name)
+        if not plugin:
+            await event.respond(f"❌ `{plugin_name}` bulunamadı.")
+            return
+        
+        await db.add_plugin_user_access(plugin_name, user_id)
+        await event.respond(f"✅ `{user_id}` kullanıcısına `{plugin_name}` izni verildi.")
+    
+    @bot.on(events.CallbackQuery(pattern=rb"pset_restrict_([a-zA-Z0-9_]+)$"))
+    async def pset_restrict_prompt(event):
+        """Kullanıcıyı engelle - ID iste"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer("❌ Yetkiniz yok!", alert=True)
+            return
+        
+        plugin_name = event.pattern_match.group(1).decode()
+        
+        text = f"🚫 **{plugin_name}** için Engelle\n\n"
+        text += "Kullanıcı ID'sini yazın:\n"
+        text += "Örnek: `/prestrict tag 123456789`"
+        
+        await event.edit(text, buttons=[
+            [btn.callback("🔙 Geri", f"pset_{plugin_name}")]
+        ])
+    
+    @bot.on(events.NewMessage(pattern=r'^/prestrict\s+(\S+)\s+(\d+)$'))
+    async def prestrict_command(event):
+        """Plugin'den kullanıcıyı engelle"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            return
+        
+        plugin_name = event.pattern_match.group(1)
+        user_id = int(event.pattern_match.group(2))
+        
+        plugin = await db.get_plugin(plugin_name)
+        if not plugin:
+            await event.respond(f"❌ `{plugin_name}` bulunamadı.")
+            return
+        
+        await db.restrict_plugin_user(plugin_name, user_id)
+        
+        # Eğer kullanıcının aktif plugin'i varsa kaldır
+        user = await db.get_user(user_id)
+        if user:
+            active = user.get("active_plugins", [])
+            if plugin_name in active:
+                active.remove(plugin_name)
+                await db.update_user(user_id, {"active_plugins": active})
+                await plugin_manager.deactivate_plugin(user_id, plugin_name)
+        
+        await event.respond(f"✅ `{user_id}` kullanıcısı `{plugin_name}` için engellendi.")
+    
+    @bot.on(events.CallbackQuery(pattern=rb"pset_allowlist_([a-zA-Z0-9_]+)"))
+    async def pset_allowlist_handler(event):
+        """İzinli kullanıcıları listele"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer("❌ Yetkiniz yok!", alert=True)
+            return
+        
+        plugin_name = event.pattern_match.group(1).decode()
+        plugin = await db.get_plugin(plugin_name)
+        
+        if not plugin:
+            await event.answer("❌ Plugin bulunamadı!", alert=True)
+            return
+        
+        allowed = plugin.get("allowed_users", [])
+        
+        text = f"👤 **{plugin_name}** İzinli Kullanıcılar\n\n"
+        
+        if not allowed:
+            text += "📭 Henüz izinli kullanıcı yok.\n"
+            text += "(Özel plugin'ler için izin gerekir)"
+        else:
+            for uid in allowed[:20]:
+                user = await db.get_user(uid)
+                if user:
+                    name = user.get("username") or user.get("first_name") or str(uid)
+                    text += f"• `{uid}` - {name}\n"
+                else:
+                    text += f"• `{uid}`\n"
+            
+            if len(allowed) > 20:
+                text += f"\n... ve {len(allowed)-20} kişi daha"
+        
+        text += f"\n\n🗑️ İzni kaldır: `/premove {plugin_name} <id>`"
+        
+        await event.edit(text, buttons=[
+            [btn.callback("🔙 Geri", f"pset_{plugin_name}")]
+        ])
+    
+    @bot.on(events.CallbackQuery(pattern=rb"pset_restrictlist_([a-zA-Z0-9_]+)"))
+    async def pset_restrictlist_handler(event):
+        """Engelli kullanıcıları listele"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer("❌ Yetkiniz yok!", alert=True)
+            return
+        
+        plugin_name = event.pattern_match.group(1).decode()
+        plugin = await db.get_plugin(plugin_name)
+        
+        if not plugin:
+            await event.answer("❌ Plugin bulunamadı!", alert=True)
+            return
+        
+        restricted = plugin.get("restricted_users", [])
+        
+        text = f"🚫 **{plugin_name}** Engelli Kullanıcılar\n\n"
+        
+        if not restricted:
+            text += "📭 Henüz engelli kullanıcı yok."
+        else:
+            for uid in restricted[:20]:
+                user = await db.get_user(uid)
+                if user:
+                    name = user.get("username") or user.get("first_name") or str(uid)
+                    text += f"• `{uid}` - {name}\n"
+                else:
+                    text += f"• `{uid}`\n"
+            
+            if len(restricted) > 20:
+                text += f"\n... ve {len(restricted)-20} kişi daha"
+        
+        text += f"\n\n✅ Engeli kaldır: `/punrestrict {plugin_name} <id>`"
+        
+        await event.edit(text, buttons=[
+            [btn.callback("🔙 Geri", f"pset_{plugin_name}")]
+        ])
+    
+    @bot.on(events.NewMessage(pattern=r'^/premove\s+(\S+)\s+(\d+)$'))
+    async def premove_command(event):
+        """Plugin iznini kaldır"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            return
+        
+        plugin_name = event.pattern_match.group(1)
+        user_id = int(event.pattern_match.group(2))
+        
+        await db.remove_plugin_user_access(plugin_name, user_id)
+        await event.respond(f"✅ `{user_id}` kullanıcısının `{plugin_name}` izni kaldırıldı.")
+    
+    @bot.on(events.NewMessage(pattern=r'^/punrestrict\s+(\S+)\s+(\d+)$'))
+    async def punrestrict_command(event):
+        """Plugin engelini kaldır"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            return
+        
+        plugin_name = event.pattern_match.group(1)
+        user_id = int(event.pattern_match.group(2))
+        
+        await db.unrestrict_plugin_user(plugin_name, user_id)
+        await event.respond(f"✅ `{user_id}` kullanıcısının `{plugin_name}` engeli kaldırıldı.")
+    
+    @bot.on(events.CallbackQuery(pattern=rb"pset_users_([a-zA-Z0-9_]+)"))
+    async def pset_users_handler(event):
+        """Plugin'i kullanan kullanıcıları listele"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer("❌ Yetkiniz yok!", alert=True)
+            return
+        
+        plugin_name = event.pattern_match.group(1).decode()
+        
+        users = await db.get_all_users()
+        active_users = []
+        
+        for user in users:
+            if plugin_name in user.get("active_plugins", []):
+                active_users.append(user)
+        
+        text = f"👥 **{plugin_name}** Kullananlar\n\n"
+        
+        if not active_users:
+            text += "📭 Bu plugin'i kullanan yok."
+        else:
+            text += f"Toplam: `{len(active_users)}` kullanıcı\n\n"
+            for user in active_users[:20]:
+                uid = user.get("user_id")
+                name = user.get("username") or user.get("first_name") or str(uid)
+                text += f"• `{uid}` - {name}\n"
+            
+            if len(active_users) > 20:
+                text += f"\n... ve {len(active_users)-20} kişi daha"
+        
+        await event.edit(text, buttons=[
+            [btn.callback("🔙 Geri", f"pset_{plugin_name}")]
+        ])
+    
+    @bot.on(events.CallbackQuery(data=b"noop"))
+    async def noop_handler(event):
+        """Boş callback - sayfa numarası için"""
+        await event.answer()
