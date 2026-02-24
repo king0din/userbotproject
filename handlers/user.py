@@ -92,6 +92,7 @@ def register_user_handlers(bot):
             btn.callback("❓ Yardım", "help_main",
                         icon_custom_emoji_id=5238091390690068061),
             btn.callback("📝 Komutlar", "commands")
+                        icon_custom_emoji_id=5962952497197748583)
         ])
         
         # Plugin Kanalı
