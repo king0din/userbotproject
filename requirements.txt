@@ -20,6 +20,9 @@ aiohttp>=3.8.0
 # Sistem istatistikleri
 psutil>=5.9.0
 
+# İnternet hız testi
+speedtest-cli>=2.1.3
+
 # Opsiyonel: Pyrogram desteği için
 # pyrogram>=2.0.0
 # tgcrypto>=1.2.0
