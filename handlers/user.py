@@ -454,10 +454,17 @@ def register_user_handlers(bot):
         active_plugins = user_data.get("active_plugins", [])
         
         # Kullanıcının erişebileceği pluginleri filtrele
+        # Devre dışı pluginleri gösterme
         accessible_plugins = []
         for p in all_plugins:
+            # Devre dışı pluginleri atla
+            if p.get("is_disabled", False):
+                continue
+            # Genel veya izinli ise ekle
             if p.get("is_public", True) or user_id in p.get("allowed_users", []):
-                accessible_plugins.append(p)
+                # Kısıtlı kullanıcıysa atla
+                if user_id not in p.get("restricted_users", []):
+                    accessible_plugins.append(p)
         
         if not accessible_plugins:
             text = "📭 **Henüz plugin eklenmemiş.**\n\nPlugin duyuruları için kanalı takip edin."
@@ -478,7 +485,9 @@ def register_user_handlers(bot):
         for p in page_plugins:
             name = p['name']
             is_active = name in active_plugins
+            is_default = p.get("default_active", False)
             status = "🟢" if is_active else "⚪"
+            default_icon = "⭐" if is_default else ""
             
             # Komutları göster
             cmds = p.get("commands", [])[:2]
@@ -486,12 +495,12 @@ def register_user_handlers(bot):
             if len(p.get("commands", [])) > 2:
                 cmd_text += "..."
             
-            text += f"{status} **{name}**\n"
+            text += f"{status}{default_icon} **{name}**\n"
             text += f"   └ {cmd_text}\n"
             text += f"   └ Yükle: `/pactive {name}`\n\n"
         
         text += f"━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"🟢 Yüklü | ⚪ Yüklü değil\n"
+        text += f"🟢 Yüklü | ⚪ Yüklü değil | ⭐ Zorunlu\n"
         text += f"📊 Toplam: **{len(accessible_plugins)}** plugin\n"
         text += f"✅ Aktif: **{len(active_plugins)}** plugin\n\n"
         text += f"💡 **Detay için:** `/pinfo <isim>`"
@@ -615,6 +624,16 @@ def register_user_handlers(bot):
     @check_ban
     async def pactive_command(event):
         plugin_name = event.pattern_match.group(1)
+        
+        # Devre dışı plugin kontrolü
+        plugin = await db.get_plugin(plugin_name)
+        if plugin and plugin.get("is_disabled", False):
+            await event.respond(
+                f"⛔ **`{plugin_name}` devre dışı!**\n\n"
+                f"Bu plugin yönetici tarafından devre dışı bırakılmış.\n"
+                f"Şu anda kullanılamaz."
+            )
+            return
         
         user_data = await db.get_user(event.sender_id)
         if not user_data or not user_data.get("is_logged_in"):
