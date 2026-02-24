@@ -870,202 +870,202 @@ def register_admin_handlers(bot):
     
     @bot.on(events.NewMessage(pattern=r'^/speedtest$'))
     async def speedtest_command(event):
-        """İnternet hız testi"""
+        """İnternet hız testi - Resimli"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
             return
         
-        msg = await event.respond(
-            "🚀 **İnternet Hız Testi**\n\n"
-            "⏳ Test başlatılıyor...\n"
-            "━━━━━━━━━━━━━━━━━━━━"
-        )
-        
-        try:
-            import speedtest
-        except ImportError:
-            await msg.edit(
-                "❌ **speedtest-cli yüklü değil!**\n\n"
-                "Yüklemek için: `pip install speedtest-cli`"
-            )
-            return
+        msg = await event.respond("🚀 **Hız testi başlatılıyor...**\n\n⏳ Lütfen bekleyin (15-30 saniye)")
         
         import concurrent.futures
+        import subprocess
+        import re
         
-        def run_speedtest():
-            """Senkron speedtest çalıştır"""
-            st = speedtest.Speedtest()
-            st.get_best_server()
-            server = st.best
-            download = st.download() / 1_000_000
-            upload = st.upload() / 1_000_000
-            return {
-                'server': server,
-                'download': download,
-                'upload': upload,
-                'ping': server['latency']
-            }
+        def run_speedtest_cli():
+            """speedtest-cli ile test yap ve sonuç URL'i al"""
+            try:
+                # --share ile sonuç resmi URL'i alınır
+                result = subprocess.run(
+                    ['speedtest-cli', '--share', '--simple'],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                output = result.stdout
+                
+                # Sonuçları parse et
+                ping = download = upload = image_url = None
+                
+                for line in output.split('\n'):
+                    if 'Ping:' in line:
+                        ping = float(re.search(r'[\d.]+', line).group())
+                    elif 'Download:' in line:
+                        download = float(re.search(r'[\d.]+', line).group())
+                    elif 'Upload:' in line:
+                        upload = float(re.search(r'[\d.]+', line).group())
+                    elif 'Share results:' in line or 'http' in line:
+                        url_match = re.search(r'https?://[^\s]+', line)
+                        if url_match:
+                            image_url = url_match.group()
+                
+                return {
+                    'ping': ping,
+                    'download': download,
+                    'upload': upload,
+                    'image_url': image_url,
+                    'error': None
+                }
+            except subprocess.TimeoutExpired:
+                return {'error': 'Zaman aşımı (60 saniye)'}
+            except FileNotFoundError:
+                return {'error': 'speedtest-cli yüklü değil. Yüklemek için: pip install speedtest-cli'}
+            except Exception as e:
+                return {'error': str(e)}
         
         try:
-            await msg.edit(
-                "🚀 **İnternet Hız Testi**\n\n"
-                "🔍 En iyi sunucu aranıyor...\n"
-                "⬇️ İndirme test ediliyor...\n"
-                "⬆️ Yükleme test ediliyor...\n\n"
-                "⏳ Bu işlem 20-40 saniye sürebilir...\n"
-                "━━━━━━━━━━━━━━━━━━━━"
-            )
-            
             # Thread'de çalıştır
             loop = asyncio.get_event_loop()
             with concurrent.futures.ThreadPoolExecutor() as pool:
-                result = await loop.run_in_executor(pool, run_speedtest)
+                result = await loop.run_in_executor(pool, run_speedtest_cli)
             
-            server = result['server']
+            if result.get('error'):
+                await msg.edit(f"❌ **Hata:** `{result['error']}`")
+                return
+            
+            ping = result['ping']
             download = result['download']
             upload = result['upload']
-            ping = result['ping']
-            
-            # Hız değerlendirmesi
-            if download >= 100:
-                download_emoji = "🚀"
-                download_rating = "Mükemmel"
-            elif download >= 50:
-                download_emoji = "⚡"
-                download_rating = "Çok İyi"
-            elif download >= 25:
-                download_emoji = "✅"
-                download_rating = "İyi"
-            elif download >= 10:
-                download_emoji = "📶"
-                download_rating = "Orta"
-            else:
-                download_emoji = "🐌"
-                download_rating = "Yavaş"
-            
-            if upload >= 50:
-                upload_emoji = "🚀"
-                upload_rating = "Mükemmel"
-            elif upload >= 25:
-                upload_emoji = "⚡"
-                upload_rating = "Çok İyi"
-            elif upload >= 10:
-                upload_emoji = "✅"
-                upload_rating = "İyi"
-            elif upload >= 5:
-                upload_emoji = "📶"
-                upload_rating = "Orta"
-            else:
-                upload_emoji = "🐌"
-                upload_rating = "Yavaş"
-            
-            # Ping değerlendirmesi
-            if ping <= 20:
-                ping_emoji = "🟢"
-                ping_rating = "Mükemmel"
-            elif ping <= 50:
-                ping_emoji = "🟡"
-                ping_rating = "İyi"
-            elif ping <= 100:
-                ping_emoji = "🟠"
-                ping_rating = "Orta"
-            else:
-                ping_emoji = "🔴"
-                ping_rating = "Yüksek"
-            
-            result_text = (
-                "🚀 **İnternet Hız Testi - Sonuç**\n\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                f"🌐 **Sunucu:** `{server['sponsor']}`\n"
-                f"📍 **Konum:** `{server['name']}, {server['country']}`\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"{ping_emoji} **Ping:** `{ping:.1f} ms` ({ping_rating})\n\n"
-                f"{download_emoji} **İndirme:** `{download:.2f} Mbps`\n"
-                f"   └ {download_rating}\n\n"
-                f"{upload_emoji} **Yükleme:** `{upload:.2f} Mbps`\n"
-                f"   └ {upload_rating}\n\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 100%"
-            )
-            
-            await msg.edit(result_text)
-            
-        except Exception as e:
-            await msg.edit(f"❌ **Hata:** `{str(e)}`")
-    
-    @bot.on(events.CallbackQuery(data=b"speedtest"))
-    async def speedtest_callback(event):
-        """Callback ile hız testi"""
-        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
-            await event.answer(config.MESSAGES["admin_only"], alert=True)
-            return
-        
-        await event.answer("🚀 Hız testi başlatılıyor...")
-        
-        try:
-            import speedtest
-        except ImportError:
-            await event.edit(
-                "❌ **speedtest-cli yüklü değil!**\n\n"
-                "Yüklemek için: `pip install speedtest-cli`",
-                buttons=[back_button("stats")]
-            )
-            return
-        
-        import concurrent.futures
-        
-        def run_speedtest():
-            """Senkron speedtest çalıştır"""
-            st = speedtest.Speedtest()
-            st.get_best_server()
-            server = st.best
-            download = st.download() / 1_000_000
-            upload = st.upload() / 1_000_000
-            return {
-                'server': server,
-                'download': download,
-                'upload': upload,
-                'ping': server['latency']
-            }
-        
-        try:
-            await event.edit(
-                "🚀 **İnternet Hız Testi**\n\n"
-                "🔍 Sunucu aranıyor...\n"
-                "⬇️ İndirme test ediliyor...\n"
-                "⬆️ Yükleme test ediliyor...\n\n"
-                "⏳ 20-40 saniye sürebilir...\n"
-                "━━━━━━━━━━━━━━━━━━━━"
-            )
-            
-            # Thread'de çalıştır
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                result = await loop.run_in_executor(pool, run_speedtest)
-            
-            server = result['server']
-            download = result['download']
-            upload = result['upload']
-            ping = result['ping']
+            image_url = result['image_url']
             
             # Emoji seç
             dl_emoji = "🚀" if download >= 100 else "⚡" if download >= 50 else "✅" if download >= 25 else "📶" if download >= 10 else "🐌"
             ul_emoji = "🚀" if upload >= 50 else "⚡" if upload >= 25 else "✅" if upload >= 10 else "📶" if upload >= 5 else "🐌"
             ping_emoji = "🟢" if ping <= 20 else "🟡" if ping <= 50 else "🟠" if ping <= 100 else "🔴"
             
-            await event.edit(
+            text = (
                 "🚀 **Hız Testi Sonucu**\n\n"
-                f"🌐 `{server['sponsor']}`\n"
-                f"📍 `{server['name']}, {server['country']}`\n\n"
                 "━━━━━━━━━━━━━━━━━━━━\n"
                 f"{ping_emoji} **Ping:** `{ping:.1f} ms`\n"
                 f"{dl_emoji} **İndirme:** `{download:.2f} Mbps`\n"
                 f"{ul_emoji} **Yükleme:** `{upload:.2f} Mbps`\n"
-                "━━━━━━━━━━━━━━━━━━━━",
-                buttons=[
-                    [Button.inline("🔄 Tekrar Test", b"speedtest")],
-                    back_button("stats")
-                ]
+                "━━━━━━━━━━━━━━━━━━━━"
             )
+            
+            # Resim varsa gönder
+            if image_url:
+                await msg.delete()
+                await bot.send_file(
+                    event.chat_id,
+                    image_url,
+                    caption=text
+                )
+            else:
+                await msg.edit(text)
+            
+        except Exception as e:
+            await msg.edit(f"❌ **Hata:** `{str(e)}`")
+    
+    @bot.on(events.CallbackQuery(data=b"speedtest"))
+    async def speedtest_callback(event):
+        """Callback ile hız testi - Resimli"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer(config.MESSAGES["admin_only"], alert=True)
+            return
+        
+        await event.answer("🚀 Hız testi başlatılıyor...")
+        await event.edit("🚀 **Hız testi başlatılıyor...**\n\n⏳ Lütfen bekleyin (15-30 saniye)")
+        
+        import concurrent.futures
+        import subprocess
+        import re
+        
+        def run_speedtest_cli():
+            """speedtest-cli ile test yap ve sonuç URL'i al"""
+            try:
+                result = subprocess.run(
+                    ['speedtest-cli', '--share', '--simple'],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                output = result.stdout
+                
+                ping = download = upload = image_url = None
+                
+                for line in output.split('\n'):
+                    if 'Ping:' in line:
+                        ping = float(re.search(r'[\d.]+', line).group())
+                    elif 'Download:' in line:
+                        download = float(re.search(r'[\d.]+', line).group())
+                    elif 'Upload:' in line:
+                        upload = float(re.search(r'[\d.]+', line).group())
+                    elif 'Share results:' in line or 'http' in line:
+                        url_match = re.search(r'https?://[^\s]+', line)
+                        if url_match:
+                            image_url = url_match.group()
+                
+                return {
+                    'ping': ping,
+                    'download': download,
+                    'upload': upload,
+                    'image_url': image_url,
+                    'error': None
+                }
+            except subprocess.TimeoutExpired:
+                return {'error': 'Zaman aşımı'}
+            except FileNotFoundError:
+                return {'error': 'speedtest-cli yüklü değil'}
+            except Exception as e:
+                return {'error': str(e)}
+        
+        try:
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(pool, run_speedtest_cli)
+            
+            if result.get('error'):
+                await event.edit(
+                    f"❌ **Hata:** `{result['error']}`",
+                    buttons=[back_button("stats")]
+                )
+                return
+            
+            ping = result['ping']
+            download = result['download']
+            upload = result['upload']
+            image_url = result['image_url']
+            
+            dl_emoji = "🚀" if download >= 100 else "⚡" if download >= 50 else "✅" if download >= 25 else "📶" if download >= 10 else "🐌"
+            ul_emoji = "🚀" if upload >= 50 else "⚡" if upload >= 25 else "✅" if upload >= 10 else "📶" if upload >= 5 else "🐌"
+            ping_emoji = "🟢" if ping <= 20 else "🟡" if ping <= 50 else "🟠" if ping <= 100 else "🔴"
+            
+            text = (
+                "🚀 **Hız Testi Sonucu**\n\n"
+                f"{ping_emoji} **Ping:** `{ping:.1f} ms`\n"
+                f"{dl_emoji} **İndirme:** `{download:.2f} Mbps`\n"
+                f"{ul_emoji} **Yükleme:** `{upload:.2f} Mbps`"
+            )
+            
+            if image_url:
+                # Eski mesajı sil, resimli yeni mesaj gönder
+                chat_id = event.chat_id
+                await event.delete()
+                await bot.send_file(
+                    chat_id,
+                    image_url,
+                    caption=text,
+                    buttons=[
+                        [Button.inline("🔄 Tekrar Test", b"speedtest")],
+                        [Button.inline("🔙 İstatistikler", b"stats")]
+                    ]
+                )
+            else:
+                await event.edit(
+                    text,
+                    buttons=[
+                        [Button.inline("🔄 Tekrar Test", b"speedtest")],
+                        back_button("stats")
+                    ]
+                )
             
         except Exception as e:
             await event.edit(
