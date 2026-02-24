@@ -870,202 +870,217 @@ def register_admin_handlers(bot):
     
     @bot.on(events.NewMessage(pattern=r'^/speedtest$'))
     async def speedtest_command(event):
-        """İnternet hız testi - Resimli"""
+        """İnternet hız testi"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
             return
         
-        msg = await event.respond("🚀 **Hız testi başlatılıyor...**\n\n⏳ Lütfen bekleyin (15-30 saniye)")
+        msg = await event.respond("🚀 **Hız testi başlatılıyor...**")
         
-        import concurrent.futures
-        import subprocess
-        import re
+        import aiohttp
+        import time as time_module
         
-        def run_speedtest_cli():
-            """speedtest-cli ile test yap ve sonuç URL'i al"""
+        async def test_download():
+            """İndirme hızını test et"""
+            # Cloudflare'in 10MB test dosyası
+            test_urls = [
+                "https://speed.cloudflare.com/__down?bytes=10000000",  # 10MB
+                "https://proof.ovh.net/files/10Mb.dat",  # 10MB
+            ]
+            
+            for url in test_urls:
+                try:
+                    start = time_module.time()
+                    total_bytes = 0
+                    
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                        async with session.get(url) as response:
+                            async for chunk in response.content.iter_chunked(1024 * 64):
+                                total_bytes += len(chunk)
+                    
+                    elapsed = time_module.time() - start
+                    if elapsed > 0:
+                        speed_mbps = (total_bytes * 8) / (elapsed * 1_000_000)
+                        return speed_mbps, total_bytes
+                except:
+                    continue
+            
+            return None, 0
+        
+        async def test_upload():
+            """Yükleme hızını test et"""
             try:
-                # --share ile sonuç resmi URL'i alınır
-                result = subprocess.run(
-                    ['speedtest-cli', '--share', '--simple'],
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
-                output = result.stdout
+                # 2MB veri oluştur
+                data = b'0' * (2 * 1024 * 1024)
                 
-                # Sonuçları parse et
-                ping = download = upload = image_url = None
+                start = time_module.time()
                 
-                for line in output.split('\n'):
-                    if 'Ping:' in line:
-                        ping = float(re.search(r'[\d.]+', line).group())
-                    elif 'Download:' in line:
-                        download = float(re.search(r'[\d.]+', line).group())
-                    elif 'Upload:' in line:
-                        upload = float(re.search(r'[\d.]+', line).group())
-                    elif 'Share results:' in line or 'http' in line:
-                        url_match = re.search(r'https?://[^\s]+', line)
-                        if url_match:
-                            image_url = url_match.group()
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                    async with session.post(
+                        "https://speed.cloudflare.com/__up",
+                        data=data
+                    ) as response:
+                        await response.read()
                 
-                return {
-                    'ping': ping,
-                    'download': download,
-                    'upload': upload,
-                    'image_url': image_url,
-                    'error': None
-                }
-            except subprocess.TimeoutExpired:
-                return {'error': 'Zaman aşımı (60 saniye)'}
-            except FileNotFoundError:
-                return {'error': 'speedtest-cli yüklü değil. Yüklemek için: pip install speedtest-cli'}
-            except Exception as e:
-                return {'error': str(e)}
+                elapsed = time_module.time() - start
+                if elapsed > 0:
+                    speed_mbps = (len(data) * 8) / (elapsed * 1_000_000)
+                    return speed_mbps
+            except:
+                pass
+            
+            return None
+        
+        async def test_ping():
+            """Ping test et"""
+            try:
+                start = time_module.time()
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+                    async with session.head("https://www.google.com") as response:
+                        pass
+                return (time_module.time() - start) * 1000
+            except:
+                return None
         
         try:
-            # Thread'de çalıştır
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                result = await loop.run_in_executor(pool, run_speedtest_cli)
+            # Ping testi
+            await msg.edit("🚀 **Hız Testi**\n\n📶 Ping test ediliyor...")
+            ping = await test_ping()
             
-            if result.get('error'):
-                await msg.edit(f"❌ **Hata:** `{result['error']}`")
-                return
+            # İndirme testi
+            await msg.edit(
+                f"🚀 **Hız Testi**\n\n"
+                f"📶 Ping: `{ping:.1f} ms`\n"
+                f"⬇️ İndirme test ediliyor..."
+            )
+            download, dl_bytes = await test_download()
             
-            ping = result['ping']
-            download = result['download']
-            upload = result['upload']
-            image_url = result['image_url']
+            # Yükleme testi
+            await msg.edit(
+                f"🚀 **Hız Testi**\n\n"
+                f"📶 Ping: `{ping:.1f} ms`\n"
+                f"⬇️ İndirme: `{download:.2f} Mbps`\n"
+                f"⬆️ Yükleme test ediliyor..."
+            )
+            upload = await test_upload()
             
-            # Emoji seç
-            dl_emoji = "🚀" if download >= 100 else "⚡" if download >= 50 else "✅" if download >= 25 else "📶" if download >= 10 else "🐌"
-            ul_emoji = "🚀" if upload >= 50 else "⚡" if upload >= 25 else "✅" if upload >= 10 else "📶" if upload >= 5 else "🐌"
-            ping_emoji = "🟢" if ping <= 20 else "🟡" if ping <= 50 else "🟠" if ping <= 100 else "🔴"
+            # Sonuç
+            ping_emoji = "🟢" if ping and ping <= 50 else "🟡" if ping and ping <= 100 else "🔴"
+            dl_emoji = "🚀" if download and download >= 100 else "⚡" if download and download >= 50 else "✅" if download and download >= 25 else "📶" if download and download >= 10 else "🐌"
+            ul_emoji = "🚀" if upload and upload >= 50 else "⚡" if upload and upload >= 25 else "✅" if upload and upload >= 10 else "📶" if upload and upload >= 5 else "🐌"
             
-            text = (
+            result_text = (
                 "🚀 **Hız Testi Sonucu**\n\n"
                 "━━━━━━━━━━━━━━━━━━━━\n"
-                f"{ping_emoji} **Ping:** `{ping:.1f} ms`\n"
-                f"{dl_emoji} **İndirme:** `{download:.2f} Mbps`\n"
-                f"{ul_emoji} **Yükleme:** `{upload:.2f} Mbps`\n"
-                "━━━━━━━━━━━━━━━━━━━━"
             )
             
-            # Resim varsa gönder
-            if image_url:
-                await msg.delete()
-                await bot.send_file(
-                    event.chat_id,
-                    image_url,
-                    caption=text
-                )
+            if ping:
+                result_text += f"{ping_emoji} **Ping:** `{ping:.1f} ms`\n"
             else:
-                await msg.edit(text)
+                result_text += "📶 **Ping:** `N/A`\n"
+            
+            if download:
+                result_text += f"{dl_emoji} **İndirme:** `{download:.2f} Mbps`\n"
+            else:
+                result_text += "⬇️ **İndirme:** `N/A`\n"
+            
+            if upload:
+                result_text += f"{ul_emoji} **Yükleme:** `{upload:.2f} Mbps`\n"
+            else:
+                result_text += "⬆️ **Yükleme:** `N/A`\n"
+            
+            result_text += "━━━━━━━━━━━━━━━━━━━━\n"
+            result_text += "📡 Test: Cloudflare CDN"
+            
+            await msg.edit(result_text)
             
         except Exception as e:
             await msg.edit(f"❌ **Hata:** `{str(e)}`")
     
     @bot.on(events.CallbackQuery(data=b"speedtest"))
     async def speedtest_callback(event):
-        """Callback ile hız testi - Resimli"""
+        """Callback ile hız testi"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
             await event.answer(config.MESSAGES["admin_only"], alert=True)
             return
         
         await event.answer("🚀 Hız testi başlatılıyor...")
-        await event.edit("🚀 **Hız testi başlatılıyor...**\n\n⏳ Lütfen bekleyin (15-30 saniye)")
         
-        import concurrent.futures
-        import subprocess
-        import re
+        import aiohttp
+        import time as time_module
         
-        def run_speedtest_cli():
-            """speedtest-cli ile test yap ve sonuç URL'i al"""
+        async def test_download():
+            test_urls = [
+                "https://speed.cloudflare.com/__down?bytes=10000000",
+                "https://proof.ovh.net/files/10Mb.dat",
+            ]
+            
+            for url in test_urls:
+                try:
+                    start = time_module.time()
+                    total_bytes = 0
+                    
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                        async with session.get(url) as response:
+                            async for chunk in response.content.iter_chunked(1024 * 64):
+                                total_bytes += len(chunk)
+                    
+                    elapsed = time_module.time() - start
+                    if elapsed > 0:
+                        return (total_bytes * 8) / (elapsed * 1_000_000)
+                except:
+                    continue
+            return None
+        
+        async def test_upload():
             try:
-                result = subprocess.run(
-                    ['speedtest-cli', '--share', '--simple'],
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
-                output = result.stdout
+                data = b'0' * (2 * 1024 * 1024)
+                start = time_module.time()
                 
-                ping = download = upload = image_url = None
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                    async with session.post("https://speed.cloudflare.com/__up", data=data) as response:
+                        await response.read()
                 
-                for line in output.split('\n'):
-                    if 'Ping:' in line:
-                        ping = float(re.search(r'[\d.]+', line).group())
-                    elif 'Download:' in line:
-                        download = float(re.search(r'[\d.]+', line).group())
-                    elif 'Upload:' in line:
-                        upload = float(re.search(r'[\d.]+', line).group())
-                    elif 'Share results:' in line or 'http' in line:
-                        url_match = re.search(r'https?://[^\s]+', line)
-                        if url_match:
-                            image_url = url_match.group()
-                
-                return {
-                    'ping': ping,
-                    'download': download,
-                    'upload': upload,
-                    'image_url': image_url,
-                    'error': None
-                }
-            except subprocess.TimeoutExpired:
-                return {'error': 'Zaman aşımı'}
-            except FileNotFoundError:
-                return {'error': 'speedtest-cli yüklü değil'}
-            except Exception as e:
-                return {'error': str(e)}
+                elapsed = time_module.time() - start
+                if elapsed > 0:
+                    return (len(data) * 8) / (elapsed * 1_000_000)
+            except:
+                pass
+            return None
+        
+        async def test_ping():
+            try:
+                start = time_module.time()
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+                    async with session.head("https://www.google.com") as response:
+                        pass
+                return (time_module.time() - start) * 1000
+            except:
+                return None
         
         try:
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                result = await loop.run_in_executor(pool, run_speedtest_cli)
+            await event.edit("🚀 **Hız Testi**\n\n⏳ Test ediliyor...")
             
-            if result.get('error'):
-                await event.edit(
-                    f"❌ **Hata:** `{result['error']}`",
-                    buttons=[back_button("stats")]
-                )
-                return
+            ping = await test_ping()
+            download = await test_download()
+            upload = await test_upload()
             
-            ping = result['ping']
-            download = result['download']
-            upload = result['upload']
-            image_url = result['image_url']
+            ping_emoji = "🟢" if ping and ping <= 50 else "🟡" if ping and ping <= 100 else "🔴"
+            dl_emoji = "🚀" if download and download >= 100 else "⚡" if download and download >= 50 else "✅" if download and download >= 25 else "📶" if download and download >= 10 else "🐌"
+            ul_emoji = "🚀" if upload and upload >= 50 else "⚡" if upload and upload >= 25 else "✅" if upload and upload >= 10 else "📶" if upload and upload >= 5 else "🐌"
             
-            dl_emoji = "🚀" if download >= 100 else "⚡" if download >= 50 else "✅" if download >= 25 else "📶" if download >= 10 else "🐌"
-            ul_emoji = "🚀" if upload >= 50 else "⚡" if upload >= 25 else "✅" if upload >= 10 else "📶" if upload >= 5 else "🐌"
-            ping_emoji = "🟢" if ping <= 20 else "🟡" if ping <= 50 else "🟠" if ping <= 100 else "🔴"
+            result_text = "🚀 **Hız Testi Sonucu**\n\n━━━━━━━━━━━━━━━━━━━━\n"
+            result_text += f"{ping_emoji} **Ping:** `{ping:.1f} ms`\n" if ping else "📶 **Ping:** `N/A`\n"
+            result_text += f"{dl_emoji} **İndirme:** `{download:.2f} Mbps`\n" if download else "⬇️ **İndirme:** `N/A`\n"
+            result_text += f"{ul_emoji} **Yükleme:** `{upload:.2f} Mbps`\n" if upload else "⬆️ **Yükleme:** `N/A`\n"
+            result_text += "━━━━━━━━━━━━━━━━━━━━\n📡 Cloudflare CDN"
             
-            text = (
-                "🚀 **Hız Testi Sonucu**\n\n"
-                f"{ping_emoji} **Ping:** `{ping:.1f} ms`\n"
-                f"{dl_emoji} **İndirme:** `{download:.2f} Mbps`\n"
-                f"{ul_emoji} **Yükleme:** `{upload:.2f} Mbps`"
+            await event.edit(
+                result_text,
+                buttons=[
+                    [Button.inline("🔄 Tekrar Test", b"speedtest")],
+                    back_button("stats")
+                ]
             )
-            
-            if image_url:
-                # Eski mesajı sil, resimli yeni mesaj gönder
-                chat_id = event.chat_id
-                await event.delete()
-                await bot.send_file(
-                    chat_id,
-                    image_url,
-                    caption=text,
-                    buttons=[
-                        [Button.inline("🔄 Tekrar Test", b"speedtest")],
-                        [Button.inline("🔙 İstatistikler", b"stats")]
-                    ]
-                )
-            else:
-                await event.edit(
-                    text,
-                    buttons=[
-                        [Button.inline("🔄 Tekrar Test", b"speedtest")],
-                        back_button("stats")
-                    ]
-                )
             
         except Exception as e:
             await event.edit(
