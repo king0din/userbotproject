@@ -413,38 +413,28 @@ def register_admin_handlers(bot):
         buttons = [
             [Button.inline("⚙️ Plugin Ayarları", b"psettings_page_0")],
             [Button.inline("🔄 Yenile", b"admin_plugins")],
-            back_button("admin_panel")
+            back_button("settings_menu")
         ]
         await event.edit(text, buttons=buttons)
     
     @bot.on(events.CallbackQuery(data=b"admin_panel"))
     async def admin_panel_callback(event):
-        """Admin paneline geri dön"""
+        """Admin paneline geri dön - settings_menu'ya yönlendir"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
             await event.answer(config.MESSAGES["admin_only"], alert=True)
             return
         
-        # Admin panel içeriği
-        settings = await db.get_settings()
-        stats = await db.get_stats()
+        # settings_menu ile aynı içeriği göster
+        text, settings = await get_settings_text()
+        rows = get_settings_buttons_api(settings, event.sender_id == config.OWNER_ID)
         
-        mode = "🔒 Özel" if settings.get("private_mode") else "🌐 Genel"
-        maint = settings.get("maintenance_mode", False)
-        
-        text = "⚙️ **Admin Paneli**\n\n"
-        text += f"👥 Kullanıcı: `{stats.get('total_users', 0)}`\n"
-        text += f"🔌 Plugin: `{stats.get('total_plugins', 0)}`\n"
-        text += f"📊 Mod: {mode}\n"
-        text += f"🔧 Bakım: {'✅ Açık' if maint else '❌ Kapalı'}\n"
-        
-        buttons = [
-            [Button.inline("👥 Kullanıcılar", b"users_list_0"), Button.inline("🔌 Plugin'ler", b"admin_plugins")],
-            [Button.inline("👑 Sudo", b"sudo_management"), Button.inline("🚫 Ban", b"ban_management")],
-            [Button.inline("📊 İstatistik", b"stats")],
-            back_button("main_menu")
-        ]
-        
-        await event.edit(text, buttons=buttons)
+        await bot_api.edit_message_text(
+            chat_id=event.sender_id,
+            message_id=event.message_id,
+            text=text,
+            reply_markup=btn.inline_keyboard(rows)
+        )
+        await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"ban_management"))
     async def ban_management_handler(event):
@@ -1520,7 +1510,7 @@ def register_admin_handlers(bot):
             ])
             
             buttons.append([
-                Button.inline("🔙 Admin Panel", "admin_panel")
+                Button.inline("🔙 Plugin'ler", "admin_plugins")
             ])
             
             if edit:
