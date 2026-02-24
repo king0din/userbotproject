@@ -1391,100 +1391,115 @@ def register_admin_handlers(bot):
     # PLUGİN AYARLARI (/psettings)
     # ==========================================
     
-    PSETTINGS_PER_PAGE = 6
-    
     @bot.on(events.NewMessage(pattern=r'^/psettings$'))
     async def psettings_command(event):
         """Plugin ayarları ana menüsü"""
-        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
-            return
-        
-        await show_psettings_menu(event, edit=False)
+        try:
+            # Yetki kontrolü
+            if event.sender_id != config.OWNER_ID:
+                is_sudo = await db.is_sudo(event.sender_id)
+                if not is_sudo:
+                    return
+            
+            await show_psettings_menu(event, edit=False)
+        except Exception as e:
+            await event.respond(f"❌ Hata: {e}")
+            import traceback
+            traceback.print_exc()
     
     async def show_psettings_menu(event, edit=True, page=0):
         """Plugin ayarları menüsünü göster"""
-        plugins = await db.get_all_plugins()
-        
-        if not plugins:
-            text = "📭 Henüz plugin eklenmemiş."
-            if edit:
-                await event.edit(text)
-            else:
-                await event.respond(text)
-            return
-        
-        total = len(plugins)
-        total_pages = (total + PSETTINGS_PER_PAGE - 1) // PSETTINGS_PER_PAGE
-        page = max(0, min(page, total_pages - 1))
-        
-        start = page * PSETTINGS_PER_PAGE
-        end = start + PSETTINGS_PER_PAGE
-        page_plugins = plugins[start:end]
-        
-        text = "⚙️ **Plugin Ayarları**\n\n"
-        text += "Ayarlamak istediğiniz plugin'i seçin:\n\n"
-        
-        # İstatistikler
-        public_count = sum(1 for p in plugins if p.get("is_public", True))
-        private_count = total - public_count
-        disabled_count = sum(1 for p in plugins if p.get("is_disabled", False))
-        default_count = sum(1 for p in plugins if p.get("default_active", False))
-        
-        text += f"📊 **İstatistikler:**\n"
-        text += f"├ Toplam: `{total}` plugin\n"
-        text += f"├ 🌐 Genel: `{public_count}`\n"
-        text += f"├ 🔒 Özel: `{private_count}`\n"
-        text += f"├ ⛔ Devre Dışı: `{disabled_count}`\n"
-        text += f"└ ⭐ Varsayılan Aktif: `{default_count}`\n"
-        
-        rows = []
-        
-        # Plugin listesi
-        for p in page_plugins:
-            name = p.get("name", "?")
-            status_icons = ""
+        try:
+            PER_PAGE = 6
+            plugins = await db.get_all_plugins()
             
-            if p.get("is_disabled"):
-                status_icons += "⛔"
-            elif p.get("is_public", True):
-                status_icons += "🌐"
-            else:
-                status_icons += "🔒"
+            if not plugins:
+                text = "📭 Henüz plugin eklenmemiş."
+                if edit:
+                    await event.edit(text)
+                else:
+                    await event.respond(text)
+                return
             
-            if p.get("default_active"):
-                status_icons += "⭐"
+            total = len(plugins)
+            total_pages = (total + PER_PAGE - 1) // PER_PAGE
+            page = max(0, min(page, total_pages - 1))
             
-            rows.append([
-                btn.callback(f"{status_icons} {name}", f"pset_{name}")
+            start = page * PER_PAGE
+            end = start + PER_PAGE
+            page_plugins = plugins[start:end]
+            
+            text = "⚙️ **Plugin Ayarları**\n\n"
+            text += "Ayarlamak istediğiniz plugin'i seçin:\n\n"
+            
+            # İstatistikler
+            public_count = sum(1 for p in plugins if p.get("is_public", True))
+            private_count = total - public_count
+            disabled_count = sum(1 for p in plugins if p.get("is_disabled", False))
+            default_count = sum(1 for p in plugins if p.get("default_active", False))
+            
+            text += f"📊 **İstatistikler:**\n"
+            text += f"├ Toplam: `{total}` plugin\n"
+            text += f"├ 🌐 Genel: `{public_count}`\n"
+            text += f"├ 🔒 Özel: `{private_count}`\n"
+            text += f"├ ⛔ Devre Dışı: `{disabled_count}`\n"
+            text += f"└ ⭐ Varsayılan Aktif: `{default_count}`\n"
+            
+            buttons = []
+            
+            # Plugin listesi
+            for p in page_plugins:
+                name = p.get("name", "?")
+                status_icons = ""
+                
+                if p.get("is_disabled"):
+                    status_icons += "⛔"
+                elif p.get("is_public", True):
+                    status_icons += "🌐"
+                else:
+                    status_icons += "🔒"
+                
+                if p.get("default_active"):
+                    status_icons += "⭐"
+                
+                buttons.append([
+                    Button.inline(f"{status_icons} {name}", f"pset_{name}")
+                ])
+            
+            # Sayfalama
+            nav_row = []
+            if page > 0:
+                nav_row.append(Button.inline("◀️ Önceki", f"psettings_page_{page-1}"))
+            nav_row.append(Button.inline(f"📄 {page+1}/{total_pages}", "noop"))
+            if page < total_pages - 1:
+                nav_row.append(Button.inline("Sonraki ▶️", f"psettings_page_{page+1}"))
+            
+            if nav_row:
+                buttons.append(nav_row)
+            
+            # Toplu işlemler
+            buttons.append([
+                Button.inline("🌐 Hepsini Genel", "pset_bulk_public"),
+                Button.inline("🔒 Hepsini Özel", "pset_bulk_private")
             ])
+            
+            buttons.append([
+                Button.inline("🔙 Admin Panel", "admin_panel")
+            ])
+            
+            if edit:
+                await event.edit(text, buttons=buttons)
+            else:
+                await event.respond(text, buttons=buttons)
         
-        # Sayfalama
-        nav_row = []
-        if page > 0:
-            nav_row.append(btn.callback("◀️ Önceki", f"psettings_page_{page-1}"))
-        nav_row.append(btn.callback(f"📄 {page+1}/{total_pages}", "noop"))
-        if page < total_pages - 1:
-            nav_row.append(btn.callback("Sonraki ▶️", f"psettings_page_{page+1}"))
-        
-        if nav_row:
-            rows.append(nav_row)
-        
-        # Toplu işlemler
-        rows.append([
-            btn.callback("🌐 Hepsini Genel Yap", "pset_bulk_public"),
-            btn.callback("🔒 Hepsini Özel Yap", "pset_bulk_private")
-        ])
-        
-        rows.append([
-            btn.callback("🔙 Admin Panel", "admin_panel")
-        ])
-        
-        keyboard = btn.inline_keyboard(rows)
-        
-        if edit:
-            await event.edit(text, buttons=keyboard)
-        else:
-            await event.respond(text, buttons=keyboard)
+        except Exception as e:
+            error_text = f"❌ Hata: {e}"
+            import traceback
+            traceback.print_exc()
+            if edit:
+                await event.edit(error_text)
+            else:
+                await event.respond(error_text)
     
     @bot.on(events.CallbackQuery(pattern=rb"psettings_page_(\d+)"))
     async def psettings_page_handler(event):
@@ -1567,65 +1582,60 @@ def register_admin_handlers(bot):
                 cmd_text += f" +{len(commands)-5}"
             text += f"\n🔧 Komutlar: {cmd_text}\n"
         
-        rows = []
+        buttons = []
         
         # Erişim ayarı
         if is_public:
-            rows.append([
-                btn.callback("🔒 Özel Yap", f"pset_access_{plugin_name}_private",
-                            style=ButtonBuilder.STYLE_SECONDARY)
+            buttons.append([
+                Button.inline("🔒 Özel Yap", f"pset_access_{plugin_name}_private")
             ])
         else:
-            rows.append([
-                btn.callback("🌐 Genel Yap", f"pset_access_{plugin_name}_public",
-                            style=ButtonBuilder.STYLE_PRIMARY)
+            buttons.append([
+                Button.inline("🌐 Genel Yap", f"pset_access_{plugin_name}_public")
             ])
         
         # Devre dışı/aktif
         if is_disabled:
-            rows.append([
-                btn.callback("✅ Aktif Et", f"pset_status_{plugin_name}_enable",
-                            style=ButtonBuilder.STYLE_SUCCESS)
+            buttons.append([
+                Button.inline("✅ Aktif Et", f"pset_status_{plugin_name}_enable")
             ])
         else:
-            rows.append([
-                btn.callback("⛔ Devre Dışı Bırak", f"pset_status_{plugin_name}_disable",
-                            style=ButtonBuilder.STYLE_DANGER)
+            buttons.append([
+                Button.inline("⛔ Devre Dışı Bırak", f"pset_status_{plugin_name}_disable")
             ])
         
         # Varsayılan aktif
         if default_active:
-            rows.append([
-                btn.callback("◽ Varsayılan Pasif", f"pset_default_{plugin_name}_off")
+            buttons.append([
+                Button.inline("◽ Varsayılan Pasif", f"pset_default_{plugin_name}_off")
             ])
         else:
-            rows.append([
-                btn.callback("⭐ Varsayılan Aktif", f"pset_default_{plugin_name}_on")
+            buttons.append([
+                Button.inline("⭐ Varsayılan Aktif", f"pset_default_{plugin_name}_on")
             ])
         
         # Kullanıcı yönetimi
-        rows.append([
-            btn.callback("👤 İzin Ver", f"pset_allow_{plugin_name}"),
-            btn.callback("🚫 Engelle", f"pset_restrict_{plugin_name}")
+        buttons.append([
+            Button.inline("👤 İzin Ver", f"pset_allow_{plugin_name}"),
+            Button.inline("🚫 Engelle", f"pset_restrict_{plugin_name}")
         ])
         
-        rows.append([
-            btn.callback("📋 İzinli Liste", f"pset_allowlist_{plugin_name}"),
-            btn.callback("📋 Engelli Liste", f"pset_restrictlist_{plugin_name}")
+        buttons.append([
+            Button.inline("📋 İzinli Liste", f"pset_allowlist_{plugin_name}"),
+            Button.inline("📋 Engelli Liste", f"pset_restrictlist_{plugin_name}")
         ])
         
         # Aktif kullanıcıları göster
-        rows.append([
-            btn.callback("👥 Kullananlar", f"pset_users_{plugin_name}")
+        buttons.append([
+            Button.inline("👥 Kullananlar", f"pset_users_{plugin_name}")
         ])
         
         # Geri
-        rows.append([
-            btn.callback("🔙 Geri", "psettings_page_0")
+        buttons.append([
+            Button.inline("🔙 Geri", "psettings_page_0")
         ])
         
-        keyboard = btn.inline_keyboard(rows)
-        await event.edit(text, buttons=keyboard)
+        await event.edit(text, buttons=buttons)
     
     @bot.on(events.CallbackQuery(pattern=rb"pset_access_([a-zA-Z0-9_]+)_(public|private)"))
     async def pset_access_handler(event):
@@ -1702,7 +1712,7 @@ def register_admin_handlers(bot):
         text += "Örnek: `/pallow tag 123456789`"
         
         await event.edit(text, buttons=[
-            [btn.callback("🔙 Geri", f"pset_{plugin_name}")]
+            [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
         ])
     
     @bot.on(events.NewMessage(pattern=r'^/pallow\s+(\S+)\s+(\d+)$'))
@@ -1736,7 +1746,7 @@ def register_admin_handlers(bot):
         text += "Örnek: `/prestrict tag 123456789`"
         
         await event.edit(text, buttons=[
-            [btn.callback("🔙 Geri", f"pset_{plugin_name}")]
+            [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
         ])
     
     @bot.on(events.NewMessage(pattern=r'^/prestrict\s+(\S+)\s+(\d+)$'))
@@ -1802,7 +1812,7 @@ def register_admin_handlers(bot):
         text += f"\n\n🗑️ İzni kaldır: `/premove {plugin_name} <id>`"
         
         await event.edit(text, buttons=[
-            [btn.callback("🔙 Geri", f"pset_{plugin_name}")]
+            [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
         ])
     
     @bot.on(events.CallbackQuery(pattern=rb"pset_restrictlist_([a-zA-Z0-9_]+)"))
@@ -1840,7 +1850,7 @@ def register_admin_handlers(bot):
         text += f"\n\n✅ Engeli kaldır: `/punrestrict {plugin_name} <id>`"
         
         await event.edit(text, buttons=[
-            [btn.callback("🔙 Geri", f"pset_{plugin_name}")]
+            [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
         ])
     
     @bot.on(events.NewMessage(pattern=r'^/premove\s+(\S+)\s+(\d+)$'))
@@ -1898,7 +1908,7 @@ def register_admin_handlers(bot):
                 text += f"\n... ve {len(active_users)-20} kişi daha"
         
         await event.edit(text, buttons=[
-            [btn.callback("🔙 Geri", f"pset_{plugin_name}")]
+            [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
         ])
     
     @bot.on(events.CallbackQuery(data=b"noop"))
