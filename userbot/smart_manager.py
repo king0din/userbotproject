@@ -339,8 +339,16 @@ class SmartSessionManager:
         """Aktivite zamanını güncelle"""
         self.last_activity[user_id] = time.time()
     
+    async def has_active_plugins(self, user_id: int) -> bool:
+        """Kullanıcının aktif plugin'i var mı kontrol et"""
+        user = await db.get_user(user_id)
+        if user:
+            active_plugins = user.get("active_plugins", [])
+            return len(active_plugins) > 0
+        return False
+    
     async def cleanup_inactive_clients(self):
-        """İnaktif on-demand client'ları kapat"""
+        """İnaktif on-demand client'ları kapat (plugin'i olmayanları)"""
         now = time.time()
         to_close = []
         
@@ -349,7 +357,11 @@ class SmartSessionManager:
             if user_id in self.always_on_users:
                 continue
             
-            # Timeout kontrolü
+            # Aktif plugin'i olan kullanıcıları atlat
+            if await self.has_active_plugins(user_id):
+                continue
+            
+            # Timeout kontrolü (sadece plugin'i olmayan ve inaktif olanlar)
             if now - last_time > self.ON_DEMAND_TIMEOUT:
                 to_close.append(user_id)
         
@@ -871,46 +883,86 @@ class SmartSessionManager:
     
     async def restore_sessions(self) -> int:
         """
-        Sadece always-on kullanıcılarının session'larını geri yükle
-        On-demand kullanıcılar ilk komutta aktif olacak
+        Session'ları geri yükle:
+        - Aktif plugin'i olan kullanıcılar başlatılır
+        - Plugin'i olmayan kullanıcılar cache'de tutulur (on-demand)
         """
-        print("[SMART] Always-on session'lar geri yükleniyor...")
+        print("[SMART] Session'lar geri yükleniyor...")
         
         users = await db.get_logged_in_users()
         restored = 0
+        cached = 0
         
-        for user in users:
+        async def restore_single_user(user):
+            """Tek kullanıcıyı restore et"""
+            nonlocal restored, cached
+            
             user_id = user.get("user_id")
+            active_plugins = user.get("active_plugins", [])
             always_on_plugins = user.get("always_on_plugins", [])
             
             # Session verisini cache'e al
             session_data = user.get("session_data")
-            if session_data:
-                self.session_cache[user_id] = {
-                    'data': session_data,
-                    'type': user.get("session_type", "telethon")
-                }
+            if not session_data:
+                session_info = await db.get_session(user_id)
+                if session_info:
+                    session_data = session_info.get("data")
             
-            # Sadece always-on plugin'i olan kullanıcıları başlat
-            if always_on_plugins:
-                print(f"[SMART] Always-on yükleniyor: user={user_id}, plugins={always_on_plugins}")
+            if not session_data:
+                print(f"[SMART] Session verisi yok: user={user_id}")
+                return False
+            
+            self.session_cache[user_id] = {
+                'data': session_data,
+                'type': user.get("session_type", "telethon")
+            }
+            
+            # Aktif plugin'i olan kullanıcıları başlat
+            if active_plugins or always_on_plugins:
+                # Always-on mu kontrol et
+                is_always_on = bool(always_on_plugins)
                 
-                client = await self.get_or_create_client(user_id, keep_alive=True)
+                client = await self.get_or_create_client(user_id, keep_alive=is_always_on)
+                
                 if client:
-                    self.always_on_users[user_id] = {
-                        'plugins': always_on_plugins,
-                        'enabled_at': time.time()
-                    }
-                    self.last_confirm[user_id] = user.get("last_confirm", time.time())
+                    # Always-on kullanıcıları kaydet
+                    if always_on_plugins:
+                        self.always_on_users[user_id] = {
+                            'plugins': always_on_plugins,
+                            'enabled_at': time.time()
+                        }
+                        self.last_confirm[user_id] = user.get("last_confirm", time.time())
                     
-                    # Plugin'leri yükle
-                    for plugin_name in always_on_plugins:
-                        await self.plugin_manager.activate_plugin(user_id, plugin_name, client)
+                    # Tüm aktif plugin'leri yükle
+                    all_plugins = list(set(active_plugins + always_on_plugins))
+                    plugin_count = 0
                     
+                    for plugin_name in all_plugins:
+                        try:
+                            success = await self.plugin_manager.activate_plugin(user_id, plugin_name, client)
+                            if success:
+                                plugin_count += 1
+                        except Exception as e:
+                            print(f"[SMART] Plugin yükleme hatası: {plugin_name} - {e}")
+                    
+                    print(f"[SMART] ✅ user={user_id}, {plugin_count} plugin yüklendi")
                     restored += 1
+                    return True
+                else:
+                    print(f"[SMART] ❌ Client oluşturulamadı: user={user_id}")
+                    return False
+            else:
+                # Plugin'i yok, sadece cache'de tut
+                cached += 1
+                return True
         
-        print(f"[SMART] {restored} always-on session geri yüklendi")
-        print(f"[SMART] {len(self.session_cache)} session cache'de (on-demand hazır)")
+        # Paralel olarak restore et
+        tasks = [restore_single_user(user) for user in users]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        print(f"[SMART] ✅ {restored} kullanıcı aktif (plugin'li)")
+        print(f"[SMART] 📦 {cached} kullanıcı cache'de (on-demand)")
+        print(f"[SMART] 🟢 {len(self.always_on_users)} always-on")
         
         return restored
     
