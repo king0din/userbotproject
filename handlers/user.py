@@ -5,13 +5,16 @@
 from telethon import events, Button
 import config
 from database import database as db
-from userbot.manager import userbot_manager
+from userbot.smart_manager import smart_session_manager
 from userbot.plugins import plugin_manager
 from utils import (
     check_ban, check_private_mode, check_maintenance, 
     register_user, send_log, is_valid_phone, back_button
 )
 from utils.bot_api import bot_api, btn, ButtonBuilder
+
+# Eski uyumluluk için alias
+userbot_manager = smart_session_manager
 
 # State management
 user_states = {}
@@ -361,7 +364,11 @@ def register_user_handlers(bot):
                 "userbot_username": user_info["username"]
             })
             
-            client = userbot_manager.get_client(user_id)
+            # Client'ı al (login_with_session zaten oluşturmuş olmalı)
+            client = smart_session_manager.get_client(user_id)
+            if not client:
+                client = await smart_session_manager.get_or_create_client(user_id)
+            
             restored = 0
             if client:
                 restored = await plugin_manager.restore_user_plugins(user_id, client)
@@ -594,12 +601,15 @@ def register_user_handlers(bot):
             await event.respond("❌ Önce giriş yapmalısınız.")
             return
         
-        client = userbot_manager.get_client(event.sender_id)
+        msg = await event.respond("⏳ Bağlantı kuruluyor...")
+        
+        # Smart manager ile client al veya oluştur
+        client = await smart_session_manager.get_or_create_client(event.sender_id)
         if not client:
-            await event.respond("❌ Userbot bağlantısı yok.")
+            await msg.edit("❌ Userbot bağlantısı kurulamadı. Lütfen tekrar giriş yapın.")
             return
         
-        msg = await event.respond("⏳ Plugin yükleniyor...")
+        await msg.edit("⏳ Plugin yükleniyor...")
         success, message = await plugin_manager.activate_plugin(event.sender_id, plugin_name, client)
         await msg.edit(message)
         
