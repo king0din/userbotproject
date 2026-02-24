@@ -319,7 +319,17 @@ def register_user_handlers(bot):
         await db.save_session(user_id, temp["session"], temp["type"], temp.get("phone"), remember=True)
         del bot.session_temp[user_id]
         
-        await event.edit("✅ **Giriş tamamlandı!**\n\n💾 Session kaydedildi.", buttons=[
+        # Varsayılan aktif pluginleri yükle
+        client = await smart_session_manager.get_or_create_client(user_id)
+        default_count = 0
+        if client:
+            default_count = await plugin_manager.activate_default_plugins(user_id, client)
+        
+        text = "✅ **Giriş tamamlandı!**\n\n💾 Session kaydedildi."
+        if default_count > 0:
+            text += f"\n🔌 {default_count} varsayılan plugin aktif edildi."
+        
+        await event.edit(text, buttons=[
             [Button.inline(config.BUTTONS["plugins"], b"plugins_page_0")],
             [Button.inline("🏠 Ana Menü", b"main_menu")]
         ])
@@ -332,7 +342,17 @@ def register_user_handlers(bot):
             await db.save_session(user_id, temp["session"], temp["type"], temp.get("phone"), remember=False)
             del bot.session_temp[user_id]
         
-        await event.edit("✅ **Giriş tamamlandı!**", buttons=[
+        # Varsayılan aktif pluginleri yükle
+        client = await smart_session_manager.get_or_create_client(user_id)
+        default_count = 0
+        if client:
+            default_count = await plugin_manager.activate_default_plugins(user_id, client)
+        
+        text = "✅ **Giriş tamamlandı!**"
+        if default_count > 0:
+            text += f"\n\n🔌 {default_count} varsayılan plugin aktif edildi."
+        
+        await event.edit(text, buttons=[
             [Button.inline(config.BUTTONS["plugins"], b"plugins_page_0")],
             [Button.inline("🏠 Ana Menü", b"main_menu")]
         ])
@@ -620,6 +640,17 @@ def register_user_handlers(bot):
     @check_ban
     async def pinactive_command(event):
         plugin_name = event.pattern_match.group(1)
+        
+        # Varsayılan aktif plugin kontrolü
+        plugin = await db.get_plugin(plugin_name)
+        if plugin and plugin.get("default_active", False):
+            await event.respond(
+                f"⚠️ **`{plugin_name}` deaktif edilemez!**\n\n"
+                f"Bu plugin yönetici tarafından varsayılan olarak aktif ayarlanmış.\n"
+                f"Tüm kullanıcılarda zorunlu olarak çalışır."
+            )
+            return
+        
         success, message = await plugin_manager.deactivate_plugin(event.sender_id, plugin_name)
         await event.respond(message)
         
