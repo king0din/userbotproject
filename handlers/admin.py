@@ -405,10 +405,46 @@ def register_admin_handlers(bot):
             for p in all_plugins:
                 status = "✅" if p.get("is_active", True) else "❌"
                 access = "🌐" if p.get("is_public", True) else "🔒"
-                text += f"{status} {access} `{p['name']}` ({len(p.get('commands', []))} cmd)\n"
+                disabled = "⛔" if p.get("is_disabled", False) else ""
+                text += f"{status} {access}{disabled} `{p['name']}` ({len(p.get('commands', []))} cmd)\n"
             text += f"\n**Toplam:** {len(all_plugins)}"
-        text += "\n\n• `/addplugin` - Ekle\n• `/delplugin <isim>` - Sil"
-        await event.edit(text, buttons=[[Button.inline("🔄 Yenile", b"admin_plugins")], back_button("settings_menu")])
+        text += "\n\n• `/addplugin` - Ekle\n• `/delplugin <isim>` - Sil\n• `/psettings` - Ayarlar"
+        
+        buttons = [
+            [Button.inline("⚙️ Plugin Ayarları", b"psettings_page_0")],
+            [Button.inline("🔄 Yenile", b"admin_plugins")],
+            back_button("admin_panel")
+        ]
+        await event.edit(text, buttons=buttons)
+    
+    @bot.on(events.CallbackQuery(data=b"admin_panel"))
+    async def admin_panel_callback(event):
+        """Admin paneline geri dön"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer(config.MESSAGES["admin_only"], alert=True)
+            return
+        
+        # Admin panel içeriği
+        settings = await db.get_settings()
+        stats = await db.get_stats()
+        
+        mode = "🔒 Özel" if settings.get("private_mode") else "🌐 Genel"
+        maint = settings.get("maintenance_mode", False)
+        
+        text = "⚙️ **Admin Paneli**\n\n"
+        text += f"👥 Kullanıcı: `{stats.get('total_users', 0)}`\n"
+        text += f"🔌 Plugin: `{stats.get('total_plugins', 0)}`\n"
+        text += f"📊 Mod: {mode}\n"
+        text += f"🔧 Bakım: {'✅ Açık' if maint else '❌ Kapalı'}\n"
+        
+        buttons = [
+            [Button.inline("👥 Kullanıcılar", b"users_list_0"), Button.inline("🔌 Plugin'ler", b"admin_plugins")],
+            [Button.inline("👑 Sudo", b"sudo_management"), Button.inline("🚫 Ban", b"ban_management")],
+            [Button.inline("📊 İstatistik", b"stats")],
+            back_button("main_menu")
+        ]
+        
+        await event.edit(text, buttons=buttons)
     
     @bot.on(events.CallbackQuery(data=b"ban_management"))
     async def ban_management_handler(event):
@@ -1616,18 +1652,18 @@ def register_admin_handlers(bot):
         
         # Kullanıcı yönetimi
         buttons.append([
-            Button.inline("👤 İzin Ver", f"pset_allow_{plugin_name}"),
-            Button.inline("🚫 Engelle", f"pset_restrict_{plugin_name}")
+            Button.inline("👤 İzin Ver", f"psetallow_{plugin_name}"),
+            Button.inline("🚫 Engelle", f"psetrestrict_{plugin_name}")
         ])
         
         buttons.append([
-            Button.inline("📋 İzinli Liste", f"pset_allowlist_{plugin_name}"),
-            Button.inline("📋 Engelli Liste", f"pset_restrictlist_{plugin_name}")
+            Button.inline("📋 İzinli Liste", f"psetallowls_{plugin_name}"),
+            Button.inline("📋 Engelli Liste", f"psetrestrictls_{plugin_name}")
         ])
         
         # Aktif kullanıcıları göster
         buttons.append([
-            Button.inline("👥 Kullananlar", f"pset_users_{plugin_name}")
+            Button.inline("👥 Kullananlar", f"psetusers_{plugin_name}")
         ])
         
         # Geri
@@ -1698,7 +1734,7 @@ def register_admin_handlers(bot):
         await event.answer(f"✅ Varsayılan {'aktif' if default_active else 'pasif'} yapıldı!", alert=True)
         await show_plugin_settings(event, plugin_name)
     
-    @bot.on(events.CallbackQuery(pattern=rb"pset_allow_([a-zA-Z0-9_]+)$"))
+    @bot.on(events.CallbackQuery(pattern=rb"psetallow_([a-zA-Z0-9_]+)$"))
     async def pset_allow_prompt(event):
         """Kullanıcıya izin ver - ID iste"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
@@ -1709,7 +1745,7 @@ def register_admin_handlers(bot):
         
         text = f"👤 **{plugin_name}** için İzin Ver\n\n"
         text += "Kullanıcı ID'sini yazın:\n"
-        text += "Örnek: `/pallow tag 123456789`"
+        text += f"Örnek: `/pallow {plugin_name} 123456789`"
         
         await event.edit(text, buttons=[
             [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
@@ -1732,7 +1768,7 @@ def register_admin_handlers(bot):
         await db.add_plugin_user_access(plugin_name, user_id)
         await event.respond(f"✅ `{user_id}` kullanıcısına `{plugin_name}` izni verildi.")
     
-    @bot.on(events.CallbackQuery(pattern=rb"pset_restrict_([a-zA-Z0-9_]+)$"))
+    @bot.on(events.CallbackQuery(pattern=rb"psetrestrict_([a-zA-Z0-9_]+)$"))
     async def pset_restrict_prompt(event):
         """Kullanıcıyı engelle - ID iste"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
@@ -1743,7 +1779,7 @@ def register_admin_handlers(bot):
         
         text = f"🚫 **{plugin_name}** için Engelle\n\n"
         text += "Kullanıcı ID'sini yazın:\n"
-        text += "Örnek: `/prestrict tag 123456789`"
+        text += f"Örnek: `/prestrict {plugin_name} 123456789`"
         
         await event.edit(text, buttons=[
             [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
@@ -1776,7 +1812,7 @@ def register_admin_handlers(bot):
         
         await event.respond(f"✅ `{user_id}` kullanıcısı `{plugin_name}` için engellendi.")
     
-    @bot.on(events.CallbackQuery(pattern=rb"pset_allowlist_([a-zA-Z0-9_]+)"))
+    @bot.on(events.CallbackQuery(pattern=rb"psetallowls_([a-zA-Z0-9_]+)"))
     async def pset_allowlist_handler(event):
         """İzinli kullanıcıları listele"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
@@ -1815,7 +1851,7 @@ def register_admin_handlers(bot):
             [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
         ])
     
-    @bot.on(events.CallbackQuery(pattern=rb"pset_restrictlist_([a-zA-Z0-9_]+)"))
+    @bot.on(events.CallbackQuery(pattern=rb"psetrestrictls_([a-zA-Z0-9_]+)"))
     async def pset_restrictlist_handler(event):
         """Engelli kullanıcıları listele"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
@@ -1877,7 +1913,7 @@ def register_admin_handlers(bot):
         await db.unrestrict_plugin_user(plugin_name, user_id)
         await event.respond(f"✅ `{user_id}` kullanıcısının `{plugin_name}` engeli kaldırıldı.")
     
-    @bot.on(events.CallbackQuery(pattern=rb"pset_users_([a-zA-Z0-9_]+)"))
+    @bot.on(events.CallbackQuery(pattern=rb"psetusers_([a-zA-Z0-9_]+)"))
     async def pset_users_handler(event):
         """Plugin'i kullanan kullanıcıları listele"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
