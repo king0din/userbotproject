@@ -1690,17 +1690,29 @@ def register_admin_handlers(bot):
         is_disabled = status == "disable"
         await db.update_plugin(plugin_name, {"is_disabled": is_disabled})
         
+        deactivated_count = 0
         if is_disabled:
             # Tüm kullanıcılarda deaktif et
             users = await db.get_all_users()
             for user in users:
+                user_id = user.get("user_id")
                 active = user.get("active_plugins", [])
                 if plugin_name in active:
                     active.remove(plugin_name)
-                    await db.update_user(user["user_id"], {"active_plugins": active})
-                    await plugin_manager.deactivate_plugin(user["user_id"], plugin_name)
+                    await db.update_user(user_id, {"active_plugins": active})
+                    
+                    # Handler'ları kaldır (client aktifse)
+                    try:
+                        success, _ = await plugin_manager.deactivate_plugin(user_id, plugin_name)
+                        if success:
+                            deactivated_count += 1
+                    except:
+                        pass
+            
+            await event.answer(f"✅ Devre dışı! {deactivated_count} kullanıcıda kaldırıldı.", alert=True)
+        else:
+            await event.answer(f"✅ Aktif edildi!", alert=True)
         
-        await event.answer(f"✅ {'Devre dışı bırakıldı' if is_disabled else 'Aktif edildi'}!", alert=True)
         await show_plugin_settings(event, plugin_name)
     
     @bot.on(events.CallbackQuery(pattern=rb"pset_default_([a-zA-Z0-9_]+)_(on|off)"))
