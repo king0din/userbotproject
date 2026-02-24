@@ -1489,7 +1489,7 @@ def register_admin_handlers(bot):
                     status_icons += "⭐"
                 
                 buttons.append([
-                    Button.inline(f"{status_icons} {name}", f"pset_{name}")
+                    Button.inline(f"{status_icons} {name}", f"psetsel_{name}")
                 ])
             
             # Sayfalama
@@ -1554,7 +1554,7 @@ def register_admin_handlers(bot):
         await event.answer(f"✅ Tüm plugin'ler {'genel' if is_public else 'özel'} yapıldı!", alert=True)
         await show_psettings_menu(event, edit=True)
     
-    @bot.on(events.CallbackQuery(pattern=rb"pset_([a-zA-Z0-9_]+)$"))
+    @bot.on(events.CallbackQuery(pattern=rb"psetsel_([a-zA-Z0-9_]+)$"))
     async def pset_plugin_handler(event):
         """Tek plugin ayar menüsü"""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
@@ -1562,10 +1562,6 @@ def register_admin_handlers(bot):
             return
         
         plugin_name = event.pattern_match.group(1).decode()
-        
-        # bulk işlemlerini atla
-        if plugin_name in ["bulk"]:
-            return
         
         plugin = await db.get_plugin(plugin_name)
         
@@ -1738,7 +1734,7 @@ def register_admin_handlers(bot):
         text += f"Örnek: `/pallow {plugin_name} 123456789`"
         
         await event.edit(text, buttons=[
-            [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
+            [Button.inline("🔙 Geri", f"psetsel_{plugin_name}")]
         ])
     
     @bot.on(events.NewMessage(pattern=r'^/pallow\s+(\S+)\s+(\d+)$'))
@@ -1772,7 +1768,7 @@ def register_admin_handlers(bot):
         text += f"Örnek: `/prestrict {plugin_name} 123456789`"
         
         await event.edit(text, buttons=[
-            [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
+            [Button.inline("🔙 Geri", f"psetsel_{plugin_name}")]
         ])
     
     @bot.on(events.NewMessage(pattern=r'^/prestrict\s+(\S+)\s+(\d+)$'))
@@ -1838,7 +1834,7 @@ def register_admin_handlers(bot):
         text += f"\n\n🗑️ İzni kaldır: `/premove {plugin_name} <id>`"
         
         await event.edit(text, buttons=[
-            [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
+            [Button.inline("🔙 Geri", f"psetsel_{plugin_name}")]
         ])
     
     @bot.on(events.CallbackQuery(pattern=rb"psetrestrictls_([a-zA-Z0-9_]+)"))
@@ -1876,7 +1872,7 @@ def register_admin_handlers(bot):
         text += f"\n\n✅ Engeli kaldır: `/punrestrict {plugin_name} <id>`"
         
         await event.edit(text, buttons=[
-            [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
+            [Button.inline("🔙 Geri", f"psetsel_{plugin_name}")]
         ])
     
     @bot.on(events.NewMessage(pattern=r'^/premove\s+(\S+)\s+(\d+)$'))
@@ -1934,7 +1930,7 @@ def register_admin_handlers(bot):
                 text += f"\n... ve {len(active_users)-20} kişi daha"
         
         await event.edit(text, buttons=[
-            [Button.inline("🔙 Geri", f"pset_{plugin_name}")]
+            [Button.inline("🔙 Geri", f"psetsel_{plugin_name}")]
         ])
     
     @bot.on(events.CallbackQuery(data=b"noop"))
