@@ -9,7 +9,9 @@ import importlib
 import importlib.util
 import subprocess
 import sys
-from typing import Optional, Dict, List, Tuple
+import tempfile
+import asyncio
+from typing import Optional, Dict, List, Tuple, Set
 from telethon import TelegramClient
 import config
 from database import database as db
@@ -21,37 +23,188 @@ class PluginManager:
         self.loaded_plugins: Dict[str, Dict] = {}
         self.user_active_plugins: Dict[int, Dict[str, any]] = {}
         self._retry_count: Dict[str, int] = {}
+        self._compat_installed = False
+        self._installed_packages: Set[str] = set()  # Kurulu paket cache
+        self._packages_checked = False
+    
+    async def preinstall_all_dependencies(self):
+        """Tüm pluginlerin bağımlılıklarını önceden kur"""
+        print("[PLUGIN] 📦 Bağımlılıklar kontrol ediliyor...")
         
-        # Uyumluluk katmanını hazırla
-        self._setup_compatibility()
+        all_plugins = await db.get_all_plugins()
+        if not all_plugins:
+            return
+        
+        all_imports = set()
+        
+        # Tüm pluginlerin import'larını topla
+        for plugin in all_plugins:
+            filename = plugin.get("filename", f"{plugin['name']}.py")
+            filepath = os.path.join(config.PLUGINS_DIR, filename)
+            
+            if not os.path.exists(filepath):
+                continue
+            
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                tree = ast.parse(content)
+                
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            module_name = alias.name.split('.')[0]
+                            all_imports.add(module_name)
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.module:
+                            module_name = node.module.split('.')[0]
+                            all_imports.add(module_name)
+            except:
+                continue
+        
+        # Standart kütüphaneler ve zaten kurulu olanları atla
+        skip_modules = {
+            'os', 'sys', 'time', 'datetime', 'json', 'random', 'math', 're',
+            'asyncio', 'subprocess', 'shutil', 'glob', 'pathlib', 'tempfile',
+            'base64', 'hashlib', 'uuid', 'io', 'collections', 'itertools',
+            'functools', 'typing', 'abc', 'copy', 'pickle', 'sqlite3',
+            'urllib', 'http', 'html', 'xml', 'email', 'mimetypes',
+            'logging', 'traceback', 'inspect', 'importlib', 'ast',
+            'struct', 'codecs', 'string', 'textwrap', 'difflib',
+            'threading', 'multiprocessing', 'concurrent', 'queue',
+            'socket', 'ssl', 'select', 'selectors', 'signal',
+            'contextlib', 'weakref', 'gc', 'platform', 'locale',
+            'getpass', 'gettext', 'argparse', 'configparser',
+            'csv', 'zipfile', 'tarfile', 'gzip', 'bz2', 'lzma',
+            'secrets', 'statistics', 'decimal', 'fractions',
+            'numbers', 'cmath', 'array', 'bisect', 'heapq',
+            'enum', 'graphlib', 'dataclasses', 'contextvars',
+            '__future__', 'builtins', 'warnings', 'atexit',
+            'telethon', 'pyrogram', 'motor', 'pymongo', 'dotenv', 'git',
+            'userbot', 'userbot_compat', 'config', 'database', 'utils',
+            'seduserbot', 'asena'
+        }
+        
+        package_mapping = {
+            'cv2': 'opencv-python',
+            'PIL': 'Pillow',
+            'sklearn': 'scikit-learn',
+            'yaml': 'pyyaml',
+            'bs4': 'beautifulsoup4',
+        }
+        
+        to_install = []
+        
+        for module in all_imports:
+            if module in skip_modules:
+                continue
+            
+            # Zaten kurulu mu kontrol et
+            try:
+                importlib.import_module(module)
+                self._installed_packages.add(module)
+            except ImportError:
+                package_name = package_mapping.get(module, module)
+                to_install.append(package_name)
+        
+        # Eksik paketleri toplu kur
+        if to_install:
+            unique_packages = list(set(to_install))
+            print(f"[PLUGIN] 📦 {len(unique_packages)} paket kuruluyor: {', '.join(unique_packages)}")
+            
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install"] + unique_packages + ["-q", "--disable-pip-version-check"],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                
+                if result.returncode == 0:
+                    print(f"[PLUGIN] ✅ Tüm bağımlılıklar kuruldu")
+                    for pkg in unique_packages:
+                        self._installed_packages.add(pkg)
+                else:
+                    print(f"[PLUGIN] ⚠️ Bazı paketler kurulamadı")
+            except Exception as e:
+                print(f"[PLUGIN] ⚠️ Paket kurulum hatası: {e}")
+        else:
+            print("[PLUGIN] ✅ Tüm bağımlılıklar mevcut")
+        
+        self._packages_checked = True
     
     def _setup_compatibility(self):
         """Eski userbot pluginleri için uyumluluk katmanını kur"""
+        if self._compat_installed:
+            return
+        
         try:
-            # userbot_compat modülünü 'userbot' olarak sys.modules'a ekle
             import userbot_compat
             import userbot_compat.events
             import userbot_compat.cmdhelp
             import userbot_compat.utils
             
-            # 'userbot' ismiyle erişilebilir yap
-            sys.modules['userbot'] = userbot_compat
-            sys.modules['userbot.events'] = userbot_compat.events
-            sys.modules['userbot.cmdhelp'] = userbot_compat.cmdhelp
-            sys.modules['userbot.utils'] = userbot_compat.utils
+            sys.modules['seduserbot'] = userbot_compat
+            sys.modules['seduserbot.events'] = userbot_compat.events
+            sys.modules['seduserbot.cmdhelp'] = userbot_compat.cmdhelp
+            sys.modules['seduserbot.utils'] = userbot_compat.utils
             
+            sys.modules['asena'] = userbot_compat
+            sys.modules['asena.events'] = userbot_compat.events
+            
+            self._compat_installed = True
             print("[PLUGIN] ✅ Uyumluluk katmanı hazır")
         except Exception as e:
             print(f"[PLUGIN] ⚠️ Uyumluluk katmanı hatası: {e}")
+    
+    def _patch_plugin_content(self, content: str) -> str:
+        """Plugin içeriğindeki eski import'ları düzelt"""
+        # from userbot import ... -> from userbot_compat import ...
+        content = re.sub(
+            r'^from userbot import',
+            'from userbot_compat import',
+            content,
+            flags=re.MULTILINE
+        )
+        
+        # from userbot.xxx import ... -> from userbot_compat.xxx import ...
+        content = re.sub(
+            r'^from userbot\.',
+            'from userbot_compat.',
+            content,
+            flags=re.MULTILINE
+        )
+        
+        # import userbot -> import userbot_compat as userbot
+        content = re.sub(
+            r'^import userbot$',
+            'import userbot_compat as userbot',
+            content,
+            flags=re.MULTILINE
+        )
+        
+        return content
     
     def install_package(self, package_name: str) -> Tuple[bool, str]:
         """Pip ile paket kur"""
         try:
             clean_name = package_name.split('>=')[0].split('==')[0].split('[')[0].strip()
             
-            # userbot paketini kurmaya çalışma - bu bizim uyumluluk katmanımız
-            if clean_name.lower() == 'userbot':
-                return True, "userbot uyumluluk katmanı zaten mevcut"
+            if clean_name.lower() in ['userbot', 'userbot_compat']:
+                return True, "userbot uyumluluk katmanı mevcut"
+            
+            # Cache kontrolü - zaten kuruluysa atla
+            if clean_name in self._installed_packages:
+                return True, f"{clean_name} zaten kurulu"
+            
+            # Import ile kontrol et
+            try:
+                importlib.import_module(clean_name)
+                self._installed_packages.add(clean_name)
+                return True, f"{clean_name} zaten kurulu"
+            except ImportError:
+                pass
             
             print(f"[PLUGIN] 📦 {clean_name} kuruluyor...")
             
@@ -64,6 +217,7 @@ class PluginManager:
             
             if result.returncode == 0:
                 print(f"[PLUGIN] ✅ {clean_name} kuruldu")
+                self._installed_packages.add(clean_name)
                 return True, f"{clean_name} kuruldu"
             else:
                 print(f"[PLUGIN] ❌ {clean_name} kurulamadı: {result.stderr}")
@@ -74,15 +228,12 @@ class PluginManager:
         except Exception as e:
             return False, str(e)
     
-    def check_and_install_imports(self, file_path: str) -> Tuple[bool, List[str], List[str]]:
-        """Plugin dosyasındaki import'ları kontrol et ve eksik olanları kur"""
+    def check_and_install_imports(self, content: str) -> Tuple[bool, List[str], List[str]]:
+        """Plugin içeriğindeki import'ları kontrol et ve eksik olanları kur"""
         installed = []
         failed = []
         
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
             tree = ast.parse(content)
             imports = set()
             
@@ -96,8 +247,7 @@ class PluginManager:
                         module_name = node.module.split('.')[0]
                         imports.add(module_name)
             
-            # Standart kütüphane ve yerleşik modüller
-            stdlib_modules = {
+            skip_modules = {
                 'os', 'sys', 'time', 'datetime', 'json', 'random', 'math', 're',
                 'asyncio', 'subprocess', 'shutil', 'glob', 'pathlib', 'tempfile',
                 'base64', 'hashlib', 'uuid', 'io', 'collections', 'itertools',
@@ -114,12 +264,11 @@ class PluginManager:
                 'numbers', 'cmath', 'array', 'bisect', 'heapq',
                 'enum', 'graphlib', 'dataclasses', 'contextvars',
                 '__future__', 'builtins', 'warnings', 'atexit',
-                # Proje modülleri ve uyumluluk
                 'telethon', 'pyrogram', 'motor', 'pymongo', 'dotenv', 'git',
-                'userbot', 'userbot_compat', 'config', 'database', 'utils'
+                'userbot', 'userbot_compat', 'config', 'database', 'utils',
+                'seduserbot', 'asena'
             }
             
-            # Modül adı -> pip paket adı eşleştirmesi
             package_mapping = {
                 'cv2': 'opencv-python',
                 'PIL': 'Pillow',
@@ -168,25 +317,10 @@ class PluginManager:
                 'speech_recognition': 'SpeechRecognition',
                 'openai': 'openai',
                 'anthropic': 'anthropic',
-                'google': 'google-api-python-client',
-                'tweepy': 'tweepy',
-                'discord': 'discord.py',
-                'flask': 'flask',
-                'fastapi': 'fastapi',
-                'uvicorn': 'uvicorn',
-                'jinja2': 'Jinja2',
-                'markdown': 'markdown',
-                'newspaper': 'newspaper3k',
-                'feedparser': 'feedparser',
-                'fake_useragent': 'fake-useragent',
-                'cloudscraper': 'cloudscraper',
-                'selenium': 'selenium',
-                'playwright': 'playwright',
-                'undetected_chromedriver': 'undetected-chromedriver',
             }
             
             for module_name in imports:
-                if module_name in stdlib_modules:
+                if module_name in skip_modules:
                     continue
                 
                 try:
@@ -194,17 +328,13 @@ class PluginManager:
                 except ImportError:
                     package_name = package_mapping.get(module_name, module_name)
                     
-                    print(f"[PLUGIN] ⚠️ '{module_name}' modülü bulunamadı, '{package_name}' kuruluyor...")
+                    print(f"[PLUGIN] ⚠️ '{module_name}' bulunamadı, '{package_name}' kuruluyor...")
                     
                     success, msg = self.install_package(package_name)
                     
                     if success:
                         installed.append(package_name)
-                        try:
-                            importlib.invalidate_caches()
-                            importlib.import_module(module_name)
-                        except ImportError:
-                            pass
+                        importlib.invalidate_caches()
                     else:
                         failed.append(f"{package_name}: {msg}")
             
@@ -214,24 +344,6 @@ class PluginManager:
             return False, [], [f"Sözdizimi hatası: {e}"]
         except Exception as e:
             return False, [], [f"Hata: {e}"]
-    
-    def extract_requirements_from_file(self, file_path: str) -> List[str]:
-        """Plugin dosyasındaki requirements yorumunu çıkar"""
-        requirements = []
-        
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith('# requires:') or line.startswith('# requirements:'):
-                        packages = line.split(':', 1)[1].strip().split(',')
-                        requirements.extend([p.strip() for p in packages if p.strip()])
-                    if not line.startswith('#') and line:
-                        break
-        except:
-            pass
-        
-        return requirements
     
     def extract_plugin_info(self, file_path: str) -> Dict:
         """Plugin dosyasından bilgileri çıkar"""
@@ -248,10 +360,13 @@ class PluginManager:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            tree = ast.parse(content)
-            if (tree.body and isinstance(tree.body[0], ast.Expr) and 
-                isinstance(tree.body[0].value, ast.Constant)):
-                info["description"] = tree.body[0].value.value.strip()
+            try:
+                tree = ast.parse(content)
+                if (tree.body and isinstance(tree.body[0], ast.Expr) and 
+                    isinstance(tree.body[0].value, ast.Constant)):
+                    info["description"] = tree.body[0].value.value.strip()
+            except:
+                pass
             
             patterns = re.findall(r"pattern\s*=\s*[rf]?['\"][\^]?\.?(\w+)", content)
             info["commands"] = list(set(patterns))
@@ -272,7 +387,7 @@ class PluginManager:
             return info
             
         except Exception as e:
-            print(f"[PLUGIN] Bilgi çıkarma hatası ({file_path}): {e}")
+            print(f"[PLUGIN] Bilgi çıkarma hatası: {e}")
             return info
     
     async def register_plugin(self, file_path: str, is_public: bool = True,
@@ -339,20 +454,19 @@ class PluginManager:
                              client: TelegramClient) -> Tuple[bool, str]:
         """Kullanıcı için plugin aktif et"""
         
-        # Retry kontrolü
         retry_key = f"{user_id}_{plugin_name}"
         if retry_key in self._retry_count and self._retry_count[retry_key] >= 3:
             del self._retry_count[retry_key]
-            return False, "❌ Çok fazla kurulum denemesi. Plugin uyumsuz olabilir."
+            return False, "❌ Plugin yüklenemedi. Uyumsuz olabilir."
         
         plugin = await db.get_plugin(plugin_name)
         if not plugin:
             return False, f"`{plugin_name}` adında bir plugin bulunamadı"
         
-        if not plugin.get("is_active"):
+        if not plugin.get("is_active", True):
             return False, f"`{plugin_name}` şu anda devre dışı"
         
-        if not plugin.get("is_public"):
+        if not plugin.get("is_public", True):
             if user_id not in plugin.get("allowed_users", []):
                 return False, f"`{plugin_name}` pluginine erişim yetkiniz yok"
         
@@ -367,59 +481,57 @@ class PluginManager:
         
         file_path = os.path.join(config.PLUGINS_DIR, plugin["filename"])
         if not os.path.exists(file_path):
-            return False, f"Plugin dosyası bulunamadı"
+            return False, f"Plugin dosyası bulunamadı: {plugin['filename']}"
         
-        # Uyumluluk katmanını yeniden kur (her plugin için)
+        # Uyumluluk katmanını kur
         self._setup_compatibility()
         
-        # Uyumluluk katmanına client'ı ver
+        # Plugin dosyasını oku
         try:
-            from userbot_compat import events as compat_events
-            compat_events.set_client(client)
-        except:
-            pass
+            with open(file_path, 'r', encoding='utf-8') as f:
+                original_content = f.read()
+        except Exception as e:
+            return False, f"❌ Dosya okunamadı: {e}"
+        
+        # Import'ları patch'le
+        patched_content = self._patch_plugin_content(original_content)
+        
+        # Bağımlılıkları kontrol et
+        success, installed, failed = self.check_and_install_imports(patched_content)
         
         status_messages = []
-        
-        # Requirements kontrol
-        requirements = self.extract_requirements_from_file(file_path)
-        if requirements:
-            for req in requirements:
-                if req.lower() == 'userbot':
-                    continue
-                try:
-                    pkg_name = req.split('>=')[0].split('==')[0].strip()
-                    importlib.import_module(pkg_name.replace('-', '_'))
-                except ImportError:
-                    success, msg = self.install_package(req)
-                    if success:
-                        status_messages.append(f"  ✅ {req} kuruldu")
-                    else:
-                        return False, f"❌ `{req}` paketi kurulamadı:\n`{msg}`"
-        
-        # Import kontrolü
-        success, installed, failed = self.check_and_install_imports(file_path)
-        
         if installed:
-            status_messages.append(f"📦 Kurulan paketler: {', '.join(installed)}")
+            status_messages.append(f"📦 Kurulan: {', '.join(installed)}")
         
         if failed:
-            return False, f"❌ Bazı paketler kurulamadı:\n" + "\n".join(failed)
+            return False, f"❌ Paket kurulamadı:\n" + "\n".join(failed)
         
-        # Plugin'i yükle
+        # Plugin'i yükle - exec kullanarak
         try:
-            importlib.invalidate_caches()
+            # userbot_compat'ı hazırla
+            try:
+                from userbot_compat import events as compat_events
+                compat_events.set_client(client)
+            except Exception as e:
+                print(f"[PLUGIN] compat_events hatası: {e}")
             
-            spec = importlib.util.spec_from_file_location(
-                f"{plugin_name}_{user_id}", 
-                file_path
-            )
-            module = importlib.util.module_from_spec(spec)
+            # Modül için namespace oluştur
+            module_name = f"plugin_{plugin_name}_{user_id}"
             
+            # Yeni modül oluştur
+            import types
+            module = types.ModuleType(module_name)
+            module.__file__ = file_path
+            module.__name__ = module_name
             module.client = client
             
-            spec.loader.exec_module(module)
+            # Modülü sys.modules'a ekle
+            sys.modules[module_name] = module
             
+            # Kodu çalıştır
+            exec(compile(patched_content, file_path, 'exec'), module.__dict__)
+            
+            # Register fonksiyonu varsa çağır
             if hasattr(module, 'register') and callable(module.register):
                 module.register(client)
             
@@ -431,7 +543,6 @@ class PluginManager:
                 active_plugins.append(plugin_name)
                 await db.update_user(user_id, {"active_plugins": active_plugins})
             
-            # Retry sayacını temizle
             if retry_key in self._retry_count:
                 del self._retry_count[retry_key]
             
@@ -455,13 +566,11 @@ class PluginManager:
             else:
                 missing_module = error_str
             
-            # userbot için özel işlem - kurulum yapma, uyumluluk katmanı var
             if missing_module.lower() == 'userbot':
-                self._setup_compatibility()
                 self._retry_count[retry_key] = self._retry_count.get(retry_key, 0) + 1
                 return await self.activate_plugin(user_id, plugin_name, client)
             
-            print(f"[PLUGIN] ⚠️ Import hatası: {missing_module}")
+            print(f"[PLUGIN] Import hatası: {missing_module}")
             success, msg = self.install_package(missing_module)
             
             if success:
@@ -471,14 +580,14 @@ class PluginManager:
             else:
                 if retry_key in self._retry_count:
                     del self._retry_count[retry_key]
-                return False, f"❌ Eksik modül kurulamadı: `{missing_module}`\n\nHata: `{msg}`"
+                return False, f"❌ Modül kurulamadı: `{missing_module}`"
             
         except Exception as e:
             if retry_key in self._retry_count:
                 del self._retry_count[retry_key]
             import traceback
             traceback.print_exc()
-            return False, f"❌ Plugin yüklenirken hata:\n`{str(e)}`"
+            return False, f"❌ Plugin hatası:\n`{str(e)}`"
     
     async def deactivate_plugin(self, user_id: int, plugin_name: str) -> Tuple[bool, str]:
         """Kullanıcı için plugin deaktif et"""
@@ -497,6 +606,11 @@ class PluginManager:
                 except:
                     pass
             
+            # sys.modules'dan kaldır
+            module_name = f"plugin_{plugin_name}_{user_id}"
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+            
             del self.user_active_plugins[user_id][plugin_name]
             
             user = await db.get_user(user_id)
@@ -508,7 +622,7 @@ class PluginManager:
             return True, f"✅ `{plugin_name}` deaktif edildi"
             
         except Exception as e:
-            return False, f"Plugin deaktif edilirken hata: `{str(e)}`"
+            return False, f"Hata: `{str(e)}`"
     
     async def get_user_plugins(self, user_id: int) -> Dict:
         """Kullanıcının plugin durumunu getir"""
@@ -523,23 +637,34 @@ class PluginManager:
         }
     
     async def restore_user_plugins(self, user_id: int, client: TelegramClient) -> int:
-        """Kullanıcının önceden aktif pluginlerini geri yükle"""
+        """Kullanıcının pluginlerini geri yükle - PARALEL"""
         user = await db.get_user(user_id)
         if not user:
             return 0
         
         active_plugins = user.get("active_plugins", [])
-        restored = 0
+        if not active_plugins:
+            return 0
         
-        for plugin_name in active_plugins:
-            success, _ = await self.activate_plugin(user_id, plugin_name, client)
-            if success:
-                restored += 1
+        async def load_single_plugin(plugin_name):
+            """Tek bir plugini yükle"""
+            try:
+                success, msg = await self.activate_plugin(user_id, plugin_name, client)
+                if success:
+                    return plugin_name
+            except:
+                pass
+            return None
         
+        # Tüm pluginleri paralel yükle
+        tasks = [load_single_plugin(p) for p in active_plugins]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        restored = sum(1 for r in results if r is not None and not isinstance(r, Exception))
         return restored
     
     async def get_all_plugins_formatted(self, user_id: int = None) -> str:
-        """Tüm pluginleri formatlanmış olarak getir"""
+        """Tüm pluginleri formatla"""
         all_plugins = await db.get_all_plugins()
         
         if not all_plugins:
@@ -547,35 +672,36 @@ class PluginManager:
         
         text = "🔌 **Mevcut Plugin'ler:**\n\n"
         
-        public_plugins = [p for p in all_plugins if p.get("is_public")]
-        private_plugins = [p for p in all_plugins if not p.get("is_public")]
+        public_plugins = [p for p in all_plugins if p.get("is_public", True)]
+        private_plugins = [p for p in all_plugins if not p.get("is_public", True)]
         
         if public_plugins:
-            text += "**🌐 Genel Plugin'ler:**\n"
+            text += "**🌐 Genel:**\n"
             for p in public_plugins:
-                status = "✅" if p.get("is_active") else "❌"
+                status = "✅" if p.get("is_active", True) else "❌"
                 cmds = ", ".join([f"`.{c}`" for c in p.get("commands", [])[:3]])
-                if len(p.get("commands", [])) > 3:
-                    cmds += "..."
                 text += f"{status} `{p['name']}` - {cmds}\n"
             text += "\n"
         
         if private_plugins:
-            text += "**🔒 Özel Plugin'ler:**\n"
+            text += "**🔒 Özel:**\n"
             for p in private_plugins:
-                status = "✅" if p.get("is_active") else "❌"
-                access = "🔓" if (user_id and user_id in p.get("allowed_users", [])) else "🔐"
-                text += f"{status} {access} `{p['name']}`\n"
+                status = "✅" if p.get("is_active", True) else "❌"
+                text += f"{status} `{p['name']}`\n"
         
         text += f"\n**Toplam:** {len(all_plugins)} plugin"
         
         return text
     
     def clear_user_plugins(self, user_id: int):
-        """Kullanıcının tüm aktif pluginlerini temizle"""
+        """Kullanıcının pluginlerini temizle"""
         if user_id in self.user_active_plugins:
+            for plugin_name in list(self.user_active_plugins[user_id].keys()):
+                module_name = f"plugin_{plugin_name}_{user_id}"
+                if module_name in sys.modules:
+                    del sys.modules[module_name]
             del self.user_active_plugins[user_id]
 
 
-# Global Plugin Manager instance
+# Global instance
 plugin_manager = PluginManager()

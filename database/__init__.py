@@ -366,6 +366,67 @@ class Database:
     async def get_stats(self) -> Dict:
         """İstatistikleri getir"""
         return self.local.get_stats()
+    
+    # ==========================================
+    # TEPKİ SİSTEMİ
+    # ==========================================
+    
+    async def get_user_reaction(self, reaction_key: str, user_id: int) -> Optional[str]:
+        """Kullanıcının tepkisini getir"""
+        # Önce MongoDB'den dene (daha güncel)
+        if self.mongo.connected:
+            reaction = await self.mongo.get_user_reaction(reaction_key, user_id)
+            if reaction:
+                return reaction
+        
+        # Yerel dosyadan al
+        return self.local.get_user_reaction(reaction_key, user_id)
+    
+    async def set_user_reaction(self, reaction_key: str, user_id: int, emoji: Optional[str]) -> bool:
+        """Kullanıcının tepkisini kaydet veya sil"""
+        # Yerel dosyaya kaydet
+        local_result = self.local.set_user_reaction(reaction_key, user_id, emoji)
+        
+        # MongoDB'ye kaydet
+        if self.mongo.connected:
+            await self.mongo.set_user_reaction(reaction_key, user_id, emoji)
+        
+        return local_result
+    
+    # ==========================================
+    # SİLİNEN KULLANICILAR
+    # ==========================================
+    
+    async def get_deleted_users(self) -> List[Dict]:
+        """Silinen/banlanan hesapları getir"""
+        all_users = await self.get_all_users()
+        return [u for u in all_users if u.get("is_deleted", False)]
+    
+    async def mark_user_deleted(self, user_id: int) -> bool:
+        """Kullanıcıyı silinmiş olarak işaretle"""
+        import time
+        return await self.update_user(user_id, {
+            "is_deleted": True,
+            "deleted_at": time.time(),
+            "is_logged_in": False
+        })
+    
+    # ==========================================
+    # ALWAYS-ON KULLANICILAR
+    # ==========================================
+    
+    async def get_always_on_users(self) -> List[Dict]:
+        """Always-on plugin'i olan kullanıcıları getir"""
+        all_users = await self.get_all_users()
+        return [u for u in all_users if u.get("always_on_plugins", [])]
+    
+    async def update_always_on_plugins(self, user_id: int, plugins: List[str]) -> bool:
+        """Kullanıcının always-on plugin listesini güncelle"""
+        return await self.update_user(user_id, {"always_on_plugins": plugins})
+    
+    async def update_last_confirm(self, user_id: int, timestamp: float) -> bool:
+        """Son onay zamanını güncelle"""
+        return await self.update_user(user_id, {"last_confirm": timestamp})
 
 
 # Global Database instance

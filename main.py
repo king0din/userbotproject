@@ -1,8 +1,9 @@
 # ============================================
 # KingTG UserBot Service - Ana Bot Dosyası
 # ============================================
-# Sürüm: 2.0.0
+# Sürüm: 2.1.0
 # Geliştirici: @KingOdi
+# Smart Session Manager ile optimize edilmiş
 # ============================================
 
 import os
@@ -13,16 +14,24 @@ import time
 # Proje dizinini path'e ekle
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from telethon import TelegramClient
+from telethon import TelegramClient, events
 from dotenv import load_dotenv
 
 load_dotenv()
 
 import config
 from database import database as db
-from userbot import userbot_manager, plugin_manager
+
+# Smart Session Manager
+from userbot.smart_manager import smart_session_manager
+from userbot.plugins import plugin_manager
+
+# Eski uyumluluk için alias
+userbot_manager = smart_session_manager
+
 from handlers import register_user_handlers, register_admin_handlers
 from utils import send_log, get_readable_time
+from utils.bot_api import bot_api
 
 # ============================================
 # GLOBAL DEĞİŞKENLER
@@ -42,7 +51,7 @@ def log(text):
     print(f"\033[94m[KingTG]\033[0m {text}")
 
 # ============================================
-# SESSION SONLANDIRMA CALLBACK
+# CALLBACK'LER
 # ============================================
 
 async def on_session_terminated(user_id: int):
@@ -59,6 +68,67 @@ async def on_session_terminated(user_id: int):
         )
     except Exception as e:
         log(f"⚠️ Session sonlandırma bildirimi gönderilemedi: {e}")
+
+async def send_message_callback(user_id: int, text: str, buttons: dict = None):
+    """Bot üzerinden kullanıcıya mesaj gönder (onay sistemi için)"""
+    try:
+        await bot_api.send_message(
+            chat_id=user_id,
+            text=text,
+            reply_markup=buttons
+        )
+    except Exception as e:
+        log(f"⚠️ Mesaj gönderilemedi: user={user_id} - {e}")
+
+# ============================================
+# ALWAYS-ON ONAY HANDLER'LARI
+# ============================================
+
+def register_always_on_handlers(bot):
+    """Always-on onay callback'lerini kaydet"""
+    
+    @bot.on(events.CallbackQuery(pattern=rb"always_confirm_(\d+)"))
+    async def always_on_confirm(event):
+        """Always-on onaylandı"""
+        user_id = int(event.pattern_match.group(1).decode())
+        
+        # Sadece ilgili kullanıcı onaylayabilir
+        if event.sender_id != user_id:
+            await event.answer("❌ Bu buton sana ait değil!", alert=True)
+            return
+        
+        # Onayı işle
+        await smart_session_manager.handle_confirmation(user_id, confirmed=True)
+        
+        # Mesajı güncelle
+        await event.edit(
+            "✅ **Sürekli Dinleme Onaylandı**\n\n"
+            "Plugin'leriniz 3 gün daha aktif kalacak.\n"
+            "Sonraki onay: 3 gün sonra"
+        )
+        
+        await event.answer("✅ Onaylandı!")
+    
+    @bot.on(events.CallbackQuery(pattern=rb"always_stop_(\d+)"))
+    async def always_on_stop(event):
+        """Always-on durduruldu"""
+        user_id = int(event.pattern_match.group(1).decode())
+        
+        if event.sender_id != user_id:
+            await event.answer("❌ Bu buton sana ait değil!", alert=True)
+            return
+        
+        # Onayı reddet
+        await smart_session_manager.handle_confirmation(user_id, confirmed=False)
+        
+        # Mesajı güncelle
+        await event.edit(
+            "⏸️ **Sürekli Dinleme Durduruldu**\n\n"
+            "Plugin'leriniz deaktif edildi.\n"
+            "Tekrar aktif etmek için plugin'i yeniden başlatın."
+        )
+        
+        await event.answer("⏸️ Durduruldu!")
 
 # ============================================
 # RESTART KONTROLÜ
@@ -95,6 +165,7 @@ async def main():
     log("=" * 50)
     log(f"🤖 KingTG UserBot Service v{config.__version__}")
     log(f"👨‍💻 Geliştirici: {config.__author__}")
+    log("🚀 Smart Session Manager aktif")
     log("=" * 50)
     
     # Konfigürasyon kontrolü
@@ -127,15 +198,33 @@ async def main():
     log("🔄 Handler'lar yükleniyor...")
     register_user_handlers(bot)
     register_admin_handlers(bot)
+    register_always_on_handlers(bot)
     log("✅ Handler'lar yüklendi")
     
-    # Userbot manager callback'ini ayarla
-    userbot_manager.set_session_terminated_callback(on_session_terminated)
+    # Smart Session Manager callback'lerini ayarla
+    smart_session_manager.set_session_terminated_callback(on_session_terminated)
+    smart_session_manager.set_send_message_callback(send_message_callback)
     
-    # Kaydedilmiş session'ları geri yükle
-    log("🔄 Kaydedilmiş session'lar yükleniyor...")
-    restored = await userbot_manager.restore_sessions()
-    log(f"✅ {restored} session geri yüklendi")
+    # Plugin bağımlılıklarını önceden kur
+    log("🔄 Plugin bağımlılıkları kontrol ediliyor...")
+    await plugin_manager.preinstall_all_dependencies()
+    
+    # Session'ları geri yükle (sadece always-on)
+    log("🔄 Always-on session'lar yükleniyor...")
+    restored = await smart_session_manager.restore_sessions()
+    
+    # İstatistikleri göster
+    stats = smart_session_manager.get_stats()
+    log(f"✅ {restored} always-on session aktif")
+    log(f"📦 {stats['session_cache']} session cache'de (on-demand hazır)")
+    
+    # Arka plan görevlerini başlat
+    log("🔄 Arka plan görevleri başlatılıyor...")
+    await smart_session_manager.start_background_tasks()
+    log("✅ Arka plan görevleri aktif:")
+    log("   • İnaktif client temizleme (her 1 dk)")
+    log("   • Always-on onay kontrolü (her 1 saat)")
+    log("   • Kullanıcı senkronizasyonu (her 24 saat)")
     
     # Restart kontrolü
     await check_restart()
@@ -144,13 +233,14 @@ async def main():
     if config.LOG_CHANNEL:
         try:
             uptime = get_readable_time(time.time() - start_time)
-            stats = await db.get_stats()
+            db_stats = await db.get_stats()
             
             text = f"🤖 **Bot Başlatıldı!**\n\n"
             text += f"🔢 Sürüm: `v{config.__version__}`\n"
-            text += f"👥 Kullanıcı: `{stats.get('total_users', 0)}`\n"
-            text += f"🔌 Plugin: `{stats.get('total_plugins', 0)}`\n"
-            text += f"✅ Aktif Userbot: `{restored}`\n"
+            text += f"👥 Kullanıcı: `{db_stats.get('total_users', 0)}`\n"
+            text += f"🔌 Plugin: `{db_stats.get('total_plugins', 0)}`\n"
+            text += f"🟢 Always-On: `{stats['always_on_users']}`\n"
+            text += f"📦 On-Demand Hazır: `{stats['session_cache']}`\n"
             text += f"🔗 MongoDB: `{'Bağlı' if mongo_connected else 'Bağlı Değil'}`"
             
             await bot.send_message(config.LOG_CHANNEL, text)
@@ -161,7 +251,8 @@ async def main():
     log("✅ Bot hazır!")
     log(f"👤 Sahip: {config.OWNER_ID}")
     log(f"📊 Kullanıcılar: {await db.get_user_count()}")
-    log(f"🔌 Aktif Userbot: {len(userbot_manager.active_clients)}")
+    log(f"🟢 Always-On: {stats['always_on_users']}")
+    log(f"📦 On-Demand: {stats['session_cache']}")
     log("=" * 50)
     
     # Bot çalışmaya devam et
@@ -175,8 +266,8 @@ async def shutdown():
     """Kapanış işlemleri"""
     log("🔄 Bot kapatılıyor...")
     
-    # Tüm userbot'ları kapat
-    await userbot_manager.shutdown()
+    # Smart Session Manager'ı kapat
+    await smart_session_manager.shutdown()
     
     # Bot bağlantısını kapat
     await bot.disconnect()
@@ -189,10 +280,9 @@ async def shutdown():
 
 if __name__ == '__main__':
     try:
-        asyncio.get_event_loop().run_until_complete(main())
+        asyncio.run(main())
     except KeyboardInterrupt:
         log("⚠️ Klavye kesintisi algılandı")
-        asyncio.get_event_loop().run_until_complete(shutdown())
     except Exception as e:
         log(f"❌ Kritik hata: {e}")
         import traceback
