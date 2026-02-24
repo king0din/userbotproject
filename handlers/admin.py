@@ -831,23 +831,90 @@ def register_admin_handlers(bot):
             await event.answer(config.MESSAGES["admin_only"], alert=True)
             return
         await event.edit("⏳ **Yükleniyor...**")
+        
+        import aiohttp
+        import time as time_module
+        
+        # Hız testi fonksiyonları
+        async def test_speed():
+            results = {'ping': None, 'download': None, 'upload': None}
+            
+            # Ping
+            try:
+                start = time_module.time()
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+                    async with session.head("https://www.google.com"):
+                        pass
+                results['ping'] = (time_module.time() - start) * 1000
+            except:
+                pass
+            
+            # Download
+            try:
+                start = time_module.time()
+                total_bytes = 0
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+                    async with session.get("https://speed.cloudflare.com/__down?bytes=5000000") as response:
+                        async for chunk in response.content.iter_chunked(1024 * 64):
+                            total_bytes += len(chunk)
+                elapsed = time_module.time() - start
+                if elapsed > 0:
+                    results['download'] = (total_bytes * 8) / (elapsed * 1_000_000)
+            except:
+                pass
+            
+            # Upload
+            try:
+                data = b'0' * (1 * 1024 * 1024)  # 1MB
+                start = time_module.time()
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+                    async with session.post("https://speed.cloudflare.com/__up", data=data):
+                        pass
+                elapsed = time_module.time() - start
+                if elapsed > 0:
+                    results['upload'] = (len(data) * 8) / (elapsed * 1_000_000)
+            except:
+                pass
+            
+            return results
+        
         db_stats = await db.get_stats()
         sys_stats = await get_system_stats()
+        speed = await test_speed()
         uptime = get_readable_time(time.time() - start_time)
+        
+        # Emoji'ler
+        ping_emoji = "🟢" if speed['ping'] and speed['ping'] <= 50 else "🟡" if speed['ping'] and speed['ping'] <= 100 else "🔴"
+        dl_emoji = "🚀" if speed['download'] and speed['download'] >= 100 else "⚡" if speed['download'] and speed['download'] >= 50 else "📶"
+        ul_emoji = "🚀" if speed['upload'] and speed['upload'] >= 50 else "⚡" if speed['upload'] and speed['upload'] >= 25 else "📶"
+        
         text = "📊 **Bot İstatistikleri**\n\n"
         text += f"👥 **Kullanıcı:** `{db_stats.get('total_users', 0)}` (Aktif: `{db_stats.get('logged_in_users', 0)}`)\n"
         text += f"🔌 **Plugin:** `{db_stats.get('total_plugins', 0)}`\n"
         text += f"👑 **Sudo:** `{db_stats.get('sudo_users', 0)}` | 🚫 **Ban:** `{db_stats.get('banned_users', 0)}`\n\n"
+        
         text += "━━━━━━━━━━━━━━━━━━━━\n🖥️ **Sistem:**\n\n"
         text += f"💻 **CPU:** `{sys_stats['cpu_percent']}%` ({sys_stats['cpu_count']} core)\n"
         text += f"🧠 **RAM:** `{sys_stats['ram_used']}` / `{sys_stats['ram_total']}` ({sys_stats['ram_percent']}%)\n"
-        text += f"💾 **Disk:** `{sys_stats['disk_used']}` / `{sys_stats['disk_total']}` ({sys_stats['disk_percent']}%)\n"
-        text += f"📶 **Ping:** `{sys_stats['ping']} ms`\n" if sys_stats['ping'] > 0 else "📶 **Ping:** `N/A`\n"
-        text += f"📤 **Gönderilen:** `{sys_stats['net_sent']}`\n"
-        text += f"📥 **Alınan:** `{sys_stats['net_recv']}`\n\n"
-        text += f"━━━━━━━━━━━━━━━━━━━━\n⏱️ **Uptime:** `{uptime}`\n🔢 **Sürüm:** `v{config.__version__}`"
+        text += f"💾 **Disk:** `{sys_stats['disk_used']}` / `{sys_stats['disk_total']}` ({sys_stats['disk_percent']}%)\n\n"
+        
+        text += "━━━━━━━━━━━━━━━━━━━━\n🌐 **Ağ:**\n\n"
+        if speed['ping']:
+            text += f"{ping_emoji} **Ping:** `{speed['ping']:.1f} ms`\n"
+        else:
+            text += "📶 **Ping:** `N/A`\n"
+        if speed['download']:
+            text += f"{dl_emoji} **İndirme:** `{speed['download']:.2f} Mbps`\n"
+        else:
+            text += "⬇️ **İndirme:** `N/A`\n"
+        if speed['upload']:
+            text += f"{ul_emoji} **Yükleme:** `{speed['upload']:.2f} Mbps`\n"
+        else:
+            text += "⬆️ **Yükleme:** `N/A`\n"
+        
+        text += f"\n━━━━━━━━━━━━━━━━━━━━\n⏱️ **Uptime:** `{uptime}`\n🔢 **Sürüm:** `v{config.__version__}`"
+        
         await event.edit(text, buttons=[
-            [Button.inline("🚀 Hız Testi", b"speedtest")],
             [Button.inline("🔄 Yenile", b"stats")],
             back_button("settings_menu")
         ])
@@ -867,98 +934,6 @@ def register_admin_handlers(bot):
         text += f"💾 Disk: `{sys_stats['disk_percent']}%` | 📶 Ping: `{sys_stats['ping']} ms`\n\n"
         text += f"⏱️ Uptime: `{uptime}`"
         await msg.edit(text)
-    
-    @bot.on(events.CallbackQuery(data=b"speedtest"))
-    async def speedtest_callback(event):
-        """Hız testi - İstatistikler içinden erişilir"""
-        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
-            await event.answer(config.MESSAGES["admin_only"], alert=True)
-            return
-        
-        await event.answer("🚀 Hız testi başlatılıyor...")
-        
-        import aiohttp
-        import time as time_module
-        
-        async def test_download():
-            test_urls = [
-                "https://speed.cloudflare.com/__down?bytes=10000000",
-                "https://proof.ovh.net/files/10Mb.dat",
-            ]
-            
-            for url in test_urls:
-                try:
-                    start = time_module.time()
-                    total_bytes = 0
-                    
-                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                        async with session.get(url) as response:
-                            async for chunk in response.content.iter_chunked(1024 * 64):
-                                total_bytes += len(chunk)
-                    
-                    elapsed = time_module.time() - start
-                    if elapsed > 0:
-                        return (total_bytes * 8) / (elapsed * 1_000_000)
-                except:
-                    continue
-            return None
-        
-        async def test_upload():
-            try:
-                data = b'0' * (2 * 1024 * 1024)
-                start = time_module.time()
-                
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                    async with session.post("https://speed.cloudflare.com/__up", data=data) as response:
-                        await response.read()
-                
-                elapsed = time_module.time() - start
-                if elapsed > 0:
-                    return (len(data) * 8) / (elapsed * 1_000_000)
-            except:
-                pass
-            return None
-        
-        async def test_ping():
-            try:
-                start = time_module.time()
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-                    async with session.head("https://www.google.com") as response:
-                        pass
-                return (time_module.time() - start) * 1000
-            except:
-                return None
-        
-        try:
-            await event.edit("🚀 **Hız Testi**\n\n⏳ Test ediliyor...")
-            
-            ping = await test_ping()
-            download = await test_download()
-            upload = await test_upload()
-            
-            ping_emoji = "🟢" if ping and ping <= 50 else "🟡" if ping and ping <= 100 else "🔴"
-            dl_emoji = "🚀" if download and download >= 100 else "⚡" if download and download >= 50 else "✅" if download and download >= 25 else "📶" if download and download >= 10 else "🐌"
-            ul_emoji = "🚀" if upload and upload >= 50 else "⚡" if upload and upload >= 25 else "✅" if upload and upload >= 10 else "📶" if upload and upload >= 5 else "🐌"
-            
-            result_text = "🚀 **Hız Testi Sonucu**\n\n━━━━━━━━━━━━━━━━━━━━\n"
-            result_text += f"{ping_emoji} **Ping:** `{ping:.1f} ms`\n" if ping else "📶 **Ping:** `N/A`\n"
-            result_text += f"{dl_emoji} **İndirme:** `{download:.2f} Mbps`\n" if download else "⬇️ **İndirme:** `N/A`\n"
-            result_text += f"{ul_emoji} **Yükleme:** `{upload:.2f} Mbps`\n" if upload else "⬆️ **Yükleme:** `N/A`\n"
-            result_text += "━━━━━━━━━━━━━━━━━━━━\n📡 Cloudflare CDN"
-            
-            await event.edit(
-                result_text,
-                buttons=[
-                    [Button.inline("🔄 Tekrar Test", b"speedtest")],
-                    back_button("stats")
-                ]
-            )
-            
-        except Exception as e:
-            await event.edit(
-                f"❌ **Hata:** `{str(e)}`",
-                buttons=[back_button("stats")]
-            )
     
     @bot.on(events.CallbackQuery(data=b"update_bot"))
     async def update_bot_handler(event):
