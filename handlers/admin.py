@@ -1671,13 +1671,23 @@ def register_admin_handlers(bot):
         access = match.group(2).decode()
         
         is_public = access == "public"
+        
+        # Önceki durumu kaydet (genel yapılırken eski kullanıcıları bulmak için)
+        plugin = await db.get_plugin(plugin_name)
+        previous_users = []
+        if is_public and plugin:
+            # Özel yapılmadan önce kimler kullanıyordu - DB'de hala active_plugins'de olanlar
+            users = await db.get_all_users()
+            for user in users:
+                if plugin_name in user.get("active_plugins", []):
+                    previous_users.append(user.get("user_id"))
+        
         await db.update_plugin(plugin_name, {"is_public": is_public})
         
-        deactivated_count = 0
+        count = 0
         
-        # Özel yapıldığında izinsiz kullanıcılarda deaktif et
         if not is_public:
-            plugin = await db.get_plugin(plugin_name)
+            # Özel yapıldığında izinsiz kullanıcılarda deaktif et
             allowed_users = plugin.get("allowed_users", []) if plugin else []
             
             users = await db.get_all_users()
@@ -1701,16 +1711,40 @@ def register_admin_handlers(bot):
                     try:
                         success, _ = await plugin_manager.deactivate_plugin(user_id, plugin_name)
                         if success:
-                            deactivated_count += 1
+                            count += 1
                     except:
                         pass
             
-            if deactivated_count > 0:
-                await event.answer(f"✅ Özel yapıldı! {deactivated_count} kullanıcıda kaldırıldı.", alert=True)
+            if count > 0:
+                await event.answer(f"✅ Özel yapıldı! {count} kullanıcıda kaldırıldı.", alert=True)
             else:
                 await event.answer(f"✅ Özel yapıldı!", alert=True)
         else:
-            await event.answer(f"✅ Genel yapıldı!", alert=True)
+            # Genel yapıldığında önceden yüklenmiş kullanıcılarda tekrar aktif et
+            users = await db.get_all_users()
+            for user in users:
+                user_id = user.get("user_id")
+                active = user.get("active_plugins", [])
+                
+                # Zaten aktifse atla
+                if plugin_name in active:
+                    # Ama handler yüklü olmayabilir, client varsa yükle
+                    client = smart_session_manager.get_client(user_id)
+                    if client:
+                        # user_active_plugins'de yoksa yükle
+                        if user_id not in plugin_manager.user_active_plugins or \
+                           plugin_name not in plugin_manager.user_active_plugins.get(user_id, {}):
+                            try:
+                                success, _ = await plugin_manager.activate_plugin(user_id, plugin_name, client)
+                                if success:
+                                    count += 1
+                            except:
+                                pass
+            
+            if count > 0:
+                await event.answer(f"✅ Genel yapıldı! {count} kullanıcıda yüklendi.", alert=True)
+            else:
+                await event.answer(f"✅ Genel yapıldı!", alert=True)
         
         await show_plugin_settings(event, plugin_name)
     
