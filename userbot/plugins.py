@@ -22,6 +22,8 @@ class PluginManager:
     def __init__(self):
         self.loaded_plugins: Dict[str, Dict] = {}
         self.user_active_plugins: Dict[int, Dict[str, any]] = {}
+        # Kullanıcı başına kaydedilen handler'lar
+        self.user_handlers: Dict[int, Dict[str, List]] = {}
         self._retry_count: Dict[str, int] = {}
         self._compat_installed = False
         self._installed_packages: Set[str] = set()  # Kurulu paket cache
@@ -528,12 +530,24 @@ class PluginManager:
             # Modülü sys.modules'a ekle
             sys.modules[module_name] = module
             
+            # Mevcut handler sayısını kaydet (önceki durum)
+            handlers_before = len(client.list_event_handlers())
+            
             # Kodu çalıştır
             exec(compile(patched_content, file_path, 'exec'), module.__dict__)
             
             # Register fonksiyonu varsa çağır
             if hasattr(module, 'register') and callable(module.register):
                 module.register(client)
+            
+            # Yeni eklenen handler'ları tespit et ve kaydet
+            handlers_after = client.list_event_handlers()
+            new_handlers = handlers_after[handlers_before:]
+            
+            # Handler'ları kullanıcı ve plugin bazında sakla
+            if user_id not in self.user_handlers:
+                self.user_handlers[user_id] = {}
+            self.user_handlers[user_id][plugin_name] = new_handlers
             
             self.user_active_plugins[user_id][plugin_name] = module
             
@@ -600,6 +614,24 @@ class PluginManager:
         try:
             module = self.user_active_plugins[user_id][plugin_name]
             
+            # Önce event handler'ları kaldır
+            if user_id in self.user_handlers and plugin_name in self.user_handlers[user_id]:
+                handlers = self.user_handlers[user_id][plugin_name]
+                
+                # Client'ı bul
+                client = getattr(module, 'client', None)
+                
+                if client and handlers:
+                    for callback, event in handlers:
+                        try:
+                            client.remove_event_handler(callback, event)
+                            print(f"[PLUGIN] Handler kaldırıldı: {plugin_name} - {callback.__name__}")
+                        except Exception as e:
+                            print(f"[PLUGIN] Handler kaldırma hatası: {e}")
+                
+                del self.user_handlers[user_id][plugin_name]
+            
+            # Unregister fonksiyonu varsa çağır
             if hasattr(module, 'unregister') and callable(module.unregister):
                 try:
                     module.unregister()
@@ -622,6 +654,8 @@ class PluginManager:
             return True, f"✅ `{plugin_name}` deaktif edildi"
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return False, f"Hata: `{str(e)}`"
     
     async def get_user_plugins(self, user_id: int) -> Dict:
@@ -697,10 +731,30 @@ class PluginManager:
         """Kullanıcının pluginlerini temizle"""
         if user_id in self.user_active_plugins:
             for plugin_name in list(self.user_active_plugins[user_id].keys()):
+                module = self.user_active_plugins[user_id].get(plugin_name)
+                
+                # Handler'ları kaldır
+                if user_id in self.user_handlers and plugin_name in self.user_handlers[user_id]:
+                    handlers = self.user_handlers[user_id][plugin_name]
+                    client = getattr(module, 'client', None) if module else None
+                    
+                    if client and handlers:
+                        for callback, event in handlers:
+                            try:
+                                client.remove_event_handler(callback, event)
+                            except:
+                                pass
+                
+                # sys.modules'dan kaldır
                 module_name = f"plugin_{plugin_name}_{user_id}"
                 if module_name in sys.modules:
                     del sys.modules[module_name]
+            
             del self.user_active_plugins[user_id]
+        
+        # Handler kayıtlarını temizle
+        if user_id in self.user_handlers:
+            del self.user_handlers[user_id]
 
 
 # Global instance
