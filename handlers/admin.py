@@ -846,7 +846,11 @@ def register_admin_handlers(bot):
         text += f"📤 **Gönderilen:** `{sys_stats['net_sent']}`\n"
         text += f"📥 **Alınan:** `{sys_stats['net_recv']}`\n\n"
         text += f"━━━━━━━━━━━━━━━━━━━━\n⏱️ **Uptime:** `{uptime}`\n🔢 **Sürüm:** `v{config.__version__}`"
-        await event.edit(text, buttons=[[Button.inline("🔄 Yenile", b"stats")], back_button("settings_menu")])
+        await event.edit(text, buttons=[
+            [Button.inline("🚀 Hız Testi", b"speedtest")],
+            [Button.inline("🔄 Yenile", b"stats")],
+            back_button("settings_menu")
+        ])
     
     @bot.on(events.NewMessage(pattern=r'^/stats$'))
     async def stats_command(event):
@@ -863,6 +867,213 @@ def register_admin_handlers(bot):
         text += f"💾 Disk: `{sys_stats['disk_percent']}%` | 📶 Ping: `{sys_stats['ping']} ms`\n\n"
         text += f"⏱️ Uptime: `{uptime}`"
         await msg.edit(text)
+    
+    @bot.on(events.NewMessage(pattern=r'^/speedtest$'))
+    async def speedtest_command(event):
+        """İnternet hız testi"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            return
+        
+        msg = await event.respond(
+            "🚀 **İnternet Hız Testi**\n\n"
+            "⏳ Test başlatılıyor...\n"
+            "━━━━━━━━━━━━━━━━━━━━"
+        )
+        
+        try:
+            import speedtest
+        except ImportError:
+            await msg.edit(
+                "❌ **speedtest-cli yüklü değil!**\n\n"
+                "Yüklemek için: `pip install speedtest-cli`"
+            )
+            return
+        
+        try:
+            # Sunucu seçimi
+            await msg.edit(
+                "🚀 **İnternet Hız Testi**\n\n"
+                "🔍 En iyi sunucu aranıyor...\n"
+                "━━━━━━━━━━━━━━━━━━━━"
+            )
+            
+            st = speedtest.Speedtest()
+            st.get_best_server()
+            server = st.best
+            
+            # İndirme testi
+            await msg.edit(
+                "🚀 **İnternet Hız Testi**\n\n"
+                f"🌐 Sunucu: `{server['sponsor']}` ({server['country']})\n"
+                f"📍 Konum: `{server['name']}`\n"
+                f"📶 Ping: `{server['latency']:.1f} ms`\n\n"
+                "⬇️ İndirme hızı test ediliyor...\n"
+                "▓▓▓▓▓░░░░░░░░░░░░░░░ 25%\n"
+                "━━━━━━━━━━━━━━━━━━━━"
+            )
+            
+            download = st.download() / 1_000_000  # Mbps
+            
+            # Yükleme testi
+            await msg.edit(
+                "🚀 **İnternet Hız Testi**\n\n"
+                f"🌐 Sunucu: `{server['sponsor']}` ({server['country']})\n"
+                f"📍 Konum: `{server['name']}`\n"
+                f"📶 Ping: `{server['latency']:.1f} ms`\n\n"
+                f"⬇️ İndirme: `{download:.2f} Mbps`\n"
+                "⬆️ Yükleme hızı test ediliyor...\n"
+                "▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░ 60%\n"
+                "━━━━━━━━━━━━━━━━━━━━"
+            )
+            
+            upload = st.upload() / 1_000_000  # Mbps
+            
+            # Sonuç
+            # Hız değerlendirmesi
+            if download >= 100:
+                download_emoji = "🚀"
+                download_rating = "Mükemmel"
+            elif download >= 50:
+                download_emoji = "⚡"
+                download_rating = "Çok İyi"
+            elif download >= 25:
+                download_emoji = "✅"
+                download_rating = "İyi"
+            elif download >= 10:
+                download_emoji = "📶"
+                download_rating = "Orta"
+            else:
+                download_emoji = "🐌"
+                download_rating = "Yavaş"
+            
+            if upload >= 50:
+                upload_emoji = "🚀"
+                upload_rating = "Mükemmel"
+            elif upload >= 25:
+                upload_emoji = "⚡"
+                upload_rating = "Çok İyi"
+            elif upload >= 10:
+                upload_emoji = "✅"
+                upload_rating = "İyi"
+            elif upload >= 5:
+                upload_emoji = "📶"
+                upload_rating = "Orta"
+            else:
+                upload_emoji = "🐌"
+                upload_rating = "Yavaş"
+            
+            # Ping değerlendirmesi
+            ping = server['latency']
+            if ping <= 20:
+                ping_emoji = "🟢"
+                ping_rating = "Mükemmel"
+            elif ping <= 50:
+                ping_emoji = "🟡"
+                ping_rating = "İyi"
+            elif ping <= 100:
+                ping_emoji = "🟠"
+                ping_rating = "Orta"
+            else:
+                ping_emoji = "🔴"
+                ping_rating = "Yüksek"
+            
+            result_text = (
+                "🚀 **İnternet Hız Testi - Sonuç**\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                f"🌐 **Sunucu:** `{server['sponsor']}`\n"
+                f"📍 **Konum:** `{server['name']}, {server['country']}`\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"{ping_emoji} **Ping:** `{ping:.1f} ms` ({ping_rating})\n\n"
+                f"{download_emoji} **İndirme:** `{download:.2f} Mbps`\n"
+                f"   └ {download_rating}\n\n"
+                f"{upload_emoji} **Yükleme:** `{upload:.2f} Mbps`\n"
+                f"   └ {upload_rating}\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 100%"
+            )
+            
+            await msg.edit(result_text)
+            
+        except Exception as e:
+            await msg.edit(f"❌ **Hata:** `{str(e)}`")
+    
+    @bot.on(events.CallbackQuery(data=b"speedtest"))
+    async def speedtest_callback(event):
+        """Callback ile hız testi"""
+        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
+            await event.answer(config.MESSAGES["admin_only"], alert=True)
+            return
+        
+        await event.answer("🚀 Hız testi başlatılıyor...")
+        
+        try:
+            import speedtest
+        except ImportError:
+            await event.edit(
+                "❌ **speedtest-cli yüklü değil!**\n\n"
+                "Yüklemek için: `pip install speedtest-cli`",
+                buttons=[back_button("stats")]
+            )
+            return
+        
+        try:
+            await event.edit(
+                "🚀 **İnternet Hız Testi**\n\n"
+                "🔍 En iyi sunucu aranıyor...\n"
+                "━━━━━━━━━━━━━━━━━━━━"
+            )
+            
+            st = speedtest.Speedtest()
+            st.get_best_server()
+            server = st.best
+            
+            await event.edit(
+                "🚀 **İnternet Hız Testi**\n\n"
+                f"🌐 `{server['sponsor']}`\n"
+                f"📶 Ping: `{server['latency']:.1f} ms`\n\n"
+                "⬇️ İndirme test ediliyor...\n"
+                "▓▓▓▓▓░░░░░░░░░░░░░░░"
+            )
+            
+            download = st.download() / 1_000_000
+            
+            await event.edit(
+                "🚀 **İnternet Hız Testi**\n\n"
+                f"🌐 `{server['sponsor']}`\n"
+                f"📶 Ping: `{server['latency']:.1f} ms`\n\n"
+                f"⬇️ İndirme: `{download:.2f} Mbps`\n"
+                "⬆️ Yükleme test ediliyor...\n"
+                "▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░"
+            )
+            
+            upload = st.upload() / 1_000_000
+            ping = server['latency']
+            
+            # Emoji seç
+            dl_emoji = "🚀" if download >= 100 else "⚡" if download >= 50 else "✅" if download >= 25 else "📶"
+            ul_emoji = "🚀" if upload >= 50 else "⚡" if upload >= 25 else "✅" if upload >= 10 else "📶"
+            ping_emoji = "🟢" if ping <= 20 else "🟡" if ping <= 50 else "🟠" if ping <= 100 else "🔴"
+            
+            await event.edit(
+                "🚀 **Hız Testi Sonucu**\n\n"
+                f"🌐 `{server['sponsor']}`\n"
+                f"📍 `{server['name']}, {server['country']}`\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                f"{ping_emoji} **Ping:** `{ping:.1f} ms`\n"
+                f"{dl_emoji} **İndirme:** `{download:.2f} Mbps`\n"
+                f"{ul_emoji} **Yükleme:** `{upload:.2f} Mbps`\n"
+                "━━━━━━━━━━━━━━━━━━━━",
+                buttons=[
+                    [Button.inline("🔄 Tekrar Test", b"speedtest")],
+                    back_button("stats")
+                ]
+            )
+            
+        except Exception as e:
+            await event.edit(
+                f"❌ **Hata:** `{str(e)}`",
+                buttons=[back_button("stats")]
+            )
     
     @bot.on(events.CallbackQuery(data=b"update_bot"))
     async def update_bot_handler(event):
