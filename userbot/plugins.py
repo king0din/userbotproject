@@ -465,6 +465,10 @@ class PluginManager:
         if not plugin:
             return False, f"`{plugin_name}` adında bir plugin bulunamadı"
         
+        # Devre dışı kontrolü
+        if plugin.get("is_disabled", False):
+            return False, f"⛔ `{plugin_name}` devre dışı bırakılmış"
+        
         if not plugin.get("is_active", True):
             return False, f"`{plugin_name}` şu anda devre dışı"
         
@@ -613,23 +617,60 @@ class PluginManager:
         
         try:
             module = self.user_active_plugins[user_id][plugin_name]
+            client = getattr(module, 'client', None)
             
-            # Önce event handler'ları kaldır
+            handlers_removed = 0
+            
+            # Yöntem 1: Kayıtlı handler'ları kaldır
             if user_id in self.user_handlers and plugin_name in self.user_handlers[user_id]:
                 handlers = self.user_handlers[user_id][plugin_name]
-                
-                # Client'ı bul
-                client = getattr(module, 'client', None)
                 
                 if client and handlers:
                     for callback, event in handlers:
                         try:
                             client.remove_event_handler(callback, event)
+                            handlers_removed += 1
                             print(f"[PLUGIN] Handler kaldırıldı: {plugin_name} - {callback.__name__}")
                         except Exception as e:
                             print(f"[PLUGIN] Handler kaldırma hatası: {e}")
                 
                 del self.user_handlers[user_id][plugin_name]
+            
+            # Yöntem 2: Modül içindeki tüm handler fonksiyonlarını bul ve kaldır
+            if client:
+                module_name = f"plugin_{plugin_name}_{user_id}"
+                all_handlers = client.list_event_handlers()
+                
+                for callback, event in all_handlers:
+                    try:
+                        # Callback'in modülünü kontrol et
+                        cb_module = getattr(callback, '__module__', '')
+                        cb_qualname = getattr(callback, '__qualname__', '')
+                        
+                        # Bu plugin'e ait mi kontrol et
+                        if (module_name in str(cb_module) or 
+                            module_name in str(cb_qualname) or
+                            (hasattr(callback, '__self__') and 
+                             getattr(callback.__self__, '__module__', '') == module_name)):
+                            client.remove_event_handler(callback, event)
+                            handlers_removed += 1
+                            print(f"[PLUGIN] Handler kaldırıldı (yöntem 2): {plugin_name}")
+                    except:
+                        pass
+                
+                # Yöntem 3: Modüldeki tüm callable'ları kontrol et
+                for attr_name in dir(module):
+                    try:
+                        attr = getattr(module, attr_name)
+                        if callable(attr) and not attr_name.startswith('_'):
+                            # Bu fonksiyonun handler olarak kayıtlı olup olmadığını kontrol et
+                            for callback, event in client.list_event_handlers():
+                                if callback == attr or callback.__name__ == attr_name:
+                                    client.remove_event_handler(callback, event)
+                                    handlers_removed += 1
+                                    print(f"[PLUGIN] Handler kaldırıldı (yöntem 3): {plugin_name} - {attr_name}")
+                    except:
+                        pass
             
             # Unregister fonksiyonu varsa çağır
             if hasattr(module, 'unregister') and callable(module.unregister):
@@ -645,13 +686,15 @@ class PluginManager:
             
             del self.user_active_plugins[user_id][plugin_name]
             
+            # DB'den kaldır
             user = await db.get_user(user_id)
             active_plugins = user.get("active_plugins", []) if user else []
             if plugin_name in active_plugins:
                 active_plugins.remove(plugin_name)
                 await db.update_user(user_id, {"active_plugins": active_plugins})
             
-            return True, f"✅ `{plugin_name}` deaktif edildi"
+            print(f"[PLUGIN] {plugin_name} deaktif edildi, {handlers_removed} handler kaldırıldı")
+            return True, f"✅ `{plugin_name}` deaktif edildi ({handlers_removed} handler kaldırıldı)"
             
         except Exception as e:
             import traceback
