@@ -889,46 +889,42 @@ def register_admin_handlers(bot):
             )
             return
         
-        try:
-            # Sunucu seçimi
-            await msg.edit(
-                "🚀 **İnternet Hız Testi**\n\n"
-                "🔍 En iyi sunucu aranıyor...\n"
-                "━━━━━━━━━━━━━━━━━━━━"
-            )
-            
+        import concurrent.futures
+        
+        def run_speedtest():
+            """Senkron speedtest çalıştır"""
             st = speedtest.Speedtest()
             st.get_best_server()
             server = st.best
-            
-            # İndirme testi
+            download = st.download() / 1_000_000
+            upload = st.upload() / 1_000_000
+            return {
+                'server': server,
+                'download': download,
+                'upload': upload,
+                'ping': server['latency']
+            }
+        
+        try:
             await msg.edit(
                 "🚀 **İnternet Hız Testi**\n\n"
-                f"🌐 Sunucu: `{server['sponsor']}` ({server['country']})\n"
-                f"📍 Konum: `{server['name']}`\n"
-                f"📶 Ping: `{server['latency']:.1f} ms`\n\n"
-                "⬇️ İndirme hızı test ediliyor...\n"
-                "▓▓▓▓▓░░░░░░░░░░░░░░░ 25%\n"
+                "🔍 En iyi sunucu aranıyor...\n"
+                "⬇️ İndirme test ediliyor...\n"
+                "⬆️ Yükleme test ediliyor...\n\n"
+                "⏳ Bu işlem 20-40 saniye sürebilir...\n"
                 "━━━━━━━━━━━━━━━━━━━━"
             )
             
-            download = st.download() / 1_000_000  # Mbps
+            # Thread'de çalıştır
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(pool, run_speedtest)
             
-            # Yükleme testi
-            await msg.edit(
-                "🚀 **İnternet Hız Testi**\n\n"
-                f"🌐 Sunucu: `{server['sponsor']}` ({server['country']})\n"
-                f"📍 Konum: `{server['name']}`\n"
-                f"📶 Ping: `{server['latency']:.1f} ms`\n\n"
-                f"⬇️ İndirme: `{download:.2f} Mbps`\n"
-                "⬆️ Yükleme hızı test ediliyor...\n"
-                "▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░ 60%\n"
-                "━━━━━━━━━━━━━━━━━━━━"
-            )
+            server = result['server']
+            download = result['download']
+            upload = result['upload']
+            ping = result['ping']
             
-            upload = st.upload() / 1_000_000  # Mbps
-            
-            # Sonuç
             # Hız değerlendirmesi
             if download >= 100:
                 download_emoji = "🚀"
@@ -963,7 +959,6 @@ def register_admin_handlers(bot):
                 upload_rating = "Yavaş"
             
             # Ping değerlendirmesi
-            ping = server['latency']
             if ping <= 20:
                 ping_emoji = "🟢"
                 ping_rating = "Mükemmel"
@@ -1016,42 +1011,45 @@ def register_admin_handlers(bot):
             )
             return
         
-        try:
-            await event.edit(
-                "🚀 **İnternet Hız Testi**\n\n"
-                "🔍 En iyi sunucu aranıyor...\n"
-                "━━━━━━━━━━━━━━━━━━━━"
-            )
-            
+        import concurrent.futures
+        
+        def run_speedtest():
+            """Senkron speedtest çalıştır"""
             st = speedtest.Speedtest()
             st.get_best_server()
             server = st.best
-            
-            await event.edit(
-                "🚀 **İnternet Hız Testi**\n\n"
-                f"🌐 `{server['sponsor']}`\n"
-                f"📶 Ping: `{server['latency']:.1f} ms`\n\n"
-                "⬇️ İndirme test ediliyor...\n"
-                "▓▓▓▓▓░░░░░░░░░░░░░░░"
-            )
-            
             download = st.download() / 1_000_000
-            
+            upload = st.upload() / 1_000_000
+            return {
+                'server': server,
+                'download': download,
+                'upload': upload,
+                'ping': server['latency']
+            }
+        
+        try:
             await event.edit(
                 "🚀 **İnternet Hız Testi**\n\n"
-                f"🌐 `{server['sponsor']}`\n"
-                f"📶 Ping: `{server['latency']:.1f} ms`\n\n"
-                f"⬇️ İndirme: `{download:.2f} Mbps`\n"
-                "⬆️ Yükleme test ediliyor...\n"
-                "▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░"
+                "🔍 Sunucu aranıyor...\n"
+                "⬇️ İndirme test ediliyor...\n"
+                "⬆️ Yükleme test ediliyor...\n\n"
+                "⏳ 20-40 saniye sürebilir...\n"
+                "━━━━━━━━━━━━━━━━━━━━"
             )
             
-            upload = st.upload() / 1_000_000
-            ping = server['latency']
+            # Thread'de çalıştır
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(pool, run_speedtest)
+            
+            server = result['server']
+            download = result['download']
+            upload = result['upload']
+            ping = result['ping']
             
             # Emoji seç
-            dl_emoji = "🚀" if download >= 100 else "⚡" if download >= 50 else "✅" if download >= 25 else "📶"
-            ul_emoji = "🚀" if upload >= 50 else "⚡" if upload >= 25 else "✅" if upload >= 10 else "📶"
+            dl_emoji = "🚀" if download >= 100 else "⚡" if download >= 50 else "✅" if download >= 25 else "📶" if download >= 10 else "🐌"
+            ul_emoji = "🚀" if upload >= 50 else "⚡" if upload >= 25 else "✅" if upload >= 10 else "📶" if upload >= 5 else "🐌"
             ping_emoji = "🟢" if ping <= 20 else "🟡" if ping <= 50 else "🟠" if ping <= 100 else "🔴"
             
             await event.edit(
