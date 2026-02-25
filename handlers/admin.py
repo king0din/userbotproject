@@ -84,16 +84,16 @@ def register_admin_handlers(bot):
                 [
                     btn.callback(" Özel Yap" if mode == "public" else " Genel Yap", "toggle_mode",
                                 style=ButtonBuilder.STYLE_PRIMARY if mode == "public" else ButtonBuilder.STYLE_SUCCESS,
-                                icon_custom_emoji_id=5832093724410486528 if mode == "public" else 5832151447424039657),
+                                icon_custom_emoji_id=5832551281431946000 if mode == "public" else 5832490468990000458),
                     btn.callback(" Bakım Kapat" if maint else " Bakım Aç", "toggle_maintenance",
                                 style=ButtonBuilder.STYLE_SUCCESS if maint else ButtonBuilder.STYLE_DANGER,
-                                icon_custom_emoji_id=5832093724410486528 if maint else 5832126063324093707)
+                                icon_custom_emoji_id=5832308667319328140 if maint else 5832499024564854704)
                 ],
                 # Kullanıcılar ve Pluginler
                 [
                     btn.callback(" Kullanıcılar", "users_list_0", 
                                 style=ButtonBuilder.STYLE_PRIMARY,
-                                icon_custom_emoji_id=5832607941692378907),
+                                icon_custom_emoji_id=5832570548655234693),
                     btn.callback(" Plugin'ler", "admin_plugins", 
                                 style=ButtonBuilder.STYLE_PRIMARY,
                                 icon_custom_emoji_id=5830184853236097449)
@@ -102,28 +102,28 @@ def register_admin_handlers(bot):
                 [
                     btn.callback(" Sudo", "sudo_management", 
                                 style=ButtonBuilder.STYLE_SUCCESS,
-                                icon_custom_emoji_id=5832235042063835840),
+                                icon_custom_emoji_id=5832280088606939924),
                     btn.callback(" Ban", "ban_management", 
                                 style=ButtonBuilder.STYLE_DANGER,
-                                icon_custom_emoji_id=5832149976972109145)
+                                icon_custom_emoji_id=5832507597319577197)
                 ],
                 # İstatistik ve Loglar
                 [
                     btn.callback(" İstatistik", "stats", 
                                 style=ButtonBuilder.STYLE_PRIMARY,
-                                icon_custom_emoji_id=5832153413021130498),
+                                icon_custom_emoji_id=5832499024564854704),
                     btn.callback(" Loglar", "view_logs", 
                                 style=ButtonBuilder.STYLE_PRIMARY,
-                                icon_custom_emoji_id=5832365506916523096)
+                                icon_custom_emoji_id=5832261714736848714)
                 ],
                 # Güncelle ve Restart
                 [
                     btn.callback(" Güncelle", "update_bot", 
                                 style=ButtonBuilder.STYLE_SUCCESS,
-                                icon_custom_emoji_id=5832124569195700361),
+                                icon_custom_emoji_id=5832202083410911000),
                     btn.callback(" Restart", "restart_bot", 
                                 style=ButtonBuilder.STYLE_DANGER,
-                                icon_custom_emoji_id=5832104239718752496)
+                                icon_custom_emoji_id=5832381458425062093)
                 ],
                 # Komutlar
                 [btn.callback(" Komutlar", "admin_commands", 
@@ -132,7 +132,7 @@ def register_admin_handlers(bot):
                 # Geri
                 [btn.callback(" Ana Menü", "main_menu", 
                              style=ButtonBuilder.STYLE_DANGER,
-                             icon_custom_emoji_id=5832646161554480591)]
+                             icon_custom_emoji_id=5832654562510511307)]
             ]
         else:
             rows = [
@@ -141,10 +141,10 @@ def register_admin_handlers(bot):
                              icon_custom_emoji_id=5830184853236097449)],
                 [btn.callback(" İstatistik", "stats", 
                              style=ButtonBuilder.STYLE_PRIMARY,
-                             icon_custom_emoji_id=5832153413021130498)],
+                             icon_custom_emoji_id=5832499024564854704)],
                 [btn.callback(" Ana Menü", "main_menu", 
                              style=ButtonBuilder.STYLE_DANGER,
-                             icon_custom_emoji_id=5832646161554480591)]
+                             icon_custom_emoji_id=5832654562510511307)]
             ]
         return rows
     
@@ -1557,7 +1557,7 @@ def register_admin_handlers(bot):
             text += f"├ ⛔ Devre Dışı: `{disabled_count}`\n"
             text += f"└ ⭐ Varsayılan Aktif: `{default_count}`\n"
             
-            buttons = []
+            rows = []
             
             # Plugin listesi
             for p in page_plugins:
@@ -1574,35 +1574,54 @@ def register_admin_handlers(bot):
                 if p.get("default_active"):
                     status_icons += "⭐"
                 
-                buttons.append([
-                    Button.inline(f"{status_icons} {name}", f"psetsel_{name}")
+                rows.append([
+                    btn.callback(f"{status_icons} {name}", f"psetsel_{name}",
+                                style=ButtonBuilder.STYLE_PRIMARY)
                 ])
             
             # Sayfalama
             nav_row = []
             if page > 0:
-                nav_row.append(Button.inline("◀️ Önceki", f"psettings_page_{page-1}"))
-            nav_row.append(Button.inline(f"📄 {page+1}/{total_pages}", "noop"))
+                nav_row.append(btn.callback(" Önceki", f"psettings_page_{page-1}",
+                                           icon_custom_emoji_id=5834632747137638263))
+            nav_row.append(btn.callback(f"📄 {page+1}/{total_pages}", "noop"))
             if page < total_pages - 1:
-                nav_row.append(Button.inline("Sonraki ▶️", f"psettings_page_{page+1}"))
+                nav_row.append(btn.callback(" Sonraki", f"psettings_page_{page+1}",
+                                           icon_custom_emoji_id=5834933416323193844))
             
             if nav_row:
-                buttons.append(nav_row)
+                rows.append(nav_row)
             
             # Toplu işlemler
-            buttons.append([
-                Button.inline("🌐 Hepsini Genel", "pset_bulk_public"),
-                Button.inline("🔒 Hepsini Özel", "pset_bulk_private")
+            rows.append([
+                btn.callback(" Hepsini Genel", "pset_bulk_public",
+                            style=ButtonBuilder.STYLE_SUCCESS,
+                            icon_custom_emoji_id=5832490468990000458),
+                btn.callback(" Hepsini Özel", "pset_bulk_private",
+                            style=ButtonBuilder.STYLE_DANGER,
+                            icon_custom_emoji_id=5832636278834733177)
             ])
             
-            buttons.append([
-                Button.inline("🔙 Plugin'ler", "admin_plugins")
+            rows.append([
+                btn.callback(" Plugin'ler", "admin_plugins",
+                            style=ButtonBuilder.STYLE_PRIMARY,
+                            icon_custom_emoji_id=5830184853236097449)
             ])
             
             if edit:
-                await event.edit(text, buttons=buttons)
+                await bot_api.edit_message_text(
+                    chat_id=event.sender_id,
+                    message_id=event.message_id,
+                    text=text,
+                    reply_markup=btn.inline_keyboard(rows)
+                )
+                await event.answer()
             else:
-                await event.respond(text, buttons=buttons)
+                await bot_api.send_message(
+                    chat_id=event.sender_id,
+                    text=text,
+                    reply_markup=btn.inline_keyboard(rows)
+                )
         
         except Exception as e:
             error_text = f"❌ Hata: {e}"
@@ -1690,60 +1709,90 @@ def register_admin_handlers(bot):
                 cmd_text += f" +{len(commands)-5}"
             text += f"\n🔧 Komutlar: {cmd_text}\n"
         
-        buttons = []
+        rows = []
         
         # Erişim ayarı
         if is_public:
-            buttons.append([
-                Button.inline("🔒 Özel Yap", f"pset_access_{plugin_name}_private")
+            rows.append([
+                btn.callback(" Özel Yap", f"pset_access_{plugin_name}_private",
+                            style=ButtonBuilder.STYLE_DANGER,
+                            icon_custom_emoji_id=5832636278834733177)
             ])
         else:
-            buttons.append([
-                Button.inline("🌐 Genel Yap", f"pset_access_{plugin_name}_public")
+            rows.append([
+                btn.callback(" Genel Yap", f"pset_access_{plugin_name}_public",
+                            style=ButtonBuilder.STYLE_SUCCESS,
+                            icon_custom_emoji_id=5832532705698388983)
             ])
         
         # Devre dışı/aktif
         if is_disabled:
-            buttons.append([
-                Button.inline("✅ Aktif Et", f"pset_status_{plugin_name}_enable")
+            rows.append([
+                btn.callback(" Aktif Et", f"pset_status_{plugin_name}_enable",
+                            style=ButtonBuilder.STYLE_SUCCESS,
+                            icon_custom_emoji_id=5832249761842864793)
             ])
         else:
-            buttons.append([
-                Button.inline("⛔ Devre Dışı Bırak", f"pset_status_{plugin_name}_disable")
+            rows.append([
+                btn.callback(" Devre Dışı Bırak", f"pset_status_{plugin_name}_disable",
+                            style=ButtonBuilder.STYLE_DANGER,
+                            icon_custom_emoji_id=5830001655701052988)
             ])
         
         # Varsayılan aktif
         if default_active:
-            buttons.append([
-                Button.inline("◽ Varsayılan Pasif", f"pset_default_{plugin_name}_off")
+            rows.append([
+                btn.callback(" Varsayılan Pasif", f"pset_default_{plugin_name}_off",
+                            style=ButtonBuilder.STYLE_DANGER,
+                            icon_custom_emoji_id=5830287159357087904)
             ])
         else:
-            buttons.append([
-                Button.inline("⭐ Varsayılan Aktif", f"pset_default_{plugin_name}_on")
+            rows.append([
+                btn.callback(" Varsayılan Aktif", f"pset_default_{plugin_name}_on",
+                            style=ButtonBuilder.STYLE_SUCCESS,
+                            icon_custom_emoji_id=5832308667319328140)
             ])
         
         # Kullanıcı yönetimi
-        buttons.append([
-            Button.inline("👤 İzin Ver", f"psetallow_{plugin_name}"),
-            Button.inline("🚫 Engelle", f"psetrestrict_{plugin_name}")
+        rows.append([
+            btn.callback(" İzin Ver", f"psetallow_{plugin_name}",
+                        style=ButtonBuilder.STYLE_SUCCESS,
+                        icon_custom_emoji_id=5832365979362925905),
+            btn.callback(" Engelle", f"psetrestrict_{plugin_name}",
+                        style=ButtonBuilder.STYLE_DANGER,
+                        icon_custom_emoji_id=5832507597319577197)
         ])
         
-        buttons.append([
-            Button.inline("📋 İzinli Liste", f"psetallowls_{plugin_name}"),
-            Button.inline("📋 Engelli Liste", f"psetrestrictls_{plugin_name}")
+        rows.append([
+            btn.callback(" İzinli Liste", f"psetallowls_{plugin_name}",
+                        style=ButtonBuilder.STYLE_PRIMARY,
+                        icon_custom_emoji_id=5832687998830910706),
+            btn.callback(" Engelli Liste", f"psetrestrictls_{plugin_name}",
+                        style=ButtonBuilder.STYLE_PRIMARY,
+                        icon_custom_emoji_id=5832685469095173542)
         ])
         
         # Aktif kullanıcıları göster
-        buttons.append([
-            Button.inline("👥 Kullananlar", f"psetusers_{plugin_name}")
+        rows.append([
+            btn.callback(" Kullananlar", f"psetusers_{plugin_name}",
+                        style=ButtonBuilder.STYLE_PRIMARY,
+                        icon_custom_emoji_id=5832570548655234693)
         ])
         
         # Geri
-        buttons.append([
-            Button.inline("🔙 Geri", "psettings_page_0")
+        rows.append([
+            btn.callback(" Geri", "psettings_page_0",
+                        style=ButtonBuilder.STYLE_DANGER,
+                        icon_custom_emoji_id=5832646161554480591)
         ])
         
-        await event.edit(text, buttons=buttons)
+        await bot_api.edit_message_text(
+            chat_id=event.sender_id,
+            message_id=event.message_id,
+            text=text,
+            reply_markup=btn.inline_keyboard(rows)
+        )
+        await event.answer()
     
     @bot.on(events.CallbackQuery(pattern=rb"pset_access_([a-zA-Z0-9_]+)_(public|private)"))
     async def pset_access_handler(event):
