@@ -59,17 +59,17 @@ def register_user_handlers(bot):
         if is_logged_in:
             # Giriş yapılmış - Plugin butonları
             rows.append([
-                btn.callback("🔌 Pluginler", "plugins_page_0", 
+                btn.callback(" Pluginler", "plugins_page_0", 
                             style=ButtonBuilder.STYLE_PRIMARY,
                             icon_custom_emoji_id=5830184853236097449)
             ])
             rows.append([
-                btn.callback("📦 Pluginlerim", "my_plugins_0",
+                btn.callback(" Pluginlerim", "my_plugins_0",
                             style=ButtonBuilder.STYLE_PRIMARY,
                              icon_custom_emoji_id=5832711694165483426)
             ])
             rows.append([
-                btn.callback("🚪 Çıkış Yap", "logout_confirm",
+                btn.callback(" Çıkış Yap", "logout_confirm",
                             style=ButtonBuilder.STYLE_DANGER,
                             icon_custom_emoji_id=5832183129720233237)
             ])
@@ -78,27 +78,27 @@ def register_user_handlers(bot):
             session_data = await db.get_session(event.sender_id)
             if session_data and session_data.get("remember"):
                 rows.append([
-                    btn.callback("⚡ Hızlı Giriş", "quick_login",
+                    btn.callback(" Hızlı Giriş", "quick_login",
                                 style=ButtonBuilder.STYLE_SUCCESS,
                                 icon_custom_emoji_id=5832277107899636698)
                 ])
             rows.append([
-                btn.callback("🔐 Giriş Yap", "login_menu",
+                btn.callback(" Giriş Yap", "login_menu",
                             style=ButtonBuilder.STYLE_SUCCESS,
                             icon_custom_emoji_id=5832668083067559171)
             ])
         
         # Yardım ve Komutlar
         rows.append([
-            btn.callback("❓ Yardım", "help_main",
+            btn.callback(" Yardım", "help_main",
                         icon_custom_emoji_id=5832628878606082111),
-            btn.callback("📝 Komutlar", "commands",
+            btn.callback(" Komutlar", "commands",
                         icon_custom_emoji_id=5832365506916523096)
         ])
         
         # Plugin Kanalı
         rows.append([
-            btn.url(f"📢 {config.PLUGIN_CHANNEL}", f"https://t.me/{config.PLUGIN_CHANNEL}",
+            btn.url(f" {config.PLUGIN_CHANNEL}", f"https://t.me/{config.PLUGIN_CHANNEL}",
                    style=ButtonBuilder.STYLE_PRIMARY,
                     icon_custom_emoji_id=5832328832190784454)
         ])
@@ -106,7 +106,7 @@ def register_user_handlers(bot):
         # Admin butonu
         if event.sender_id == config.OWNER_ID or await db.is_sudo(event.sender_id):
             rows.append([
-                btn.callback("⚙️ Yönetim Paneli", "settings_menu",
+                btn.callback(" Yönetim Paneli", "settings_menu",
                             style=ButtonBuilder.STYLE_DANGER,
                             icon_custom_emoji_id=5832502928690127854)
             ])
@@ -152,16 +152,16 @@ def register_user_handlers(bot):
             del user_states[event.sender_id]
         
         rows = [
-            [btn.callback("📱 Telefon Numarası", "login_phone",
+            [btn.callback(" Telefon Numarası", "login_phone",
                          style=ButtonBuilder.STYLE_SUCCESS,
                          icon_custom_emoji_id=5832225314889015431)],
-            [btn.callback("🔑 Telethon Session", "login_telethon",
+            [btn.callback(" Telethon Session", "login_telethon",
                          style=ButtonBuilder.STYLE_PRIMARY,
                          icon_custom_emoji_id=5832345561088400364)],
-            [btn.callback("🔑 Pyrogram Session", "login_pyrogram",
+            [btn.callback(" Pyrogram Session", "login_pyrogram",
                          style=ButtonBuilder.STYLE_PRIMARY,
                          icon_custom_emoji_id=5832345561088400364)],
-            [btn.callback("◀️ Geri", "main_menu",
+            [btn.callback(" Geri", "main_menu",
                           style=ButtonBuilder.STYLE_DANGER,
                           icon_custom_emoji_id=5832646161554480591)]
         ]
@@ -178,7 +178,9 @@ def register_user_handlers(bot):
     async def login_phone_start(event):
         user_states[event.sender_id] = {"state": STATE_WAITING_PHONE}
         text = config.MESSAGES["login_phone"] + "\n\n⚠️ İptal: /cancel"
-        await event.edit(text, buttons=[[Button.inline("❌ İptal", b"login_menu")]])
+        await event.edit(text, buttons=[[Button.inline("❌ İptal", b"login_menu",
+                                                       style=ButtonBuilder.STYLE_PRIMARY,
+                                                       icon_custom_emoji_id=5832545487521062736)]])
     
     @bot.on(events.CallbackQuery(data=b"login_telethon"))
     async def login_telethon_start(event):
