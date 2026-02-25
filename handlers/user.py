@@ -178,8 +178,7 @@ def register_user_handlers(bot):
     async def login_phone_start(event):
         user_states[event.sender_id] = {"state": STATE_WAITING_PHONE}
         text = config.MESSAGES["login_phone"] + "\n\n⚠️ İptal: /cancel"
-        await event.edit(text, buttons=[[btn.callback(style=ButtonBuilder.STYLE_DANGER,
-                                                      icon_custom_emoji_id=5832545487521062736)]])
+        await event.edit(text, buttons=[[Button.inline("❌ İptal", b"login_menu")]])
     
     @bot.on(events.CallbackQuery(data=b"login_telethon"))
     async def login_telethon_start(event):
