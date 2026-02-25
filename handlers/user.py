@@ -183,19 +183,25 @@ def register_user_handlers(bot):
     async def login_phone_start(event):
         user_states[event.sender_id] = {"state": STATE_WAITING_PHONE}
         text = config.MESSAGES["login_phone"] + "\n\n⚠️ İptal: /cancel"
-        await event.edit(text, buttons=[[Button.inline("❌ İptal", b"login_menu")]])
+        rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"login_telethon"))
     async def login_telethon_start(event):
         user_states[event.sender_id] = {"state": STATE_WAITING_SESSION_TELETHON, "session_type": "telethon"}
         text = config.MESSAGES["login_session_telethon"] + "\n\n⚠️ İptal: /cancel"
-        await event.edit(text, buttons=[[Button.inline("❌ İptal", b"login_menu")]])
+        rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"login_pyrogram"))
     async def login_pyrogram_start(event):
         user_states[event.sender_id] = {"state": STATE_WAITING_SESSION_PYROGRAM, "session_type": "pyrogram"}
         text = config.MESSAGES["login_session_pyrogram"] + "\n\n⚠️ İptal: /cancel"
-        await event.edit(text, buttons=[[Button.inline("❌ İptal", b"login_menu")]])
+        rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     async def handle_phone_input(event, bot):
         user_id = event.sender_id
@@ -216,12 +222,13 @@ def register_user_handlers(bot):
             error = result.get("error", "Bilinmeyen hata")
             if result.get("error") == "flood_wait":
                 error = f"{result['seconds']} saniye bekleyin"
-            await msg.edit(f"❌ Hata: {error}", buttons=[[Button.inline("🔙 Geri", b"login_menu")]])
+            rows = [[btn.callback(" Geri", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+            await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=f"❌ Hata: {error}", reply_markup=btn.inline_keyboard(rows))
             return
         
         user_states[user_id] = {"state": STATE_WAITING_CODE, "phone": phone}
-        await msg.edit(config.MESSAGES["login_code"] + "\n\n⚠️ İptal: /cancel", 
-                       buttons=[[Button.inline("❌ İptal", b"login_menu")]])
+        rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
+        await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=config.MESSAGES["login_code"] + "\n\n⚠️ İptal: /cancel", reply_markup=btn.inline_keyboard(rows))
     
     async def handle_code_input(event, bot):
         user_id = event.sender_id
@@ -235,8 +242,8 @@ def register_user_handlers(bot):
         
         if result.get("stage") == "2fa":
             user_states[user_id]["state"] = STATE_WAITING_2FA
-            await msg.edit(config.MESSAGES["login_2fa"] + "\n\n⚠️ İptal: /cancel",
-                          buttons=[[Button.inline("❌ İptal", b"login_menu")]])
+            rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
+            await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=config.MESSAGES["login_2fa"] + "\n\n⚠️ İptal: /cancel", reply_markup=btn.inline_keyboard(rows))
             return
         
         if result["success"]:
@@ -245,7 +252,8 @@ def register_user_handlers(bot):
             error = result.get("error", "Bilinmeyen hata")
             if error in ["code_expired", "no_pending_login"]:
                 if user_id in user_states: del user_states[user_id]
-            await msg.edit(f"❌ {error}", buttons=[[Button.inline("🔙 Geri", b"login_menu")]])
+            rows = [[btn.callback(" Geri", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+            await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=f"❌ {error}", reply_markup=btn.inline_keyboard(rows))
     
     async def handle_2fa_input(event, bot):
         user_id = event.sender_id
@@ -260,8 +268,8 @@ def register_user_handlers(bot):
         if result["success"]:
             await handle_login_success(event, bot, result, msg)
         else:
-            await msg.edit(f"❌ {result.get('error', 'Hata')}", 
-                          buttons=[[Button.inline("🔙 Geri", b"login_menu")]])
+            rows = [[btn.callback(" Geri", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+            await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=f"❌ {result.get('error', 'Hata')}", reply_markup=btn.inline_keyboard(rows))
     
     async def handle_session_input(event, bot, session_type):
         user_id = event.sender_id
@@ -279,8 +287,8 @@ def register_user_handlers(bot):
             await handle_login_success(event, bot, result, msg)
         else:
             if user_id in user_states: del user_states[user_id]
-            await msg.edit(f"❌ {result.get('error', 'Session geçersiz')}", 
-                          buttons=[[Button.inline("🔙 Geri", b"login_menu")]])
+            rows = [[btn.callback(" Geri", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+            await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=f"❌ {result.get('error', 'Session geçersiz')}", reply_markup=btn.inline_keyboard(rows))
     
     async def handle_login_success(event, bot, result, msg):
         user_id = event.sender_id
@@ -303,15 +311,18 @@ def register_user_handlers(bot):
         
         if user_id in user_states: del user_states[user_id]
         
-        await msg.edit(
-            config.MESSAGES["login_success"].format(
+        rows = [
+            [btn.callback(" Kaydet", "save_session", style=ButtonBuilder.STYLE_SUCCESS, icon_custom_emoji_id=5832181205574884602),
+             btn.callback(" Kaydetme", "dont_save_session", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]
+        ]
+        await bot_api.edit_message_text(
+            chat_id=user_id,
+            message_id=msg.id,
+            text=config.MESSAGES["login_success"].format(
                 name=user_info["first_name"] or "Kullanıcı",
                 user_id=user_info["id"]
             ) + "\n\n" + config.MESSAGES["login_remember"],
-            buttons=[
-                [Button.inline(config.BUTTONS["remember_yes"], b"save_session"),
-                 Button.inline(config.BUTTONS["remember_no"], b"dont_save_session")]
-            ]
+            reply_markup=btn.inline_keyboard(rows)
         )
         await send_log(bot, "login", f"Giriş: @{user_info['username']}", user_id)
     
@@ -340,10 +351,12 @@ def register_user_handlers(bot):
         if default_count > 0:
             text += f"\n🔌 {default_count} varsayılan plugin aktif edildi."
         
-        await event.edit(text, buttons=[
-            [Button.inline(config.BUTTONS["plugins"], b"plugins_page_0")],
-            [Button.inline("🏠 Ana Menü", b"main_menu")]
-        ])
+        rows = [
+            [btn.callback(" Pluginler", "plugins_page_0", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5830184853236097449)],
+            [btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)]
+        ]
+        await bot_api.edit_message_text(chat_id=user_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"dont_save_session"))
     async def dont_save_session_handler(event):
@@ -363,10 +376,12 @@ def register_user_handlers(bot):
         if default_count > 0:
             text += f"\n\n🔌 {default_count} varsayılan plugin aktif edildi."
         
-        await event.edit(text, buttons=[
-            [Button.inline(config.BUTTONS["plugins"], b"plugins_page_0")],
-            [Button.inline("🏠 Ana Menü", b"main_menu")]
-        ])
+        rows = [
+            [btn.callback(" Pluginler", "plugins_page_0", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5830184853236097449)],
+            [btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)]
+        ]
+        await bot_api.edit_message_text(chat_id=user_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     # ==========================================
     # HIZLI GİRİŞ
@@ -408,16 +423,17 @@ def register_user_handlers(bot):
             if restored > 0:
                 text += f"\n🔌 {restored} plugin yüklendi"
             
-            await event.edit(text, buttons=[
-                [Button.inline(config.BUTTONS["plugins"], b"plugins_page_0")],
-                [Button.inline("🏠 Ana Menü", b"main_menu")]
-            ])
+            rows = [
+                [btn.callback(" Pluginler", "plugins_page_0", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5830184853236097449)],
+                [btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)]
+            ]
+            await bot_api.edit_message_text(chat_id=user_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
             await send_log(bot, "login", f"Hızlı giriş: @{user_info['username']}", user_id)
         else:
             await db.clear_session(user_id, keep_data=False)
-            await event.edit("❌ Session geçersiz. Yeniden giriş yapın.", buttons=[
-                [Button.inline(config.BUTTONS["login"], b"login_menu")]
-            ])
+            rows = [[btn.callback(" Giriş Yap", "login_menu", style=ButtonBuilder.STYLE_SUCCESS, icon_custom_emoji_id=5832668083067559171)]]
+            await bot_api.edit_message_text(chat_id=user_id, message_id=event.message_id, text="❌ Session geçersiz. Yeniden giriş yapın.", reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     # ==========================================
     # ÇIKIŞ
@@ -425,11 +441,13 @@ def register_user_handlers(bot):
     
     @bot.on(events.CallbackQuery(data=b"logout_confirm"))
     async def logout_confirm_handler(event):
-        await event.edit(config.MESSAGES["logout_confirm"], buttons=[
-            [Button.inline(config.BUTTONS["keep_data"], b"logout_keep"),
-             Button.inline(config.BUTTONS["delete_data"], b"logout_delete")],
-            back_button("main_menu")
-        ])
+        rows = [
+            [btn.callback(" Sakla", "logout_keep", style=ButtonBuilder.STYLE_SUCCESS, icon_custom_emoji_id=5832181205574884602),
+             btn.callback(" Sil", "logout_delete", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)],
+            [btn.callback(" Geri", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]
+        ]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=config.MESSAGES["logout_confirm"], reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     @bot.on(events.CallbackQuery(pattern=b"logout_(keep|delete)"))
     async def logout_handler(event):
@@ -444,7 +462,8 @@ def register_user_handlers(bot):
         text = config.MESSAGES["logout_success"]
         text += "\n\n💾 Bilgiler saklandı." if keep_data else "\n\n🗑️ Bilgiler silindi."
         
-        await event.edit(text, buttons=[[Button.inline("🏠 Ana Menü", b"main_menu")]])
+        rows = [[btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832654562510511307)]]
+        await bot_api.edit_message_text(chat_id=user_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
         await send_log(bot, "logout", f"Çıkış (sakla: {keep_data})", user_id)
     
     # ==========================================
@@ -519,18 +538,19 @@ def register_user_handlers(bot):
         # Sayfalama butonları
         nav_buttons = []
         if page > 0:
-            nav_buttons.append(Button.inline("⬅️ Önceki", f"plugins_page_{page - 1}".encode()))
+            nav_buttons.append(btn.callback(" Önceki", f"plugins_page_{page - 1}", icon_custom_emoji_id=5834632747137638263))
         if page < total_pages - 1:
-            nav_buttons.append(Button.inline("Sonraki ➡️", f"plugins_page_{page + 1}".encode()))
+            nav_buttons.append(btn.callback(" Sonraki", f"plugins_page_{page + 1}", icon_custom_emoji_id=5834933416323193844))
         
-        buttons = []
+        rows = []
         if nav_buttons:
-            buttons.append(nav_buttons)
-        buttons.append([Button.inline(config.BUTTONS["my_plugins"], b"my_plugins_0")])
-        buttons.append([Button.url(config.BUTTONS["plugin_channel"], f"https://t.me/{config.PLUGIN_CHANNEL}")])
-        buttons.append(back_button("main_menu"))
+            rows.append(nav_buttons)
+        rows.append([btn.callback(" Pluginlerim", "my_plugins_0", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832711694165483426)])
+        rows.append([btn.url(f" {config.PLUGIN_CHANNEL}", f"https://t.me/{config.PLUGIN_CHANNEL}", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832328832190784454)])
+        rows.append([btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)])
         
-        await event.edit(text, buttons=buttons)
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     # ==========================================
     # PLUGİNLERİM - SAYFALI
@@ -552,11 +572,12 @@ def register_user_handlers(bot):
             text += "\n\n💡 Plugin yüklemek için:\n"
             text += "1️⃣ Plugin listesinden birini seçin\n"
             text += "2️⃣ `/pactive <isim>` yazın"
-            buttons = [
-                [Button.inline("🔌 Plugin Listesi", b"plugins_page_0")],
-                back_button("main_menu")
+            rows = [
+                [btn.callback(" Plugin Listesi", "plugins_page_0", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5830184853236097449)],
+                [btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)]
             ]
-            await event.edit(text, buttons=buttons)
+            await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+            await event.answer()
             return
         
         total_pages = (len(active_plugins) + PLUGINS_PER_PAGE - 1) // PLUGINS_PER_PAGE
@@ -580,17 +601,18 @@ def register_user_handlers(bot):
         # Sayfalama butonları
         nav_buttons = []
         if page > 0:
-            nav_buttons.append(Button.inline("⬅️ Önceki", f"my_plugins_{page - 1}".encode()))
+            nav_buttons.append(btn.callback(" Önceki", f"my_plugins_{page - 1}", icon_custom_emoji_id=5834632747137638263))
         if page < total_pages - 1:
-            nav_buttons.append(Button.inline("Sonraki ➡️", f"my_plugins_{page + 1}".encode()))
+            nav_buttons.append(btn.callback(" Sonraki", f"my_plugins_{page + 1}", icon_custom_emoji_id=5834933416323193844))
         
-        buttons = []
+        rows = []
         if nav_buttons:
-            buttons.append(nav_buttons)
-        buttons.append([Button.inline("🔌 Tüm Plugin'ler", b"plugins_page_0")])
-        buttons.append(back_button("main_menu"))
+            rows.append(nav_buttons)
+        rows.append([btn.callback(" Tüm Plugin'ler", "plugins_page_0", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5830184853236097449)])
+        rows.append([btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)])
         
-        await event.edit(text, buttons=buttons)
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     # ==========================================
     # PLUGİN KOMUTLARI
@@ -719,7 +741,8 @@ def register_user_handlers(bot):
                 try: await userbot_manager.pending_logins[user_id]["client"].disconnect()
                 except: pass
                 del userbot_manager.pending_logins[user_id]
-            await event.respond("❌ İptal edildi.", buttons=[[Button.inline("🏠 Ana Menü", b"main_menu")]])
+            rows = [[btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832654562510511307)]]
+            await bot_api.send_message(chat_id=user_id, text="❌ İptal edildi.", reply_markup=btn.inline_keyboard(rows))
         else:
             await event.respond("ℹ️ İptal edilecek işlem yok.")
     
@@ -751,8 +774,8 @@ def register_user_handlers(bot):
     @check_ban
     async def help_command(event):
         """Help komutu - yardım menüsünü açar"""
-        text, buttons = await get_help_main_content(event.sender_id)
-        await event.respond(text, buttons=buttons)
+        text, rows = await get_help_main_content(event.sender_id)
+        await bot_api.send_message(chat_id=event.sender_id, text=text, reply_markup=btn.inline_keyboard(rows))
     
     async def get_help_main_content(user_id):
         """Ana yardım menüsü içeriği"""
@@ -761,21 +784,22 @@ def register_user_handlers(bot):
         text += "**Userbot** kurarak ek özellikler kazanabilirsiniz.\n\n"
         text += "📚 **Konu Seçin:**"
         
-        buttons = [
-            [Button.inline("🤖 Userbot Nedir?", b"help_what")],
-            [Button.inline("🔐 Nasıl Giriş Yapılır?", b"help_login")],
-            [Button.inline("🔌 Plugin Nedir?", b"help_plugins")],
-            [Button.inline("⚙️ Komutlar Nasıl Kullanılır?", b"help_commands")],
-            [Button.inline("❓ Sıkça Sorulan Sorular", b"help_faq")],
-            back_button("main_menu")
+        rows = [
+            [btn.callback("🤖 Userbot Nedir?", "help_what", style=ButtonBuilder.STYLE_PRIMARY)],
+            [btn.callback("🔐 Nasıl Giriş Yapılır?", "help_login", style=ButtonBuilder.STYLE_PRIMARY)],
+            [btn.callback("🔌 Plugin Nedir?", "help_plugins", style=ButtonBuilder.STYLE_PRIMARY)],
+            [btn.callback("⚙️ Komutlar Nasıl Kullanılır?", "help_commands", style=ButtonBuilder.STYLE_PRIMARY)],
+            [btn.callback("❓ Sıkça Sorulan Sorular", "help_faq", style=ButtonBuilder.STYLE_PRIMARY)],
+            [btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)]
         ]
         
-        return text, buttons
+        return text, rows
     
     @bot.on(events.CallbackQuery(data=b"help_main"))
     async def help_main_handler(event):
-        text, buttons = await get_help_main_content(event.sender_id)
-        await event.edit(text, buttons=buttons)
+        text, rows = await get_help_main_content(event.sender_id)
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"help_what"))
     async def help_what_handler(event):
@@ -796,7 +820,9 @@ def register_user_handlers(bot):
         text += "komutları kendinize yazarsınız. Örneğin\n"
         text += "`.afk` yazıp gönderdiğinizde AFK moduna geçersiniz."
         
-        await event.edit(text, buttons=[[Button.inline("🔙 Geri", b"help_main")]])
+        rows = [[btn.callback(" Geri", "help_main", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"help_login"))
     async def help_login_handler(event):
@@ -820,7 +846,9 @@ def register_user_handlers(bot):
         text += "Giriş sonrası oturumu kaydederseniz,\n"
         text += "bir dahaki sefere tek tıkla giriş yapabilirsiniz."
         
-        await event.edit(text, buttons=[[Button.inline("🔙 Geri", b"help_main")]])
+        rows = [[btn.callback(" Geri", "help_main", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"help_plugins"))
     async def help_plugins_handler(event):
@@ -846,10 +874,12 @@ def register_user_handlers(bot):
         text += "Plugin kanalımızı takip ederek yeni\n"
         text += "plugin duyurularından haberdar olun!"
         
-        await event.edit(text, buttons=[
-            [Button.url("📢 Plugin Kanalı", f"https://t.me/{config.PLUGIN_CHANNEL}")],
-            [Button.inline("🔙 Geri", b"help_main")]
-        ])
+        rows = [
+            [btn.url(f" Plugin Kanalı", f"https://t.me/{config.PLUGIN_CHANNEL}", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832328832190784454)],
+            [btn.callback(" Geri", "help_main", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]
+        ]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"help_commands"))
     async def help_commands_handler(event):
@@ -877,7 +907,9 @@ def register_user_handlers(bot):
         text += "Userbot komutlarını kendinize (Kayıtlı\n"
         text += "Mesajlar) yazarak test edebilirsiniz."
         
-        await event.edit(text, buttons=[[Button.inline("🔙 Geri", b"help_main")]])
+        rows = [[btn.callback(" Geri", "help_main", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"help_faq"))
     async def help_faq_handler(event):
@@ -905,7 +937,9 @@ def register_user_handlers(bot):
         
         text += f"📞 **Destek:** @{config.OWNER_USERNAME}"
         
-        await event.edit(text, buttons=[[Button.inline("🔙 Geri", b"help_main")]])
+        rows = [[btn.callback(" Geri", "help_main", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"commands"))
     async def commands_handler(event):
@@ -920,7 +954,9 @@ def register_user_handlers(bot):
             for cmd, desc in config.COMMANDS["admin"].items():
                 text += f"• `{cmd}` - {desc}\n"
         
-        await event.edit(text, buttons=[back_button("main_menu")])
+        rows = [[btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)]]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"close"))
     async def close_handler(event):
