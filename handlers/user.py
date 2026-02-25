@@ -954,8 +954,14 @@ def register_user_handlers(bot):
             for cmd, desc in config.COMMANDS["admin"].items():
                 text += f"• `{cmd}` - {desc}\n"
         
-        rows = [[btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)]]
-        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        try:
+            rows = [[btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)]]
+            result = await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+            if not result:
+                raise Exception("Bot API failed")
+        except:
+            # Fallback
+            await event.edit(text, buttons=[[Button.inline("🏠 Ana Menü", b"main_menu")]])
         await event.answer()
     
     @bot.on(events.CallbackQuery(data=b"close"))
