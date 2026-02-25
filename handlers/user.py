@@ -29,25 +29,13 @@ PLUGINS_PER_PAGE = 8
 def register_user_handlers(bot):
     """Kullanıcı handler'larını kaydet"""
     
-    # ==========================================
-    # /start KOMUTU (Bot API - Renkli Butonlar)
-    # ==========================================
-    
-    @bot.on(events.NewMessage(pattern=r'^/start$'))
-    @check_ban
-    @check_maintenance
-    @check_private_mode
-    @register_user
-    async def start_handler(event):
-        if event.sender_id in user_states:
-            del user_states[event.sender_id]
-        
-        user = await event.get_sender()
-        user_data = await db.get_user(event.sender_id)
+    async def build_main_menu(user_id, user_first_name):
+        """Ana menü içeriğini oluştur - /start ve main_menu için ortak"""
+        user_data = await db.get_user(user_id)
         is_logged_in = user_data.get("is_logged_in", False) if user_data else False
         
         text = config.MESSAGES["welcome"]
-        text += f"\n\n👋 Merhaba **{user.first_name}**!"
+        text += f"\n\n👋 Merhaba **{user_first_name}**!"
         
         if is_logged_in:
             active_count = len(user_data.get("active_plugins", []))
@@ -66,7 +54,7 @@ def register_user_handlers(bot):
             rows.append([
                 btn.callback(" Pluginlerim", "my_plugins_0",
                             style=ButtonBuilder.STYLE_PRIMARY,
-                             icon_custom_emoji_id=5832711694165483426)
+                            icon_custom_emoji_id=5832711694165483426)
             ])
             rows.append([
                 btn.callback(" Çıkış Yap", "logout_confirm",
@@ -75,7 +63,7 @@ def register_user_handlers(bot):
             ])
         else:
             # Giriş yapılmamış
-            session_data = await db.get_session(event.sender_id)
+            session_data = await db.get_session(user_id)
             if session_data and session_data.get("remember"):
                 rows.append([
                     btn.callback(" Hızlı Giriş", "quick_login",
@@ -100,18 +88,35 @@ def register_user_handlers(bot):
         rows.append([
             btn.url(f" {config.PLUGIN_CHANNEL}", f"https://t.me/{config.PLUGIN_CHANNEL}",
                    style=ButtonBuilder.STYLE_PRIMARY,
-                    icon_custom_emoji_id=5832328832190784454)
+                   icon_custom_emoji_id=5832328832190784454)
         ])
         
         # Admin butonu
-        if event.sender_id == config.OWNER_ID or await db.is_sudo(event.sender_id):
+        if user_id == config.OWNER_ID or await db.is_sudo(user_id):
             rows.append([
                 btn.callback(" Yönetim Paneli", "settings_menu",
                             style=ButtonBuilder.STYLE_DANGER,
                             icon_custom_emoji_id=5832502928690127854)
             ])
         
-        # Bot API ile gönder
+        return text, rows
+    
+    # ==========================================
+    # /start KOMUTU (Bot API - Renkli Butonlar)
+    # ==========================================
+    
+    @bot.on(events.NewMessage(pattern=r'^/start$'))
+    @check_ban
+    @check_maintenance
+    @check_private_mode
+    @register_user
+    async def start_handler(event):
+        if event.sender_id in user_states:
+            del user_states[event.sender_id]
+        
+        user = await event.get_sender()
+        text, rows = await build_main_menu(event.sender_id, user.first_name)
+        
         await bot_api.send_message(
             chat_id=event.sender_id,
             text=text,
@@ -162,8 +167,8 @@ def register_user_handlers(bot):
                          style=ButtonBuilder.STYLE_PRIMARY,
                          icon_custom_emoji_id=5832345561088400364)],
             [btn.callback(" Geri", "main_menu",
-                          style=ButtonBuilder.STYLE_DANGER,
-                          icon_custom_emoji_id=5832646161554480591)]
+                         style=ButtonBuilder.STYLE_DANGER,
+                         icon_custom_emoji_id=5832646161554480591)]
         ]
         
         await bot_api.edit_message_text(
@@ -728,65 +733,7 @@ def register_user_handlers(bot):
             del user_states[event.sender_id]
         
         user = await event.get_sender()
-        user_data = await db.get_user(event.sender_id)
-        is_logged_in = user_data.get("is_logged_in", False) if user_data else False
-        
-        text = config.MESSAGES["welcome"]
-        text += f"\n\n👋 Merhaba **{user.first_name}**!"
-        
-        if is_logged_in:
-            active_count = len(user_data.get("active_plugins", []))
-            text += f"\n✅ Userbot: `{user_data.get('userbot_username', '?')}`"
-            text += f"\n🔌 Aktif: `{active_count}` plugin"
-        
-        rows = []
-        
-        if is_logged_in:
-            rows.append([
-                btn.callback("🔌 Pluginler", "plugins_page_0", 
-                            style=ButtonBuilder.STYLE_PRIMARY,
-                            icon_custom_emoji_id=5237699328843200584)
-            ])
-            rows.append([
-                btn.callback("📦 Pluginlerim", "my_plugins_0",
-                            style=ButtonBuilder.STYLE_PRIMARY)
-            ])
-            rows.append([
-                btn.callback("🚪 Çıkış Yap", "logout_confirm",
-                            style=ButtonBuilder.STYLE_DANGER,
-                            icon_custom_emoji_id=5237758235143248994)
-            ])
-        else:
-            session_data = await db.get_session(event.sender_id)
-            if session_data and session_data.get("remember"):
-                rows.append([
-                    btn.callback("⚡ Hızlı Giriş", "quick_login",
-                                style=ButtonBuilder.STYLE_SUCCESS,
-                                icon_custom_emoji_id=5233408828313192030)
-                ])
-            rows.append([
-                btn.callback("🔐 Giriş Yap", "login_menu",
-                            style=ButtonBuilder.STYLE_SUCCESS,
-                            icon_custom_emoji_id=5233408828313192030)
-            ])
-        
-        rows.append([
-            btn.callback("❓ Yardım", "help_main",
-                        icon_custom_emoji_id=5238091390690068061),
-            btn.callback("📝 Komutlar", "commands")
-        ])
-        
-        rows.append([
-            btn.url(f"📢 {config.PLUGIN_CHANNEL}", f"https://t.me/{config.PLUGIN_CHANNEL}",
-                   style=ButtonBuilder.STYLE_PRIMARY)
-        ])
-        
-        if event.sender_id == config.OWNER_ID or await db.is_sudo(event.sender_id):
-            rows.append([
-                btn.callback("⚙️ Yönetim Paneli", "settings_menu",
-                            style=ButtonBuilder.STYLE_DANGER,
-                            icon_custom_emoji_id=5237830824684428925)
-            ])
+        text, rows = await build_main_menu(event.sender_id, user.first_name)
         
         await bot_api.edit_message_text(
             chat_id=event.sender_id,
