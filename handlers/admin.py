@@ -82,41 +82,69 @@ def register_admin_handlers(bot):
             rows = [
                 # Mod ve Bakım toggle butonları
                 [
-                    btn.callback("🔒 Özel Yap" if mode == "public" else "🌐 Genel Yap", "toggle_mode",
-                                style=ButtonBuilder.STYLE_PRIMARY if mode == "public" else ButtonBuilder.STYLE_SUCCESS),
-                    btn.callback("✅ Bakım Kapat" if maint else "🔧 Bakım Aç", "toggle_maintenance",
-                                style=ButtonBuilder.STYLE_SUCCESS if maint else ButtonBuilder.STYLE_DANGER)
+                    btn.callback(" Özel Yap" if mode == "public" else " Genel Yap", "toggle_mode",
+                                style=ButtonBuilder.STYLE_PRIMARY if mode == "public" else ButtonBuilder.STYLE_SUCCESS,
+                                icon_custom_emoji_id=5832093724410486528 if mode == "public" else 5832151447424039657),
+                    btn.callback(" Bakım Kapat" if maint else " Bakım Aç", "toggle_maintenance",
+                                style=ButtonBuilder.STYLE_SUCCESS if maint else ButtonBuilder.STYLE_DANGER,
+                                icon_custom_emoji_id=5832093724410486528 if maint else 5832126063324093707)
                 ],
                 # Kullanıcılar ve Pluginler
                 [
-                    btn.callback("👥 Kullanıcılar", "users_list_0", style=ButtonBuilder.STYLE_PRIMARY),
-                    btn.callback("🔌 Plugin'ler", "admin_plugins", style=ButtonBuilder.STYLE_PRIMARY)
+                    btn.callback(" Kullanıcılar", "users_list_0", 
+                                style=ButtonBuilder.STYLE_PRIMARY,
+                                icon_custom_emoji_id=5832607941692378907),
+                    btn.callback(" Plugin'ler", "admin_plugins", 
+                                style=ButtonBuilder.STYLE_PRIMARY,
+                                icon_custom_emoji_id=5830184853236097449)
                 ],
                 # Sudo ve Ban
                 [
-                    btn.callback("👑 Sudo", "sudo_management", style=ButtonBuilder.STYLE_SUCCESS),
-                    btn.callback("🚫 Ban", "ban_management", style=ButtonBuilder.STYLE_DANGER)
+                    btn.callback(" Sudo", "sudo_management", 
+                                style=ButtonBuilder.STYLE_SUCCESS,
+                                icon_custom_emoji_id=5832235042063835840),
+                    btn.callback(" Ban", "ban_management", 
+                                style=ButtonBuilder.STYLE_DANGER,
+                                icon_custom_emoji_id=5832149976972109145)
                 ],
                 # İstatistik ve Loglar
                 [
-                    btn.callback("📊 İstatistik", "stats", style=ButtonBuilder.STYLE_PRIMARY),
-                    btn.callback("📋 Loglar", "view_logs", style=ButtonBuilder.STYLE_PRIMARY)
+                    btn.callback(" İstatistik", "stats", 
+                                style=ButtonBuilder.STYLE_PRIMARY,
+                                icon_custom_emoji_id=5832153413021130498),
+                    btn.callback(" Loglar", "view_logs", 
+                                style=ButtonBuilder.STYLE_PRIMARY,
+                                icon_custom_emoji_id=5832365506916523096)
                 ],
                 # Güncelle ve Restart
                 [
-                    btn.callback("🔄 Güncelle", "update_bot", style=ButtonBuilder.STYLE_SUCCESS),
-                    btn.callback("🔃 Restart", "restart_bot", style=ButtonBuilder.STYLE_DANGER)
+                    btn.callback(" Güncelle", "update_bot", 
+                                style=ButtonBuilder.STYLE_SUCCESS,
+                                icon_custom_emoji_id=5832124569195700361),
+                    btn.callback(" Restart", "restart_bot", 
+                                style=ButtonBuilder.STYLE_DANGER,
+                                icon_custom_emoji_id=5832104239718752496)
                 ],
                 # Komutlar
-                [btn.callback("📝 Komutlar", "admin_commands", style=ButtonBuilder.STYLE_PRIMARY)],
+                [btn.callback(" Komutlar", "admin_commands", 
+                             style=ButtonBuilder.STYLE_PRIMARY,
+                             icon_custom_emoji_id=5832365506916523096)],
                 # Geri
-                [btn.callback("◀️ Ana Menü", "main_menu", icon_custom_emoji_id=5237707207794498594)]
+                [btn.callback(" Ana Menü", "main_menu", 
+                             style=ButtonBuilder.STYLE_DANGER,
+                             icon_custom_emoji_id=5832646161554480591)]
             ]
         else:
             rows = [
-                [btn.callback("🔌 Plugin'ler", "admin_plugins", style=ButtonBuilder.STYLE_PRIMARY)],
-                [btn.callback("📊 İstatistik", "stats", style=ButtonBuilder.STYLE_PRIMARY)],
-                [btn.callback("◀️ Ana Menü", "main_menu", icon_custom_emoji_id=5237707207794498594)]
+                [btn.callback(" Plugin'ler", "admin_plugins", 
+                             style=ButtonBuilder.STYLE_PRIMARY,
+                             icon_custom_emoji_id=5830184853236097449)],
+                [btn.callback(" İstatistik", "stats", 
+                             style=ButtonBuilder.STYLE_PRIMARY,
+                             icon_custom_emoji_id=5832153413021130498)],
+                [btn.callback(" Ana Menü", "main_menu", 
+                             style=ButtonBuilder.STYLE_DANGER,
+                             icon_custom_emoji_id=5832646161554480591)]
             ]
         return rows
     
@@ -420,21 +448,8 @@ def register_admin_handlers(bot):
     @bot.on(events.CallbackQuery(data=b"admin_panel"))
     async def admin_panel_callback(event):
         """Admin paneline geri dön - settings_menu'ya yönlendir"""
-        if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
-            await event.answer(config.MESSAGES["admin_only"], alert=True)
-            return
-        
-        # settings_menu ile aynı içeriği göster
-        text, settings = await get_settings_text()
-        rows = get_settings_buttons_api(settings, event.sender_id == config.OWNER_ID)
-        
-        await bot_api.edit_message_text(
-            chat_id=event.sender_id,
-            message_id=event.message_id,
-            text=text,
-            reply_markup=btn.inline_keyboard(rows)
-        )
-        await event.answer()
+        # settings_menu_handler ile aynı işlevi yapar
+        await settings_menu_handler(event)
     
     @bot.on(events.CallbackQuery(data=b"ban_management"))
     async def ban_management_handler(event):
