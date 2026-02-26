@@ -194,6 +194,9 @@ async def main():
     bot_me = await bot.get_me()
     log(f"✅ Bot bağlandı: @{bot_me.username}")
     
+    # Bot username'ini config'e kaydet (pluginler için)
+    config.BOT_USERNAME = bot_me.username
+    
     # Handler'ları kaydet
     log("🔄 Handler'lar yükleniyor...")
     register_user_handlers(bot)
@@ -209,14 +212,15 @@ async def main():
     log("🔄 Plugin bağımlılıkları kontrol ediliyor...")
     await plugin_manager.preinstall_all_dependencies()
     
-    # Session'ları geri yükle (sadece always-on)
-    log("🔄 Always-on session'lar yükleniyor...")
+    # Session'ları geri yükle
+    log("🔄 Session'lar geri yükleniyor...")
     restored = await smart_session_manager.restore_sessions()
     
     # İstatistikleri göster
     stats = smart_session_manager.get_stats()
-    log(f"✅ {restored} always-on session aktif")
-    log(f"📦 {stats['session_cache']} session cache'de (on-demand hazır)")
+    log(f"✅ {restored} kullanıcı aktif (plugin'li)")
+    log(f"📦 {stats['session_cache']} session cache'de")
+    log(f"🟢 {stats['always_on_users']} always-on")
     
     # Arka plan görevlerini başlat
     log("🔄 Arka plan görevleri başlatılıyor...")
