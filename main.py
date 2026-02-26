@@ -197,6 +197,13 @@ async def main():
     # Bot username'ini config'e kaydet (pluginler için)
     config.BOT_USERNAME = bot_me.username
     
+    # Ayrıca dosyaya da yaz (pluginler için)
+    try:
+        with open('.bot_username', 'w') as f:
+            f.write(bot_me.username)
+    except:
+        pass
+    
     # Handler'ları kaydet
     log("🔄 Handler'lar yükleniyor...")
     register_user_handlers(bot)
