@@ -1084,20 +1084,18 @@ def register_user_handlers(bot):
     
     @bot.on(events.InlineQuery())
     async def inline_query_handler(event):
-        """Inline query handler - .start komutu için butonlu mesaj"""
+        """Inline query handler - .start, .help, .plugins için butonlu mesajlar"""
         query = event.text.strip()
         user_id = event.sender_id
+        bot_username = config.BOT_USERNAME or ""
         
-        # panel_USER_ID formatını kontrol et
-        if query.startswith("panel_"):
-            try:
+        try:
+            # ===== ANA PANEL =====
+            if query.startswith("panel_"):
                 target_user_id = int(query.split("_")[1])
-                
-                # Sadece kendi panelini görebilir
                 if target_user_id != user_id:
                     return
                 
-                # Kullanıcı bilgilerini al
                 user_data = await db.get_user(user_id)
                 if not user_data:
                     return
@@ -1116,36 +1114,187 @@ def register_user_handlers(bot):
                     text += f"👤 **Hesap:** @{username}\n"
                     text += f"🔌 **Aktif Plugin:** {len(active_plugins)}\n"
                 
-                text += f"\n📱 Detaylı ayarlar için butona tıklayın."
+                text += f"\n📱 Aşağıdaki butonları kullanabilirsiniz."
                 
-                # Butonlar
-                bot_username = config.BOT_USERNAME or ""
                 buttons = []
-                
                 if bot_username:
-                    buttons.append([Button.url("⚙️ Ayarları Aç", f"https://t.me/{bot_username}?start=panel")])
-                    
                     if is_logged_in:
                         buttons.append([
                             Button.url("🔌 Pluginler", f"https://t.me/{bot_username}?start=plugins"),
                             Button.url("📦 Aktifler", f"https://t.me/{bot_username}?start=my_plugins")
                         ])
-                
-                # Inline sonuç oluştur
-                from telethon.tl.types import InputBotInlineResult, InputBotInlineMessageText
+                    buttons.append([
+                        Button.url("❓ Yardım", f"https://t.me/{bot_username}?start=help"),
+                        Button.url("⚙️ Ayarlar", f"https://t.me/{bot_username}?start=panel")
+                    ])
                 
                 await event.answer(
                     results=[
                         event.builder.article(
                             title="⚡ Userbot Kontrol Paneli",
-                            description=f"{status_text} | {len(active_plugins)} plugin",
+                            description=f"{status_text} | {len(active_plugins)} plugin aktif",
                             text=text,
                             buttons=buttons if buttons else None
                         )
                     ],
                     cache_time=0
                 )
-            except Exception as e:
-                print(f"[INLINE] Hata: {e}")
-                import traceback
-                traceback.print_exc()
+            
+            # ===== YARDIM PANELİ =====
+            elif query.startswith("help_"):
+                target_user_id = int(query.split("_")[1])
+                if target_user_id != user_id:
+                    return
+                
+                text = "📚 **Userbot Komutları**\n\n"
+                text += "**🎛️ Panel Komutları:**\n"
+                text += "`.start` - Kontrol panelini aç\n"
+                text += "`.plugins` - Plugin listesi\n"
+                text += "`.mystats` - İstatistikler\n"
+                text += "`.uhelp` - Yardım\n\n"
+                
+                text += "**🔌 Plugin Komutları:**\n"
+                text += "`.pload <isim>` - Plugin yükle\n"
+                text += "`.punload <isim>` - Plugin kaldır\n"
+                text += "`.pinfo <isim>` - Plugin bilgisi\n\n"
+                
+                text += "━━━━━━━━━━━━━━━━━━━━\n"
+                text += "💡 Komutlar `.` ile başlar"
+                
+                buttons = []
+                if bot_username:
+                    buttons.append([
+                        Button.url("⚡ Ana Panel", f"https://t.me/{bot_username}?start=panel"),
+                        Button.url("🔌 Pluginler", f"https://t.me/{bot_username}?start=plugins")
+                    ])
+                
+                await event.answer(
+                    results=[
+                        event.builder.article(
+                            title="📚 Userbot Yardım",
+                            description="Komutlar ve kullanım bilgileri",
+                            text=text,
+                            buttons=buttons if buttons else None
+                        )
+                    ],
+                    cache_time=0
+                )
+            
+            # ===== PLUGİN LİSTESİ =====
+            elif query.startswith("plugins_"):
+                target_user_id = int(query.split("_")[1])
+                if target_user_id != user_id:
+                    return
+                
+                user_data = await db.get_user(user_id)
+                active_plugins = user_data.get("active_plugins", []) if user_data else []
+                all_plugins = await db.get_all_plugins()
+                
+                # Erişilebilir pluginleri filtrele
+                accessible = []
+                for p in all_plugins:
+                    if p.get("is_disabled"):
+                        continue
+                    if p.get("is_public", True) or user_id in p.get("allowed_users", []):
+                        if user_id not in p.get("restricted_users", []):
+                            accessible.append(p)
+                
+                if not accessible:
+                    text = "📭 **Henüz plugin yok.**"
+                else:
+                    text = f"🔌 **Plugin Listesi** ({len(accessible)} adet)\n\n"
+                    
+                    for p in accessible[:10]:
+                        name = p.get("name", "?")
+                        is_active = name in active_plugins
+                        is_default = p.get("default_active", False)
+                        
+                        status = "🟢" if is_active else "⚪"
+                        default = "⭐" if is_default else ""
+                        
+                        text += f"{status}{default} `{name}`\n"
+                    
+                    if len(accessible) > 10:
+                        text += f"\n... +{len(accessible) - 10} daha"
+                    
+                    text += f"\n\n━━━━━━━━━━━━━━━━━━━━\n"
+                    text += f"🟢 Aktif | ⚪ Pasif | ⭐ Zorunlu\n"
+                    text += f"📥 `.pload <isim>` ile yükle"
+                
+                buttons = []
+                if bot_username:
+                    buttons.append([
+                        Button.url("📋 Detaylı Liste", f"https://t.me/{bot_username}?start=plugins"),
+                        Button.url("📦 Aktiflerim", f"https://t.me/{bot_username}?start=my_plugins")
+                    ])
+                    buttons.append([
+                        Button.url("⚡ Ana Panel", f"https://t.me/{bot_username}?start=panel")
+                    ])
+                
+                await event.answer(
+                    results=[
+                        event.builder.article(
+                            title="🔌 Plugin Listesi",
+                            description=f"{len(accessible)} plugin | {len(active_plugins)} aktif",
+                            text=text,
+                            buttons=buttons if buttons else None
+                        )
+                    ],
+                    cache_time=0
+                )
+            
+            # ===== İSTATİSTİKLER =====
+            elif query.startswith("stats_"):
+                target_user_id = int(query.split("_")[1])
+                if target_user_id != user_id:
+                    return
+                
+                user_data = await db.get_user(user_id)
+                if not user_data:
+                    return
+                
+                active_plugins = user_data.get("active_plugins", [])
+                is_logged_in = user_data.get("is_logged_in", False)
+                username = user_data.get("userbot_username", "?")
+                userbot_id = user_data.get("userbot_id", "?")
+                
+                status_emoji = "🟢" if is_logged_in else "🔴"
+                
+                text = "📊 **Userbot İstatistiklerim**\n\n"
+                text += f"{status_emoji} **Durum:** {'Aktif' if is_logged_in else 'Pasif'}\n"
+                
+                if is_logged_in:
+                    text += f"👤 **Hesap:** @{username}\n"
+                    text += f"🆔 **ID:** `{userbot_id}`\n"
+                    text += f"🔌 **Aktif Plugin:** {len(active_plugins)}\n"
+                    
+                    if active_plugins:
+                        text += f"\n📦 **Yüklü:**\n"
+                        for p in active_plugins[:5]:
+                            text += f"  • `{p}`\n"
+                        if len(active_plugins) > 5:
+                            text += f"  • +{len(active_plugins) - 5} daha\n"
+                
+                buttons = []
+                if bot_username:
+                    buttons.append([
+                        Button.url("🔌 Pluginler", f"https://t.me/{bot_username}?start=plugins"),
+                        Button.url("⚡ Ana Panel", f"https://t.me/{bot_username}?start=panel")
+                    ])
+                
+                await event.answer(
+                    results=[
+                        event.builder.article(
+                            title="📊 İstatistiklerim",
+                            description=f"{'Aktif' if is_logged_in else 'Pasif'} | {len(active_plugins)} plugin",
+                            text=text,
+                            buttons=buttons if buttons else None
+                        )
+                    ],
+                    cache_time=0
+                )
+                
+        except Exception as e:
+            print(f"[INLINE] Hata: {e}")
+            import traceback
+            traceback.print_exc()
