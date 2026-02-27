@@ -1077,3 +1077,75 @@ def register_user_handlers(bot):
     @bot.on(events.CallbackQuery(data=b"noop"))
     async def noop_handler(event):
         await event.answer()
+    
+    # ==========================================
+    # INLINE QUERY HANDLER
+    # ==========================================
+    
+    @bot.on(events.InlineQuery())
+    async def inline_query_handler(event):
+        """Inline query handler - .start komutu için butonlu mesaj"""
+        query = event.text.strip()
+        user_id = event.sender_id
+        
+        # panel_USER_ID formatını kontrol et
+        if query.startswith("panel_"):
+            try:
+                target_user_id = int(query.split("_")[1])
+                
+                # Sadece kendi panelini görebilir
+                if target_user_id != user_id:
+                    return
+                
+                # Kullanıcı bilgilerini al
+                user_data = await db.get_user(user_id)
+                if not user_data:
+                    return
+                
+                active_plugins = user_data.get("active_plugins", [])
+                is_logged_in = user_data.get("is_logged_in", False)
+                username = user_data.get("userbot_username", "?")
+                
+                status_emoji = "🟢" if is_logged_in else "🔴"
+                status_text = "Aktif" if is_logged_in else "Pasif"
+                
+                text = f"⚡ **Userbot Kontrol Paneli**\n\n"
+                text += f"{status_emoji} **Durum:** {status_text}\n"
+                
+                if is_logged_in:
+                    text += f"👤 **Hesap:** @{username}\n"
+                    text += f"🔌 **Aktif Plugin:** {len(active_plugins)}\n"
+                
+                text += f"\n📱 Detaylı ayarlar için butona tıklayın."
+                
+                # Butonlar
+                bot_username = config.BOT_USERNAME or ""
+                buttons = []
+                
+                if bot_username:
+                    buttons.append([Button.url("⚙️ Ayarları Aç", f"https://t.me/{bot_username}?start=panel")])
+                    
+                    if is_logged_in:
+                        buttons.append([
+                            Button.url("🔌 Pluginler", f"https://t.me/{bot_username}?start=plugins"),
+                            Button.url("📦 Aktifler", f"https://t.me/{bot_username}?start=my_plugins")
+                        ])
+                
+                # Inline sonuç oluştur
+                from telethon.tl.types import InputBotInlineResult, InputBotInlineMessageText
+                
+                await event.answer(
+                    results=[
+                        event.builder.article(
+                            title="⚡ Userbot Kontrol Paneli",
+                            description=f"{status_text} | {len(active_plugins)} plugin",
+                            text=text,
+                            buttons=buttons if buttons else None
+                        )
+                    ],
+                    cache_time=0
+                )
+            except Exception as e:
+                print(f"[INLINE] Hata: {e}")
+                import traceback
+                traceback.print_exc()
