@@ -179,6 +179,7 @@ class ButtonBuilder:
     """Renkli buton oluşturucu"""
     
     # Buton stilleri
+    STYLE_SECONDARY = "secondary"
     STYLE_PRIMARY = "primary"    # Mavi
     STYLE_SUCCESS = "success"    # Yeşil
     STYLE_DANGER = "danger"      # Kırmızı
