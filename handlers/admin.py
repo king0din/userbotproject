@@ -1242,11 +1242,11 @@ def register_admin_handlers(bot):
                 )
         
         elif stage == 'waiting_reactions':
-            # Normal ve premium emojileri al
+            # Normal ve premium emojileri al - OFFSET'E GÖRE SIRALI
             from telethon.tl.types import MessageEntityCustomEmoji
             import re
             
-            reactions = []
+            all_emojis = []  # (offset, emoji_data) listesi
             
             # Premium emojileri al
             if event.message.entities:
@@ -1255,33 +1255,48 @@ def register_admin_handlers(bot):
                         start = entity.offset
                         end = start + entity.length
                         emoji_text = event.text[start:end] if event.text else "⭐"
-                        reactions.append({
+                        all_emojis.append((start, {
                             'text': emoji_text,
                             'emoji_id': str(entity.document_id),
-                            'type': 'premium'
-                        })
+                            'type': 'premium',
+                            'offset': start
+                        }))
+            
+            # Premium emoji pozisyonlarını kaydet
+            premium_ranges = []
+            if event.message.entities:
+                for entity in event.message.entities:
+                    if isinstance(entity, MessageEntityCustomEmoji):
+                        premium_ranges.append((entity.offset, entity.offset + entity.length))
             
             # Normal emojileri al
-            emoji_pattern = re.compile(r'[\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF]+')
+            emoji_pattern = re.compile(r'[\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF\U0001FA00-\U0001FAFF]+')
             for match in emoji_pattern.finditer(event.text or ""):
-                # Premium emoji'lerle çakışmıyorsa ekle
+                start = match.start()
+                # Premium emoji ile çakışıyor mu kontrol et
                 is_premium = False
-                if event.message.entities:
-                    for entity in event.message.entities:
-                        if isinstance(entity, MessageEntityCustomEmoji):
-                            if entity.offset <= match.start() < entity.offset + entity.length:
-                                is_premium = True
-                                break
+                for p_start, p_end in premium_ranges:
+                    if p_start <= start < p_end:
+                        is_premium = True
+                        break
+                
                 if not is_premium:
-                    reactions.append({
-                        'text': match.group(),
-                        'emoji_id': None,
-                        'type': 'normal'
-                    })
+                    # Her emoji karakterini ayrı ayrı ekle
+                    for i, char in enumerate(match.group()):
+                        all_emojis.append((start + i, {
+                            'text': char,
+                            'emoji_id': None,
+                            'type': 'normal',
+                            'offset': start + i
+                        }))
             
-            if not reactions:
+            if not all_emojis:
                 await event.respond("⚠️ Emoji bulunamadı! Tekrar deneyin.")
                 return
+            
+            # Offset'e göre sırala
+            all_emojis.sort(key=lambda x: x[0])
+            reactions = [emoji_data for _, emoji_data in all_emojis]
             
             state['temp_reactions'] = reactions
             state['stage'] = 'waiting_reaction_color'
@@ -1290,6 +1305,7 @@ def register_admin_handlers(bot):
             premium_count = len([r for r in reactions if r['type'] == 'premium'])
             
             info = f"✅ **Tepkiler alındı!**\n📝 {emoji_list}\n"
+            info += f"📊 Toplam: {len(reactions)} emoji\n"
             if premium_count > 0:
                 info += f"✨ Premium: {premium_count} adet\n"
             
@@ -1562,36 +1578,62 @@ def register_admin_handlers(bot):
         await event.answer("👁️ Önizleme gönderiliyor...")
         
         content = state['content']
+        use_botapi = has_premium_features(state)
+        
+        print(f"[POST] Preview - use_botapi: {use_botapi}")
         
         try:
-            # Premium özellik varsa Bot API kullan
-            if has_premium_features(state):
+            if use_botapi:
                 from utils.bot_api import BotAPI
                 api = BotAPI()
                 buttons = build_post_buttons_botapi(state)
+                
+                print(f"[POST] Bot API buttons: {buttons}")
                 
                 if content.media:
                     file_path = await bot.download_media(content.media)
                     result = await api.send_photo(
                         chat_id=user_id,
                         photo=file_path,
-                        caption=content.message,
+                        caption=content.message or "",
                         reply_markup=buttons
                     )
                     import os
-                    os.remove(file_path)
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
                 else:
                     result = await api.send_message(
                         chat_id=user_id,
-                        text=content.message,
+                        text=content.message or "Post",
                         reply_markup=buttons
                     )
+                
+                print(f"[POST] Bot API result: {result}")
                 
                 if result:
                     state['preview_id'] = result.get('message_id')
                 else:
-                    await event.respond("❌ Bot API hatası!")
-                    return
+                    # Bot API başarısız - Telethon'a fallback
+                    print("[POST] Bot API failed, falling back to Telethon")
+                    buttons = build_post_buttons_with_builder(state)
+                    
+                    if content.media:
+                        preview = await bot.send_file(
+                            user_id,
+                            file=content.media,
+                            caption=content.message,
+                            buttons=buttons,
+                            formatting_entities=content.entities
+                        )
+                    else:
+                        preview = await bot.send_message(
+                            user_id,
+                            content.message,
+                            buttons=buttons,
+                            formatting_entities=content.entities,
+                            link_preview=False
+                        )
+                    state['preview_id'] = preview.id
             else:
                 # Normal Telethon
                 buttons = build_post_buttons_with_builder(state)
