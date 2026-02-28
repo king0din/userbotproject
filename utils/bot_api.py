@@ -234,15 +234,11 @@ class ButtonBuilder:
     
     @staticmethod
     def inline_keyboard(rows: List[List[Dict]]) -> Dict:
+        """Inline keyboard oluştur"""
         return {
             "inline_keyboard": rows
         }
 
-    @staticmethod
-    def build(rows: List[List[Dict]]) -> Dict:
-        return {
-            "inline_keyboard": rows
-        }
 
 # Global instance
 bot_api = BotAPI()
