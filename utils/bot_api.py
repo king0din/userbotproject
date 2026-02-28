@@ -53,23 +53,22 @@ class BotAPI:
     
     async def send_message(
         self,
-        chat_id: int,
+        chat_id: Union[int, str],
         text: str,
-        parse_mode: str = "HTML",
+        parse_mode: str = None,
         reply_markup: Dict = None,
         disable_web_page_preview: bool = True
-    ) -> Dict:
+    ) -> Optional[Dict]:
         """Mesaj gönder"""
-        # Markdown'ı HTML'e çevir
-        if parse_mode == "HTML":
-            text = md_to_html(text)
-        
         data = {
             "chat_id": chat_id,
             "text": text,
-            "parse_mode": parse_mode,
             "disable_web_page_preview": disable_web_page_preview
         }
+        
+        # Parse mode sadece istenirse ekle
+        if parse_mode:
+            data["parse_mode"] = parse_mode
         
         if reply_markup:
             data["reply_markup"] = reply_markup
@@ -131,14 +130,11 @@ class BotAPI:
         chat_id: Union[int, str],
         photo: str,
         caption: str = None,
-        parse_mode: str = "HTML",
+        parse_mode: str = None,
         reply_markup: Dict = None
     ) -> Optional[Dict]:
         """Fotoğraf gönder"""
         import os
-        
-        if caption and parse_mode == "HTML":
-            caption = md_to_html(caption)
         
         url = f"{self.base_url}/sendPhoto"
         
@@ -151,6 +147,7 @@ class BotAPI:
                 data.add_field('photo', open(photo, 'rb'), filename=os.path.basename(photo))
                 if caption:
                     data.add_field('caption', caption)
+                if parse_mode:
                     data.add_field('parse_mode', parse_mode)
                 if reply_markup:
                     import json
@@ -160,17 +157,18 @@ class BotAPI:
                     result = await response.json()
                     if result.get('ok'):
                         return result.get('result')
-                    print(f"[BOT_API] send_photo error: {result}")
+                    print(f"[BOT_API] send_photo error: {result.get('description')}")
                     return None
             else:
                 # URL olarak gönder
                 json_data = {
                     "chat_id": chat_id,
-                    "photo": photo,
-                    "parse_mode": parse_mode
+                    "photo": photo
                 }
                 if caption:
                     json_data["caption"] = caption
+                if parse_mode:
+                    json_data["parse_mode"] = parse_mode
                 if reply_markup:
                     json_data["reply_markup"] = reply_markup
                 
@@ -178,7 +176,7 @@ class BotAPI:
                     result = await response.json()
                     if result.get('ok'):
                         return result.get('result')
-                    print(f"[BOT_API] send_photo error: {result}")
+                    print(f"[BOT_API] send_photo error: {result.get('description')}")
                     return None
     
     async def send_document(
