@@ -117,6 +117,113 @@ class BotAPI:
             "message_id": message_id
         })
     
+    async def send_photo(
+        self,
+        chat_id: Union[int, str],
+        photo: str,
+        caption: str = None,
+        parse_mode: str = "HTML",
+        reply_markup: Dict = None
+    ) -> Optional[Dict]:
+        """Fotoğraf gönder"""
+        import os
+        
+        if caption and parse_mode == "HTML":
+            caption = md_to_html(caption)
+        
+        url = f"{self.base_url}/sendPhoto"
+        
+        async with aiohttp.ClientSession() as session:
+            # Dosya mı URL mi kontrol et
+            if os.path.exists(photo):
+                # Dosya olarak gönder
+                data = aiohttp.FormData()
+                data.add_field('chat_id', str(chat_id))
+                data.add_field('photo', open(photo, 'rb'), filename=os.path.basename(photo))
+                if caption:
+                    data.add_field('caption', caption)
+                    data.add_field('parse_mode', parse_mode)
+                if reply_markup:
+                    import json
+                    data.add_field('reply_markup', json.dumps(reply_markup))
+                
+                async with session.post(url, data=data) as response:
+                    result = await response.json()
+                    if result.get('ok'):
+                        return result.get('result')
+                    print(f"[BOT_API] send_photo error: {result}")
+                    return None
+            else:
+                # URL olarak gönder
+                json_data = {
+                    "chat_id": chat_id,
+                    "photo": photo,
+                    "parse_mode": parse_mode
+                }
+                if caption:
+                    json_data["caption"] = caption
+                if reply_markup:
+                    json_data["reply_markup"] = reply_markup
+                
+                async with session.post(url, json=json_data) as response:
+                    result = await response.json()
+                    if result.get('ok'):
+                        return result.get('result')
+                    print(f"[BOT_API] send_photo error: {result}")
+                    return None
+    
+    async def send_document(
+        self,
+        chat_id: Union[int, str],
+        document: str,
+        caption: str = None,
+        parse_mode: str = "HTML",
+        reply_markup: Dict = None
+    ) -> Optional[Dict]:
+        """Dosya gönder"""
+        import os
+        
+        if caption and parse_mode == "HTML":
+            caption = md_to_html(caption)
+        
+        url = f"{self.base_url}/sendDocument"
+        
+        async with aiohttp.ClientSession() as session:
+            if os.path.exists(document):
+                data = aiohttp.FormData()
+                data.add_field('chat_id', str(chat_id))
+                data.add_field('document', open(document, 'rb'), filename=os.path.basename(document))
+                if caption:
+                    data.add_field('caption', caption)
+                    data.add_field('parse_mode', parse_mode)
+                if reply_markup:
+                    import json
+                    data.add_field('reply_markup', json.dumps(reply_markup))
+                
+                async with session.post(url, data=data) as response:
+                    result = await response.json()
+                    if result.get('ok'):
+                        return result.get('result')
+                    print(f"[BOT_API] send_document error: {result}")
+                    return None
+            else:
+                json_data = {
+                    "chat_id": chat_id,
+                    "document": document,
+                    "parse_mode": parse_mode
+                }
+                if caption:
+                    json_data["caption"] = caption
+                if reply_markup:
+                    json_data["reply_markup"] = reply_markup
+                
+                async with session.post(url, json=json_data) as response:
+                    result = await response.json()
+                    if result.get('ok'):
+                        return result.get('result')
+                    print(f"[BOT_API] send_document error: {result}")
+                    return None
+    
     async def edit_message_reply_markup(
         self,
         chat_id: int = None,
@@ -179,10 +286,10 @@ class ButtonBuilder:
     """Renkli buton oluşturucu"""
     
     # Buton stilleri
-    STYLE_SECONDARY = "secondary"
     STYLE_PRIMARY = "primary"    # Mavi
     STYLE_SUCCESS = "success"    # Yeşil
     STYLE_DANGER = "danger"      # Kırmızı
+    STYLE_SECONDARY = "secondary"  # Gri/Beyaz
     
     # Premium emoji ID'leri
     EMOJI_LOGIN = 5233408828313192030      # Giriş
