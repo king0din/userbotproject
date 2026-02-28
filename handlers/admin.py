@@ -1046,6 +1046,62 @@ def register_admin_handlers(bot):
     # Post state yönetimi
     post_states = {}
     
+    # Renk seçenekleri (Bot API destekli)
+    BUTTON_COLORS = {
+        'default': {'name': '⚪ Varsayılan', 'emoji': '⚪'},
+        'blue': {'name': '🔵 Mavi', 'emoji': '🔵'},
+        'green': {'name': '🟢 Yeşil', 'emoji': '🟢'}, 
+        'red': {'name': '🔴 Kırmızı', 'emoji': '🔴'},
+        'orange': {'name': '🟠 Turuncu', 'emoji': '🟠'},
+        'purple': {'name': '🟣 Mor', 'emoji': '🟣'},
+        'cyan': {'name': '🩵 Cyan', 'emoji': '🩵'},
+    }
+    
+    def extract_custom_emoji_id(message):
+        """Mesajdaki custom emoji ID'lerini çıkar"""
+        if not message.entities:
+            return []
+        
+        from telethon.tl.types import MessageEntityCustomEmoji
+        
+        emojis = []
+        for entity in message.entities:
+            if isinstance(entity, MessageEntityCustomEmoji):
+                # Emoji text'ini al
+                start = entity.offset
+                end = start + entity.length
+                emoji_text = message.text[start:end] if message.text else ""
+                emojis.append({
+                    'text': emoji_text,
+                    'id': str(entity.document_id),
+                    'type': 'custom'
+                })
+        return emojis
+    
+    def extract_normal_emojis(text):
+        """Normal emojileri çıkar"""
+        import re
+        # Unicode emoji pattern
+        emoji_pattern = re.compile(
+            "["
+            "\U0001F300-\U0001F9FF"  # Misc Symbols and Pictographs, Emoticons, etc.
+            "\u2600-\u26FF"          # Misc symbols
+            "\u2700-\u27BF"          # Dingbats
+            "\U0001FA00-\U0001FA6F"  # Chess Symbols
+            "\U0001FA70-\U0001FAFF"  # Symbols and Pictographs Extended-A
+            "]+", 
+            flags=re.UNICODE
+        )
+        
+        emojis = []
+        for match in emoji_pattern.finditer(text):
+            emojis.append({
+                'text': match.group(),
+                'id': None,
+                'type': 'normal'
+            })
+        return emojis
+    
     @bot.on(events.NewMessage(pattern=r'^/post$'))
     async def post_command(event):
         """Plugin kanalına post oluştur"""
@@ -1057,7 +1113,8 @@ def register_admin_handlers(bot):
             'content': None,
             'media': None,
             'buttons': [],
-            'current_row': []
+            'current_row': [],
+            'temp_button': None,  # Oluşturulan buton (renk seçimi için)
         }
         
         await event.respond(
@@ -1096,8 +1153,8 @@ def register_admin_handlers(bot):
                 buttons=[
                     [Button.inline("🔗 Link Butonu", b"post_add_link")],
                     [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
-                    [Button.inline("➡️ Aynı Satıra Ekle", b"post_same_row"),
-                     Button.inline("⬇️ Alt Satıra Geç", b"post_new_row")],
+                    [Button.inline("➡️ Aynı Satır", b"post_same_row"),
+                     Button.inline("⬇️ Yeni Satır", b"post_new_row")],
                     [Button.inline("👁️ Önizleme", b"post_preview")],
                     [Button.inline("✅ Gönder", b"post_confirm"),
                      Button.inline("❌ İptal", b"cancel_post")]
@@ -1114,50 +1171,131 @@ def register_admin_handlers(bot):
             if not url.startswith(('http://', 'https://')):
                 url = 'https://' + url
             
-            btn = {'type': 'url', 'text': state['temp_link_text'], 'url': url}
+            # Butonu geçici olarak kaydet
+            state['temp_button'] = {
+                'type': 'url', 
+                'text': state['temp_link_text'], 
+                'url': url,
+                'color': 'default',
+                'emoji_id': None
+            }
+            state['stage'] = 'waiting_link_color'
             
-            if state.get('add_to_current_row', True) and state['current_row']:
-                state['current_row'].append(btn)
-            else:
-                if state['current_row']:
-                    state['buttons'].append(state['current_row'])
-                state['current_row'] = [btn]
-            
-            state['stage'] = 'adding_buttons'
             await event.respond(
-                f"✅ **Link butonu eklendi!**\n`{state['temp_link_text']}` → `{url}`",
+                f"✅ **Link butonu hazır!**\n"
+                f"📝 Text: `{state['temp_link_text']}`\n"
+                f"🔗 URL: `{url}`\n\n"
+                f"🎨 **Buton rengi seçin:**",
                 buttons=[
-                    [Button.inline("🔗 Link Butonu", b"post_add_link")],
-                    [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
-                    [Button.inline("➡️ Aynı Satıra Ekle", b"post_same_row"),
-                     Button.inline("⬇️ Alt Satıra Geç", b"post_new_row")],
-                    [Button.inline("👁️ Önizleme", b"post_preview")],
-                    [Button.inline("✅ Gönder", b"post_confirm"),
-                     Button.inline("❌ İptal", b"cancel_post")]
+                    [Button.inline("⚪ Varsayılan", b"lcolor_default"),
+                     Button.inline("🔵 Mavi", b"lcolor_blue")],
+                    [Button.inline("🟢 Yeşil", b"lcolor_green"),
+                     Button.inline("🔴 Kırmızı", b"lcolor_red")],
+                    [Button.inline("🟠 Turuncu", b"lcolor_orange"),
+                     Button.inline("🟣 Mor", b"lcolor_purple")],
+                    [Button.inline("❌ İptal", b"post_back_to_buttons")]
                 ]
             )
         
         elif stage == 'waiting_reactions':
-            # Emoji'leri al
-            import re
-            emojis = re.findall(r'[\U0001F300-\U0001F9FF]|[\u2600-\u26FF]|[\u2700-\u27BF]|[\U0001FA00-\U0001FA6F]|[\U0001FA70-\U0001FAFF]', event.text)
+            # Custom emoji'leri ve normal emoji'leri çıkar
+            custom_emojis = extract_custom_emoji_id(event.message)
+            normal_emojis = extract_normal_emojis(event.text or "")
             
-            if not emojis:
-                await event.respond("⚠️ Emoji bulunamadı. Tekrar deneyin:\nÖrnek: `👍❤️🔥`")
+            all_emojis = custom_emojis + normal_emojis
+            
+            if not all_emojis:
+                await event.respond(
+                    "⚠️ Emoji bulunamadı!\n\n"
+                    "Normal emoji veya **premium emoji** gönderebilirsiniz.\n"
+                    "Örnek: `👍❤️🔥` veya premium emojiler"
+                )
                 return
             
-            state['temp_reactions'] = emojis
-            state['stage'] = 'waiting_reaction_layout'
+            state['temp_reactions'] = all_emojis
+            state['stage'] = 'waiting_reaction_color'
+            
+            # Emoji listesini göster
+            emoji_list = " ".join([e['text'] for e in all_emojis])
+            premium_count = len([e for e in all_emojis if e['type'] == 'custom'])
+            normal_count = len([e for e in all_emojis if e['type'] == 'normal'])
+            
+            info = f"✅ **Tepkiler alındı!**\n\n"
+            info += f"📝 Emojiler: {emoji_list}\n"
+            if premium_count > 0:
+                info += f"✨ Premium: {premium_count} adet\n"
+            if normal_count > 0:
+                info += f"👍 Normal: {normal_count} adet\n"
             
             await event.respond(
-                f"✅ **Tepkiler:** {' '.join(emojis)}\n\n"
-                "Nasıl dizilsin?",
+                info + "\n🎨 **Buton rengi seçin:**",
                 buttons=[
-                    [Button.inline("➡️ Yan Yana", b"reaction_horizontal")],
-                    [Button.inline("⬇️ Alt Alta", b"reaction_vertical")],
+                    [Button.inline("⚪ Varsayılan", b"rcolor_default"),
+                     Button.inline("🔵 Mavi", b"rcolor_blue")],
+                    [Button.inline("🟢 Yeşil", b"rcolor_green"),
+                     Button.inline("🔴 Kırmızı", b"rcolor_red")],
+                    [Button.inline("🟠 Turuncu", b"rcolor_orange"),
+                     Button.inline("🟣 Mor", b"rcolor_purple")],
                     [Button.inline("❌ İptal", b"post_back_to_buttons")]
                 ]
             )
+        
+        elif stage == 'waiting_premium_emoji':
+            # Premium emoji ID'sini al
+            text = event.text.strip()
+            
+            # Sayı mı kontrol et
+            if text.isdigit():
+                state['current_emoji_id'] = text
+                state['stage'] = 'adding_buttons'
+                
+                await event.respond(
+                    f"✅ **Premium Emoji ayarlandı!**\n"
+                    f"✨ Emoji ID: `{text}`\n\n"
+                    "Sonraki butona bu emoji eklenecek.",
+                    buttons=[
+                        [Button.inline("🔗 Link Butonu", b"post_add_link")],
+                        [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
+                        [Button.inline("➡️ Aynı Satır", b"post_same_row"),
+                         Button.inline("⬇️ Yeni Satır", b"post_new_row")],
+                        [Button.inline("👁️ Önizleme", b"post_preview")],
+                        [Button.inline("✅ Gönder", b"post_confirm"),
+                         Button.inline("❌ İptal", b"cancel_post")]
+                    ]
+                )
+            else:
+                # Emoji'den ID çıkarmayı dene
+                # Custom emoji formatı: <emoji:id> veya sadece id
+                import re
+                match = re.search(r'(\d{15,25})', text)
+                if match:
+                    emoji_id = match.group(1)
+                    state['current_emoji_id'] = emoji_id
+                    state['stage'] = 'adding_buttons'
+                    
+                    await event.respond(
+                        f"✅ **Premium Emoji ayarlandı!**\n"
+                        f"✨ Emoji ID: `{emoji_id}`\n\n"
+                        "Sonraki butona bu emoji eklenecek.",
+                        buttons=[
+                            [Button.inline("🔗 Link Butonu", b"post_add_link")],
+                            [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
+                            [Button.inline("➡️ Aynı Satır", b"post_same_row"),
+                             Button.inline("⬇️ Yeni Satır", b"post_new_row")],
+                            [Button.inline("👁️ Önizleme", b"post_preview")],
+                            [Button.inline("✅ Gönder", b"post_confirm"),
+                             Button.inline("❌ İptal", b"cancel_post")]
+                        ]
+                    )
+                else:
+                    await event.respond(
+                        "⚠️ Geçersiz emoji ID!\n\n"
+                        "Premium emoji ID'sini şu şekilde bulabilirsiniz:\n"
+                        "1. Premium emoji'yi bir mesaja ekleyin\n"
+                        "2. Mesajı forward edin\n"
+                        "3. ID numarasını kopyalayın\n\n"
+                        "Örnek: `5368324170671202286`"
+                    )
     
     @bot.on(events.CallbackQuery(data=b"post_add_link"))
     async def post_add_link_handler(event):
@@ -1168,7 +1306,83 @@ def register_admin_handlers(bot):
         
         post_states[user_id]['stage'] = 'waiting_link_text'
         post_states[user_id]['add_to_current_row'] = False
-        await event.edit("🔗 **Link Butonu Ekle**\n\nButon **metnini** girin:\nÖrnek: `📢 Kanala Katıl`")
+        await event.edit(
+            "🔗 **Link Butonu Ekle**\n\n"
+            "Buton **metnini** girin:\n"
+            "Örnek: `📢 Kanala Katıl`"
+        )
+    
+    # Link renk seçimi
+    @bot.on(events.CallbackQuery(pattern=rb"lcolor_(\w+)"))
+    async def link_color_handler(event):
+        """Link butonu renk seçimi"""
+        user_id = event.sender_id
+        state = post_states.get(user_id)
+        if not state or not state.get('temp_button'):
+            await event.answer("Hata!", alert=True)
+            return
+        
+        color = event.pattern_match.group(1).decode()
+        btn = state['temp_button']
+        btn['color'] = color
+        
+        # Butonu listeye ekle
+        if state.get('add_to_current_row', False) and state['current_row']:
+            state['current_row'].append(btn)
+        else:
+            if state['current_row']:
+                state['buttons'].append(state['current_row'])
+            state['current_row'] = [btn]
+        
+        state['temp_button'] = None
+        state['stage'] = 'adding_buttons'
+        
+        color_emoji = BUTTON_COLORS.get(color, {}).get('emoji', '⚪')
+        await event.answer(f"✅ Buton eklendi ({color_emoji})")
+        
+        await event.edit(
+            f"✅ **Link butonu eklendi!** {color_emoji}\n"
+            f"📝 `{btn['text']}` → `{btn['url']}`",
+            buttons=[
+                [Button.inline("🔗 Link Butonu", b"post_add_link")],
+                [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
+                [Button.inline("➡️ Aynı Satır", b"post_same_row"),
+                 Button.inline("⬇️ Yeni Satır", b"post_new_row")],
+                [Button.inline("👁️ Önizleme", b"post_preview")],
+                [Button.inline("✅ Gönder", b"post_confirm"),
+                 Button.inline("❌ İptal", b"cancel_post")]
+            ]
+        )
+    
+    # Tepki renk seçimi
+    @bot.on(events.CallbackQuery(pattern=rb"rcolor_(\w+)"))
+    async def reaction_color_handler(event):
+        """Tepki butonları renk seçimi ve dizilim"""
+        user_id = event.sender_id
+        state = post_states.get(user_id)
+        if not state or not state.get('temp_reactions'):
+            await event.answer("Hata!", alert=True)
+            return
+        
+        color = event.pattern_match.group(1).decode()
+        reactions = state['temp_reactions']
+        
+        state['temp_color'] = color
+        state['stage'] = 'waiting_reaction_layout'
+        
+        color_emoji = BUTTON_COLORS.get(color, {}).get('emoji', '⚪')
+        emoji_list = " ".join([e['text'] for e in reactions])
+        
+        await event.edit(
+            f"🎨 **Renk:** {color_emoji}\n"
+            f"📝 **Emojiler:** {emoji_list}\n\n"
+            "Nasıl dizilsin?",
+            buttons=[
+                [Button.inline("➡️ Yan Yana", b"reaction_horizontal")],
+                [Button.inline("⬇️ Alt Alta", b"reaction_vertical")],
+                [Button.inline("❌ İptal", b"post_back_to_buttons")]
+            ]
+        )
     
     @bot.on(events.CallbackQuery(data=b"post_add_reaction"))
     async def post_add_reaction_handler(event):
@@ -1193,21 +1407,36 @@ def register_admin_handlers(bot):
         
         # Yan yana tepki butonları
         reactions = state.get('temp_reactions', [])
-        row = [{'type': 'reaction', 'emoji': e} for e in reactions]
+        color = state.get('temp_color', 'default')
+        
+        row = []
+        for e in reactions:
+            row.append({
+                'type': 'reaction', 
+                'emoji': e['text'],
+                'emoji_id': e.get('id'),  # Premium emoji ID
+                'color': color
+            })
         
         if state['current_row']:
             state['buttons'].append(state['current_row'])
         state['buttons'].append(row)
         state['current_row'] = []
+        state['temp_reactions'] = None
+        state['temp_color'] = None
         state['stage'] = 'adding_buttons'
         
+        emoji_list = " ".join([e['text'] for e in reactions])
+        color_emoji = BUTTON_COLORS.get(color, {}).get('emoji', '⚪')
+        
         await event.edit(
-            f"✅ **Tepkiler eklendi (yan yana):** {' '.join(reactions)}",
+            f"✅ **Tepkiler eklendi (yan yana)!** {color_emoji}\n"
+            f"📝 {emoji_list}",
             buttons=[
                 [Button.inline("🔗 Link Butonu", b"post_add_link")],
                 [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
-                [Button.inline("➡️ Aynı Satıra Ekle", b"post_same_row"),
-                 Button.inline("⬇️ Alt Satıra Geç", b"post_new_row")],
+                [Button.inline("➡️ Aynı Satır", b"post_same_row"),
+                 Button.inline("⬇️ Yeni Satır", b"post_new_row")],
                 [Button.inline("👁️ Önizleme", b"post_preview")],
                 [Button.inline("✅ Gönder", b"post_confirm"),
                  Button.inline("❌ İptal", b"cancel_post")]
@@ -1223,23 +1452,35 @@ def register_admin_handlers(bot):
         
         # Alt alta tepki butonları
         reactions = state.get('temp_reactions', [])
+        color = state.get('temp_color', 'default')
         
         if state['current_row']:
             state['buttons'].append(state['current_row'])
             state['current_row'] = []
         
         for e in reactions:
-            state['buttons'].append([{'type': 'reaction', 'emoji': e}])
+            state['buttons'].append([{
+                'type': 'reaction', 
+                'emoji': e['text'],
+                'emoji_id': e.get('id'),
+                'color': color
+            }])
         
+        state['temp_reactions'] = None
+        state['temp_color'] = None
         state['stage'] = 'adding_buttons'
         
+        emoji_list = " ".join([e['text'] for e in reactions])
+        color_emoji = BUTTON_COLORS.get(color, {}).get('emoji', '⚪')
+        
         await event.edit(
-            f"✅ **Tepkiler eklendi (alt alta):** {' '.join(reactions)}",
+            f"✅ **Tepkiler eklendi (alt alta)!** {color_emoji}\n"
+            f"📝 {emoji_list}",
             buttons=[
                 [Button.inline("🔗 Link Butonu", b"post_add_link")],
                 [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
-                [Button.inline("➡️ Aynı Satıra Ekle", b"post_same_row"),
-                 Button.inline("⬇️ Alt Satıra Geç", b"post_new_row")],
+                [Button.inline("➡️ Aynı Satır", b"post_same_row"),
+                 Button.inline("⬇️ Yeni Satır", b"post_new_row")],
                 [Button.inline("👁️ Önizleme", b"post_preview")],
                 [Button.inline("✅ Gönder", b"post_confirm"),
                  Button.inline("❌ İptal", b"cancel_post")]
@@ -1278,13 +1519,16 @@ def register_admin_handlers(bot):
             return
         
         state['stage'] = 'adding_buttons'
+        state['temp_button'] = None
+        state['temp_reactions'] = None
+        
         await event.edit(
             "📝 **Buton Ekleme**",
             buttons=[
                 [Button.inline("🔗 Link Butonu", b"post_add_link")],
                 [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
-                [Button.inline("➡️ Aynı Satıra Ekle", b"post_same_row"),
-                 Button.inline("⬇️ Alt Satıra Geç", b"post_new_row")],
+                [Button.inline("➡️ Aynı Satır", b"post_same_row"),
+                 Button.inline("⬇️ Yeni Satır", b"post_new_row")],
                 [Button.inline("👁️ Önizleme", b"post_preview")],
                 [Button.inline("✅ Gönder", b"post_confirm"),
                  Button.inline("❌ İptal", b"cancel_post")]
@@ -1304,12 +1548,72 @@ def register_admin_handlers(bot):
                 if btn['type'] == 'url':
                     btn_row.append(Button.url(btn['text'], btn['url']))
                 elif btn['type'] == 'reaction':
-                    # Tepki butonları - başlangıçta 0
-                    btn_row.append(Button.inline(f"{btn['emoji']} 0", f"react_{btn['emoji']}_0".encode()))
+                    emoji = btn['emoji']
+                    btn_row.append(Button.inline(f"{emoji} 0", f"react_{emoji}_0".encode()))
             if btn_row:
                 telethon_buttons.append(btn_row)
         
         return telethon_buttons if telethon_buttons else None
+    
+    def build_post_buttons_botapi(state):
+        """State'den Bot API formatında butonlar oluştur (renkli + premium emoji)"""
+        from utils.bot_api import ButtonBuilder
+        btn_builder = ButtonBuilder()
+        
+        all_buttons = state['buttons'].copy()
+        if state['current_row']:
+            all_buttons.append(state['current_row'])
+        
+        rows = []
+        for row in all_buttons:
+            btn_row = []
+            for button in row:
+                color = button.get('color', 'default')
+                
+                if button['type'] == 'url':
+                    text = button['text']
+                    url = button['url']
+                    emoji_id = button.get('emoji_id')
+                    
+                    if emoji_id:
+                        btn_row.append(btn_builder.url(text, url, icon_custom_emoji_id=emoji_id))
+                    else:
+                        btn_row.append(btn_builder.url(text, url))
+                        
+                elif button['type'] == 'reaction':
+                    emoji = button['emoji']
+                    emoji_id = button.get('emoji_id')
+                    
+                    # Callback data için emoji_id ekle
+                    if emoji_id:
+                        callback_data = f"react_custom_{emoji_id}_0"
+                        btn_row.append(btn_builder.callback(
+                            f"{emoji} 0", 
+                            callback_data,
+                            icon_custom_emoji_id=emoji_id
+                        ))
+                    else:
+                        callback_data = f"react_{emoji}_0"
+                        btn_row.append(btn_builder.callback(f"{emoji} 0", callback_data))
+            
+            if btn_row:
+                rows.append(btn_row)
+        
+        return btn_builder.inline_keyboard(rows) if rows else None
+    
+    def has_premium_content(state):
+        """State'de premium emoji var mı kontrol et"""
+        all_buttons = state['buttons'].copy()
+        if state['current_row']:
+            all_buttons.append(state['current_row'])
+        
+        for row in all_buttons:
+            for btn in row:
+                if btn.get('emoji_id'):
+                    return True
+                if btn.get('color') and btn.get('color') != 'default':
+                    return True
+        return False
     
     @bot.on(events.CallbackQuery(pattern=rb"react_(.+)_(\d+)"))
     async def reaction_handler(event):
@@ -1411,29 +1715,58 @@ def register_admin_handlers(bot):
         
         await event.answer("👁️ Önizleme gönderiliyor...")
         
-        buttons = build_post_buttons(state)
         content = state['content']
         
+        # Premium içerik varsa Bot API kullan
+        use_botapi = has_premium_content(state)
+        
         try:
-            # Mesajı butonlarla birlikte gönder
-            if content.media:
-                preview = await bot.send_file(
-                    user_id,
-                    file=content.media,
-                    caption=content.message,
-                    buttons=buttons,
-                    formatting_entities=content.entities
-                )
+            if use_botapi:
+                # Bot API ile gönder (premium emoji + renk desteği)
+                from utils.bot_api import bot_api
+                buttons = build_post_buttons_botapi(state)
+                
+                if content.media:
+                    file_path = await bot.download_media(content.media)
+                    result = await bot_api.send_photo(
+                        chat_id=user_id,
+                        photo=file_path,
+                        caption=content.message,
+                        reply_markup=buttons
+                    )
+                    import os
+                    os.remove(file_path)
+                else:
+                    result = await bot_api.send_message(
+                        chat_id=user_id,
+                        text=content.message,
+                        reply_markup=buttons
+                    )
+                
+                if result:
+                    state['preview_id'] = result.get('message_id')
             else:
-                preview = await bot.send_message(
-                    user_id,
-                    content.message,
-                    buttons=buttons,
-                    formatting_entities=content.entities,
-                    link_preview=False
-                )
-            
-            state['preview_id'] = preview.id
+                # Telethon ile gönder
+                buttons = build_post_buttons(state)
+                
+                if content.media:
+                    preview = await bot.send_file(
+                        user_id,
+                        file=content.media,
+                        caption=content.message,
+                        buttons=buttons,
+                        formatting_entities=content.entities
+                    )
+                else:
+                    preview = await bot.send_message(
+                        user_id,
+                        content.message,
+                        buttons=buttons,
+                        formatting_entities=content.entities,
+                        link_preview=False
+                    )
+                
+                state['preview_id'] = preview.id
             
             await bot.send_message(
                 user_id,
@@ -1457,37 +1790,76 @@ def register_admin_handlers(bot):
         
         await event.edit("⏳ **Gönderiliyor...**")
         
-        buttons = build_post_buttons(state)
         content = state['content']
         channel = config.PLUGIN_CHANNEL
         
+        # Premium içerik varsa Bot API kullan
+        use_botapi = has_premium_content(state)
+        
         try:
-            # Kanala gönder
-            if content.media:
-                msg = await bot.send_file(
-                    f"@{channel}",
-                    file=content.media,
-                    caption=content.message,
-                    buttons=buttons,
-                    formatting_entities=content.entities
-                )
+            if use_botapi:
+                # Bot API ile gönder
+                from utils.bot_api import bot_api
+                buttons = build_post_buttons_botapi(state)
+                
+                if content.media:
+                    file_path = await bot.download_media(content.media)
+                    result = await bot_api.send_photo(
+                        chat_id=f"@{channel}",
+                        photo=file_path,
+                        caption=content.message,
+                        reply_markup=buttons
+                    )
+                    import os
+                    os.remove(file_path)
+                else:
+                    result = await bot_api.send_message(
+                        chat_id=f"@{channel}",
+                        text=content.message,
+                        reply_markup=buttons
+                    )
+                
+                if result:
+                    msg_id = result.get('message_id')
+                    del post_states[user_id]
+                    
+                    await event.edit(
+                        f"✅ **Post gönderildi!**\n\n"
+                        f"📢 Kanal: @{channel}\n"
+                        f"🔗 [Gönderiye Git](https://t.me/{channel}/{msg_id})"
+                    )
+                    await send_log(bot, "post", f"Plugin kanalına post gönderildi (Bot API)", user_id)
+                else:
+                    await event.edit("❌ **Hata:** Bot API ile gönderilemedi")
             else:
-                msg = await bot.send_message(
-                    f"@{channel}",
-                    content.message,
-                    buttons=buttons,
-                    formatting_entities=content.entities,
-                    link_preview=False
+                # Telethon ile gönder
+                buttons = build_post_buttons(state)
+                
+                if content.media:
+                    msg = await bot.send_file(
+                        f"@{channel}",
+                        file=content.media,
+                        caption=content.message,
+                        buttons=buttons,
+                        formatting_entities=content.entities
+                    )
+                else:
+                    msg = await bot.send_message(
+                        f"@{channel}",
+                        content.message,
+                        buttons=buttons,
+                        formatting_entities=content.entities,
+                        link_preview=False
+                    )
+                
+                del post_states[user_id]
+                
+                await event.edit(
+                    f"✅ **Post gönderildi!**\n\n"
+                    f"📢 Kanal: @{channel}\n"
+                    f"🔗 [Gönderiye Git](https://t.me/{channel}/{msg.id})"
                 )
-            
-            del post_states[user_id]
-            
-            await event.edit(
-                f"✅ **Post gönderildi!**\n\n"
-                f"📢 Kanal: @{channel}\n"
-                f"🔗 [Gönderiye Git](https://t.me/{channel}/{msg.id})"
-            )
-            await send_log(bot, "post", f"Plugin kanalına post gönderildi", user_id)
+                await send_log(bot, "post", f"Plugin kanalına post gönderildi", user_id)
             
         except Exception as e:
             await event.edit(f"❌ **Hata:** `{e}`\n\nBot'un kanala mesaj atma yetkisi var mı kontrol edin.")
