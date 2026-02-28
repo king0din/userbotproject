@@ -34,13 +34,22 @@ class BotAPI:
         self.token = token or config.BOT_TOKEN
         self.base_url = f"https://api.telegram.org/bot{self.token}"
     
-    async def _request(self, method: str, data: Dict = None) -> Dict:
+    async def _request(self, method: str, data: Dict = None) -> Optional[Dict]:
         """API isteği gönder"""
         url = f"{self.base_url}/{method}"
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=data) as response:
-                return await response.json()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=data) as response:
+                    result = await response.json()
+                    if result.get('ok'):
+                        return result.get('result')
+                    else:
+                        print(f"[BOT_API] {method} error: {result.get('description')}")
+                        return None
+        except Exception as e:
+            print(f"[BOT_API] {method} exception: {e}")
+            return None
     
     async def send_message(
         self,
