@@ -80,22 +80,20 @@ class BotAPI:
         chat_id: int,
         message_id: int,
         text: str,
-        parse_mode: str = "HTML",
+        parse_mode: str = None,
         reply_markup: Dict = None,
         disable_web_page_preview: bool = True
-    ) -> Dict:
+    ) -> Optional[Dict]:
         """Mesajı düzenle"""
-        # Markdown'ı HTML'e çevir
-        if parse_mode == "HTML":
-            text = md_to_html(text)
-        
         data = {
             "chat_id": chat_id,
             "message_id": message_id,
             "text": text,
-            "parse_mode": parse_mode,
             "disable_web_page_preview": disable_web_page_preview
         }
+        
+        if parse_mode:
+            data["parse_mode"] = parse_mode
         
         if reply_markup:
             data["reply_markup"] = reply_markup
