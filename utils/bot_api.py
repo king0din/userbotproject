@@ -80,7 +80,7 @@ class BotAPI:
         chat_id: int,
         message_id: int,
         text: str,
-        parse_mode: str = None,
+        parse_mode: str = "Markdown",
         reply_markup: Dict = None,
         disable_web_page_preview: bool = True
     ) -> Optional[Dict]:
