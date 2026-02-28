@@ -1246,56 +1246,68 @@ def register_admin_handlers(bot):
             from telethon.tl.types import MessageEntityCustomEmoji
             import re
             
+            text = event.text or ""
             all_emojis = []  # (offset, emoji_data) listesi
             
-            # Premium emojileri al
+            # Premium emoji pozisyonlarını ve verilerini al
+            premium_positions = {}  # offset -> emoji_data
             if event.message.entities:
                 for entity in event.message.entities:
                     if isinstance(entity, MessageEntityCustomEmoji):
                         start = entity.offset
-                        end = start + entity.length
-                        emoji_text = event.text[start:end] if event.text else "⭐"
-                        all_emojis.append((start, {
+                        length = entity.length
+                        emoji_text = text[start:start+length]
+                        premium_positions[start] = {
                             'text': emoji_text,
                             'emoji_id': str(entity.document_id),
                             'type': 'premium',
-                            'offset': start
-                        }))
+                            'length': length
+                        }
             
-            # Premium emoji pozisyonlarını kaydet
-            premium_ranges = []
-            if event.message.entities:
-                for entity in event.message.entities:
-                    if isinstance(entity, MessageEntityCustomEmoji):
-                        premium_ranges.append((entity.offset, entity.offset + entity.length))
-            
-            # Normal emojileri al
-            emoji_pattern = re.compile(r'[\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF\U0001FA00-\U0001FAFF]+')
-            for match in emoji_pattern.finditer(event.text or ""):
-                start = match.start()
-                # Premium emoji ile çakışıyor mu kontrol et
-                is_premium = False
-                for p_start, p_end in premium_ranges:
-                    if p_start <= start < p_end:
-                        is_premium = True
-                        break
+            # Mesajı karakter karakter tara
+            i = 0
+            while i < len(text):
+                # Premium emoji mi?
+                if i in premium_positions:
+                    data = premium_positions[i]
+                    all_emojis.append((i, {
+                        'text': data['text'],
+                        'emoji_id': data['emoji_id'],
+                        'type': 'premium'
+                    }))
+                    i += data['length']
+                    continue
                 
-                if not is_premium:
-                    # Her emoji karakterini ayrı ayrı ekle
-                    for i, char in enumerate(match.group()):
-                        all_emojis.append((start + i, {
-                            'text': char,
+                # Normal emoji mi?
+                char = text[i]
+                # Emoji unicode range kontrolü
+                if ord(char) >= 0x1F300:
+                    # Variation selector varsa dahil et
+                    emoji_text = char
+                    if i + 1 < len(text) and ord(text[i+1]) in [0xFE0F, 0xFE0E]:
+                        emoji_text += text[i+1]
+                        i += 1
+                    
+                    # Premium emoji içinde mi kontrol et
+                    in_premium = False
+                    for p_start, p_data in premium_positions.items():
+                        if p_start <= i < p_start + p_data['length']:
+                            in_premium = True
+                            break
+                    
+                    if not in_premium:
+                        all_emojis.append((i, {
+                            'text': emoji_text,
                             'emoji_id': None,
-                            'type': 'normal',
-                            'offset': start + i
+                            'type': 'normal'
                         }))
+                i += 1
             
             if not all_emojis:
                 await event.respond("⚠️ Emoji bulunamadı! Tekrar deneyin.")
                 return
             
-            # Offset'e göre sırala
-            all_emojis.sort(key=lambda x: x[0])
+            # Offset'e göre zaten sıralı
             reactions = [emoji_data for _, emoji_data in all_emojis]
             
             state['temp_reactions'] = reactions
@@ -1471,11 +1483,13 @@ def register_admin_handlers(bot):
         # Yan yana butonlar
         row = []
         for r in reactions:
+            # Callback her zaman emoji text ile (eski postlarla uyum)
+            callback_data = f"react_{r['text']}_0"
             row.append({
                 'text': f"{r['text']} 0",
-                'callback': f"react_{r.get('emoji_id') or r['text']}_0",
+                'callback': callback_data,
                 'color': style,
-                'emoji_id': r.get('emoji_id')
+                'emoji_id': r.get('emoji_id')  # Premium emoji ID (buton görünümü için)
             })
         
         if state['current_row']:
@@ -1510,9 +1524,10 @@ def register_admin_handlers(bot):
         
         # Alt alta butonlar
         for r in reactions:
+            callback_data = f"react_{r['text']}_0"
             state['buttons'].append([{
                 'text': f"{r['text']} 0",
-                'callback': f"react_{r.get('emoji_id') or r['text']}_0",
+                'callback': callback_data,
                 'color': style,
                 'emoji_id': r.get('emoji_id')
             }])
@@ -1596,6 +1611,7 @@ def register_admin_handlers(bot):
                         chat_id=user_id,
                         photo=file_path,
                         caption=content.message or "",
+                        parse_mode="Markdown",
                         reply_markup=buttons
                     )
                     import os
@@ -1605,6 +1621,7 @@ def register_admin_handlers(bot):
                     result = await api.send_message(
                         chat_id=user_id,
                         text=content.message or "Post",
+                        parse_mode="Markdown",
                         reply_markup=buttons
                     )
                 
@@ -1696,15 +1713,18 @@ def register_admin_handlers(bot):
                     result = await api.send_photo(
                         chat_id=f"@{channel}",
                         photo=file_path,
-                        caption=content.message,
+                        caption=content.message or "",
+                        parse_mode="Markdown",
                         reply_markup=buttons
                     )
                     import os
-                    os.remove(file_path)
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
                 else:
                     result = await api.send_message(
                         chat_id=f"@{channel}",
-                        text=content.message,
+                        text=content.message or "Post",
+                        parse_mode="Markdown",
                         reply_markup=buttons
                     )
                 
