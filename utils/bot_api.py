@@ -11,18 +11,46 @@ from typing import Optional, List, Dict, Any, Union
 import config
 
 def md_to_html(text: str) -> str:
-    """Markdown'ı HTML'e çevir"""
+    """Markdown'ı HTML'e çevir ve HTML karakterlerini escape et"""
     if not text:
         return text
     
-    # **bold** -> <b>bold</b>
-    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-    # `code` -> <code>code</code>
-    text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
-    # __italic__ -> <i>italic</i>
-    text = re.sub(r'__(.+?)__', r'<i>\1</i>', text)
-    # ~~strike~~ -> <s>strike</s>
-    text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
+    import html
+    
+    # Önce Markdown pattern'lerini bul ve kaydet
+    bold_pattern = re.compile(r'\*\*(.+?)\*\*')
+    code_pattern = re.compile(r'`(.+?)`')
+    italic_pattern = re.compile(r'__(.+?)__')
+    strike_pattern = re.compile(r'~~(.+?)~~')
+    
+    # Markdown içeriklerini çıkar
+    bolds = bold_pattern.findall(text)
+    codes = code_pattern.findall(text)
+    italics = italic_pattern.findall(text)
+    strikes = strike_pattern.findall(text)
+    
+    # Placeholder'larla değiştir
+    for i, b in enumerate(bolds):
+        text = text.replace(f'**{b}**', f'__BOLD{i}__', 1)
+    for i, c in enumerate(codes):
+        text = text.replace(f'`{c}`', f'__CODE{i}__', 1)
+    for i, it in enumerate(italics):
+        text = text.replace(f'__{it}__', f'__ITALIC{i}__', 1)
+    for i, s in enumerate(strikes):
+        text = text.replace(f'~~{s}~~', f'__STRIKE{i}__', 1)
+    
+    # HTML escape (< > & karakterleri)
+    text = html.escape(text)
+    
+    # Placeholder'ları HTML tag'leriyle değiştir
+    for i, b in enumerate(bolds):
+        text = text.replace(f'__BOLD{i}__', f'<b>{html.escape(b)}</b>')
+    for i, c in enumerate(codes):
+        text = text.replace(f'__CODE{i}__', f'<code>{html.escape(c)}</code>')
+    for i, it in enumerate(italics):
+        text = text.replace(f'__ITALIC{i}__', f'<i>{html.escape(it)}</i>')
+    for i, s in enumerate(strikes):
+        text = text.replace(f'__STRIKE{i}__', f'<s>{html.escape(s)}</s>')
     
     return text
 
@@ -55,18 +83,21 @@ class BotAPI:
         self,
         chat_id: Union[int, str],
         text: str,
-        parse_mode: str = None,
+        parse_mode: str = "HTML",
         reply_markup: Dict = None,
         disable_web_page_preview: bool = True
     ) -> Optional[Dict]:
         """Mesaj gönder"""
+        # Markdown'ı HTML'e çevir
+        if parse_mode == "HTML":
+            text = md_to_html(text)
+        
         data = {
             "chat_id": chat_id,
             "text": text,
             "disable_web_page_preview": disable_web_page_preview
         }
         
-        # Parse mode sadece istenirse ekle
         if parse_mode:
             data["parse_mode"] = parse_mode
         
@@ -80,20 +111,22 @@ class BotAPI:
         chat_id: int,
         message_id: int,
         text: str,
-        parse_mode: str = "Markdown",
+        parse_mode: str = "HTML",
         reply_markup: Dict = None,
         disable_web_page_preview: bool = True
     ) -> Optional[Dict]:
         """Mesajı düzenle"""
+        # Markdown'ı HTML'e çevir
+        if parse_mode == "HTML":
+            text = md_to_html(text)
+        
         data = {
             "chat_id": chat_id,
             "message_id": message_id,
             "text": text,
+            "parse_mode": parse_mode,
             "disable_web_page_preview": disable_web_page_preview
         }
-        
-        if parse_mode:
-            data["parse_mode"] = parse_mode
         
         if reply_markup:
             data["reply_markup"] = reply_markup
