@@ -9,20 +9,52 @@ import aiohttp
 import re
 from typing import Optional, List, Dict, Any, Union
 import config
+from utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 def md_to_html(text: str) -> str:
-    """Markdown'ı HTML'e çevir"""
+    """Markdown'ı HTML'e çevir ve HTML karakterlerini escape et"""
     if not text:
         return text
     
-    # **bold** -> <b>bold</b>
-    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-    # `code` -> <code>code</code>
-    text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
-    # __italic__ -> <i>italic</i>
-    text = re.sub(r'__(.+?)__', r'<i>\1</i>', text)
-    # ~~strike~~ -> <s>strike</s>
-    text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
+    import html
+    
+    # Önce Markdown pattern'lerini bul ve kaydet
+    bold_pattern = re.compile(r'\*\*(.+?)\*\*')
+    code_pattern = re.compile(r'`(.+?)`')
+    italic_pattern = re.compile(r'__(.+?)__')
+    strike_pattern = re.compile(r'~~(.+?)~~')
+    
+    # Markdown içeriklerini çıkar
+    bolds = bold_pattern.findall(text)
+    codes = code_pattern.findall(text)
+    italics = italic_pattern.findall(text)
+    strikes = strike_pattern.findall(text)
+    
+    # Placeholder'larla değiştir
+    for i, b in enumerate(bolds):
+        text = text.replace(f'**{b}**', f'__BOLD{i}__', 1)
+    for i, c in enumerate(codes):
+        text = text.replace(f'`{c}`', f'__CODE{i}__', 1)
+    for i, it in enumerate(italics):
+        text = text.replace(f'__{it}__', f'__ITALIC{i}__', 1)
+    for i, s in enumerate(strikes):
+        text = text.replace(f'~~{s}~~', f'__STRIKE{i}__', 1)
+    
+    # HTML escape (< > & karakterleri)
+    text = html.escape(text)
+    
+    # Placeholder'ları HTML tag'leriyle değiştir
+    for i, b in enumerate(bolds):
+        text = text.replace(f'__BOLD{i}__', f'<b>{html.escape(b)}</b>')
+    for i, c in enumerate(codes):
+        text = text.replace(f'__CODE{i}__', f'<code>{html.escape(c)}</code>')
+    for i, it in enumerate(italics):
+        text = text.replace(f'__ITALIC{i}__', f'<i>{html.escape(it)}</i>')
+    for i, s in enumerate(strikes):
+        text = text.replace(f'__STRIKE{i}__', f'<s>{html.escape(s)}</s>')
     
     return text
 
@@ -34,22 +66,31 @@ class BotAPI:
         self.token = token or config.BOT_TOKEN
         self.base_url = f"https://api.telegram.org/bot{self.token}"
     
-    async def _request(self, method: str, data: Dict = None) -> Dict:
+    async def _request(self, method: str, data: Dict = None) -> Optional[Dict]:
         """API isteği gönder"""
         url = f"{self.base_url}/{method}"
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=data) as response:
-                return await response.json()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=data) as response:
+                    result = await response.json()
+                    if result.get('ok'):
+                        return result.get('result')
+                    else:
+                        log.warning("%s error: %s", method, result.get('description'))
+                        return None
+        except Exception as e:
+            log.error("%s exception", method, exc_info=True)
+            return None
     
     async def send_message(
         self,
-        chat_id: int,
+        chat_id: Union[int, str],
         text: str,
         parse_mode: str = "HTML",
         reply_markup: Dict = None,
         disable_web_page_preview: bool = True
-    ) -> Dict:
+    ) -> Optional[Dict]:
         """Mesaj gönder"""
         # Markdown'ı HTML'e çevir
         if parse_mode == "HTML":
@@ -58,9 +99,11 @@ class BotAPI:
         data = {
             "chat_id": chat_id,
             "text": text,
-            "parse_mode": parse_mode,
             "disable_web_page_preview": disable_web_page_preview
         }
+        
+        if parse_mode:
+            data["parse_mode"] = parse_mode
         
         if reply_markup:
             data["reply_markup"] = reply_markup
@@ -75,7 +118,7 @@ class BotAPI:
         parse_mode: str = "HTML",
         reply_markup: Dict = None,
         disable_web_page_preview: bool = True
-    ) -> Dict:
+    ) -> Optional[Dict]:
         """Mesajı düzenle"""
         # Markdown'ı HTML'e çevir
         if parse_mode == "HTML":
@@ -116,6 +159,112 @@ class BotAPI:
             "chat_id": chat_id,
             "message_id": message_id
         })
+    
+    async def send_photo(
+        self,
+        chat_id: Union[int, str],
+        photo: str,
+        caption: str = None,
+        parse_mode: str = None,
+        reply_markup: Dict = None
+    ) -> Optional[Dict]:
+        """Fotoğraf gönder"""
+        import os
+        
+        url = f"{self.base_url}/sendPhoto"
+        
+        async with aiohttp.ClientSession() as session:
+            # Dosya mı URL mi kontrol et
+            if os.path.exists(photo):
+                # Dosya olarak gönder
+                data = aiohttp.FormData()
+                data.add_field('chat_id', str(chat_id))
+                data.add_field('photo', open(photo, 'rb'), filename=os.path.basename(photo))
+                if caption:
+                    data.add_field('caption', caption)
+                if parse_mode:
+                    data.add_field('parse_mode', parse_mode)
+                if reply_markup:
+                    import json
+                    data.add_field('reply_markup', json.dumps(reply_markup))
+                
+                async with session.post(url, data=data) as response:
+                    result = await response.json()
+                    if result.get('ok'):
+                        return result.get('result')
+                    log.warning("send_photo error: %s", result.get('description'))
+                    return None
+            else:
+                # URL olarak gönder
+                json_data = {
+                    "chat_id": chat_id,
+                    "photo": photo
+                }
+                if caption:
+                    json_data["caption"] = caption
+                if parse_mode:
+                    json_data["parse_mode"] = parse_mode
+                if reply_markup:
+                    json_data["reply_markup"] = reply_markup
+                
+                async with session.post(url, json=json_data) as response:
+                    result = await response.json()
+                    if result.get('ok'):
+                        return result.get('result')
+                    log.warning("send_photo error: %s", result.get('description'))
+                    return None
+    
+    async def send_document(
+        self,
+        chat_id: Union[int, str],
+        document: str,
+        caption: str = None,
+        parse_mode: str = "HTML",
+        reply_markup: Dict = None
+    ) -> Optional[Dict]:
+        """Dosya gönder"""
+        import os
+        
+        if caption and parse_mode == "HTML":
+            caption = md_to_html(caption)
+        
+        url = f"{self.base_url}/sendDocument"
+        
+        async with aiohttp.ClientSession() as session:
+            if os.path.exists(document):
+                data = aiohttp.FormData()
+                data.add_field('chat_id', str(chat_id))
+                data.add_field('document', open(document, 'rb'), filename=os.path.basename(document))
+                if caption:
+                    data.add_field('caption', caption)
+                    data.add_field('parse_mode', parse_mode)
+                if reply_markup:
+                    import json
+                    data.add_field('reply_markup', json.dumps(reply_markup))
+                
+                async with session.post(url, data=data) as response:
+                    result = await response.json()
+                    if result.get('ok'):
+                        return result.get('result')
+                    log.warning("send_document error: %s", result)
+                    return None
+            else:
+                json_data = {
+                    "chat_id": chat_id,
+                    "document": document,
+                    "parse_mode": parse_mode
+                }
+                if caption:
+                    json_data["caption"] = caption
+                if reply_markup:
+                    json_data["reply_markup"] = reply_markup
+                
+                async with session.post(url, json=json_data) as response:
+                    result = await response.json()
+                    if result.get('ok'):
+                        return result.get('result')
+                    log.warning("send_document error: %s", result)
+                    return None
     
     async def edit_message_reply_markup(
         self,
@@ -182,6 +331,7 @@ class ButtonBuilder:
     STYLE_PRIMARY = "primary"    # Mavi
     STYLE_SUCCESS = "success"    # Yeşil
     STYLE_DANGER = "danger"      # Kırmızı
+    STYLE_SECONDARY = "secondary"  # Gri/Beyaz
     
     # Premium emoji ID'leri
     EMOJI_LOGIN = 5233408828313192030      # Giriş

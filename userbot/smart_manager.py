@@ -22,6 +22,10 @@ from telethon.errors import (
 )
 import config
 from database import database as db
+from utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 # ============================================
 # PLUGIN KATEGORİLERİ
@@ -150,7 +154,7 @@ class SmartSessionManager:
             # Session verisi var mı?
             session_data = await self._get_session_data(user_id)
             if not session_data:
-                print(f"[SMART] Session verisi yok: user={user_id}")
+                log.info("Session verisi yok: user=%s", user_id)
                 return None
             
             # Yeni client oluştur
@@ -171,7 +175,7 @@ class SmartSessionManager:
                 # Session monitor başlat
                 self._start_session_monitor(user_id)
                 
-                print(f"[SMART] Client oluşturuldu: user={user_id}, keep_alive={keep_alive}")
+                log.info("Client oluşturuldu: user=%s, keep_alive=%s", user_id, keep_alive)
             
             return client
     
@@ -215,18 +219,18 @@ class SmartSessionManager:
             await client.connect()
             
             if not await client.is_user_authorized():
-                print(f"[SMART] Kullanıcı yetkili değil: user={user_id}")
+                log.info("Kullanıcı yetkili değil: user=%s", user_id)
                 await client.disconnect()
                 return None
             
             return client
             
         except (AuthKeyUnregisteredError, UserDeactivatedBanError, UserDeactivatedError) as e:
-            print(f"[SMART] Session geçersiz: user={user_id} - {e}")
+            log.error("Session geçersiz: user=%s", user_id, exc_info=True)
             await self._handle_invalid_session(user_id)
             return None
         except Exception as e:
-            print(f"[SMART] Client oluşturma hatası: user={user_id} - {e}")
+            log.error("Client oluşturma hatası: user=%s", user_id, exc_info=True)
             return None
     
     async def _disconnect_client(self, user_id: int):
@@ -243,7 +247,7 @@ class SmartSessionManager:
         
         self._stop_session_monitor(user_id)
         
-        print(f"[SMART] Client kapatıldı: user={user_id}")
+        log.info("Client kapatıldı: user=%s", user_id)
     
     async def _handle_invalid_session(self, user_id: int):
         """Geçersiz session'ı işle"""
@@ -296,7 +300,7 @@ class SmartSessionManager:
             "always_on_plugins": self.always_on_users[user_id]['plugins']
         })
         
-        print(f"[SMART] Always-on aktif: user={user_id}, plugin={plugin_name}")
+        log.info("Always-on aktif: user=%s, plugin=%s", user_id, plugin_name)
         return True
     
     async def disable_always_on(self, user_id: int, plugin_name: str = None):
@@ -325,7 +329,7 @@ class SmartSessionManager:
         plugins = self.always_on_users.get(user_id, {}).get('plugins', [])
         await db.update_user(user_id, {"always_on_plugins": plugins})
         
-        print(f"[SMART] Always-on deaktif: user={user_id}, plugin={plugin_name}")
+        log.info("Always-on deaktif: user=%s, plugin=%s", user_id, plugin_name)
     
     def is_always_on(self, user_id: int) -> bool:
         """Kullanıcı always-on modda mı?"""
@@ -339,8 +343,16 @@ class SmartSessionManager:
         """Aktivite zamanını güncelle"""
         self.last_activity[user_id] = time.time()
     
+    async def has_active_plugins(self, user_id: int) -> bool:
+        """Kullanıcının aktif plugin'i var mı kontrol et"""
+        user = await db.get_user(user_id)
+        if user:
+            active_plugins = user.get("active_plugins", [])
+            return len(active_plugins) > 0
+        return False
+    
     async def cleanup_inactive_clients(self):
-        """İnaktif on-demand client'ları kapat"""
+        """İnaktif on-demand client'ları kapat (plugin'i olmayanları)"""
         now = time.time()
         to_close = []
         
@@ -349,12 +361,16 @@ class SmartSessionManager:
             if user_id in self.always_on_users:
                 continue
             
-            # Timeout kontrolü
+            # Aktif plugin'i olan kullanıcıları atlat
+            if await self.has_active_plugins(user_id):
+                continue
+            
+            # Timeout kontrolü (sadece plugin'i olmayan ve inaktif olanlar)
             if now - last_time > self.ON_DEMAND_TIMEOUT:
                 to_close.append(user_id)
         
         for user_id in to_close:
-            print(f"[SMART] İnaktif client kapatılıyor: user={user_id}")
+            log.info("İnaktif client kapatılıyor: user=%s", user_id)
             await self._disconnect_client(user_id)
     
     # ============================================
@@ -407,9 +423,9 @@ class SmartSessionManager:
             
             try:
                 await self.on_send_message_callback(user_id, text, buttons)
-                print(f"[SMART] Onay isteği gönderildi: user={user_id}")
+                log.info("Onay isteği gönderildi: user=%s", user_id)
             except Exception as e:
-                print(f"[SMART] Onay mesajı gönderilemedi: user={user_id} - {e}")
+                log.error("Onay mesajı gönderilemedi: user=%s", user_id, exc_info=True)
     
     async def handle_confirmation(self, user_id: int, confirmed: bool):
         """Onay yanıtını işle"""
@@ -419,7 +435,7 @@ class SmartSessionManager:
         if confirmed:
             # Onaylandı, 3 gün daha
             self.last_confirm[user_id] = time.time()
-            print(f"[SMART] Always-on onaylandı: user={user_id}")
+            log.info("Always-on onaylandı: user=%s", user_id)
         else:
             # Reddedildi, kapat
             await self._handle_no_confirmation(user_id)
@@ -456,7 +472,7 @@ class SmartSessionManager:
             except:
                 pass
         
-        print(f"[SMART] Always-on durduruldu (onay yok): user={user_id}")
+        log.info("Always-on durduruldu (onay yok): user=%s", user_id)
     
     # ============================================
     # KULLANICI SENKRONİZASYONU
@@ -491,12 +507,12 @@ class SmartSessionManager:
             await self._handle_deleted_account(user_id)
             return None
         except Exception as e:
-            print(f"[SMART] Sync hatası: user={user_id} - {e}")
+            log.error("Sync hatası: user=%s", user_id, exc_info=True)
             return None
     
     async def _handle_deleted_account(self, user_id: int):
         """Silinen hesabı işle"""
-        print(f"[SMART] Hesap silindi/banlandı: user={user_id}")
+        log.info("Hesap silindi/banlandı: user=%s", user_id)
         
         # Client'ı kapat
         await self._disconnect_client(user_id)
@@ -518,7 +534,7 @@ class SmartSessionManager:
     
     async def sync_all_users(self) -> Dict:
         """Tüm kullanıcıları senkronize et"""
-        print("[SMART] Tüm kullanıcılar senkronize ediliyor...")
+        log.info("Tüm kullanıcılar senkronize ediliyor...")
         
         users = await db.get_all_users()
         
@@ -552,7 +568,7 @@ class SmartSessionManager:
             # Rate limiting
             await asyncio.sleep(0.5)
         
-        print(f"[SMART] Sync tamamlandı: {results}")
+        log.info("Sync tamamlandı: %s", results)
         return results
     
     async def cleanup_deleted_users(self) -> int:
@@ -570,7 +586,7 @@ class SmartSessionManager:
                 count += 1
         
         if count > 0:
-            print(f"[SMART] {count} silinen hesap temizlendi")
+            log.info("%s silinen hesap temizlendi", count)
         
         return count
     
@@ -619,7 +635,7 @@ class SmartSessionManager:
                 try:
                     await self.cleanup_inactive_clients()
                 except Exception as e:
-                    print(f"[SMART] Cleanup hatası: {e}")
+                    log.error("Cleanup hatası", exc_info=True)
         
         async def confirm_loop():
             """Onay kontrolü döngüsü"""
@@ -628,7 +644,7 @@ class SmartSessionManager:
                 try:
                     await self.check_confirmations()
                 except Exception as e:
-                    print(f"[SMART] Confirm hatası: {e}")
+                    log.error("Confirm hatası", exc_info=True)
         
         async def sync_loop():
             """Kullanıcı senkronizasyon döngüsü"""
@@ -638,13 +654,13 @@ class SmartSessionManager:
                     await self.sync_all_users()
                     await self.cleanup_deleted_users()
                 except Exception as e:
-                    print(f"[SMART] Sync hatası: {e}")
+                    log.error("Sync hatası", exc_info=True)
         
         self._cleanup_task = asyncio.create_task(cleanup_loop())
         self._confirm_task = asyncio.create_task(confirm_loop())
         self._sync_task = asyncio.create_task(sync_loop())
         
-        print("[SMART] Arka plan görevleri başlatıldı")
+        log.info("Arka plan görevleri başlatıldı")
     
     def stop_background_tasks(self):
         """Arka plan görevlerini durdur"""
@@ -683,7 +699,7 @@ class SmartSessionManager:
         except FloodWaitError as e:
             return {"success": False, "error": "flood_wait", "seconds": e.seconds}
         except Exception as e:
-            print(f"[SMART] Telefon giriş hatası: {e}")
+            log.error("Telefon giriş hatası", exc_info=True)
             return {"success": False, "error": str(e)}
     
     async def verify_code(self, user_id: int, code: str) -> Dict:
@@ -738,7 +754,7 @@ class SmartSessionManager:
             return {"success": False, "error": "code_expired"}
             
         except Exception as e:
-            print(f"[SMART] Kod doğrulama hatası: {e}")
+            log.error("Kod doğrulama hatası", exc_info=True)
             return {"success": False, "error": str(e)}
     
     async def verify_2fa(self, user_id: int, password: str) -> Dict:
@@ -783,7 +799,7 @@ class SmartSessionManager:
             return {"success": False, "error": "invalid_password"}
             
         except Exception as e:
-            print(f"[SMART] 2FA hatası: {e}")
+            log.error("2FA hatası", exc_info=True)
             return {"success": False, "error": str(e)}
     
     async def login_with_session(self, user_id: int, session_string: str, 
@@ -854,7 +870,7 @@ class SmartSessionManager:
             return True
             
         except Exception as e:
-            print(f"[SMART] Çıkış hatası: {e}")
+            log.error("Çıkış hatası", exc_info=True)
             return False
     
     # ============================================
@@ -871,52 +887,92 @@ class SmartSessionManager:
     
     async def restore_sessions(self) -> int:
         """
-        Sadece always-on kullanıcılarının session'larını geri yükle
-        On-demand kullanıcılar ilk komutta aktif olacak
+        Session'ları geri yükle:
+        - Aktif plugin'i olan kullanıcılar başlatılır
+        - Plugin'i olmayan kullanıcılar cache'de tutulur (on-demand)
         """
-        print("[SMART] Always-on session'lar geri yükleniyor...")
+        log.info("Session'lar geri yükleniyor...")
         
         users = await db.get_logged_in_users()
         restored = 0
+        cached = 0
         
-        for user in users:
+        async def restore_single_user(user):
+            """Tek kullanıcıyı restore et"""
+            nonlocal restored, cached
+            
             user_id = user.get("user_id")
+            active_plugins = user.get("active_plugins", [])
             always_on_plugins = user.get("always_on_plugins", [])
             
             # Session verisini cache'e al
             session_data = user.get("session_data")
-            if session_data:
-                self.session_cache[user_id] = {
-                    'data': session_data,
-                    'type': user.get("session_type", "telethon")
-                }
+            if not session_data:
+                session_info = await db.get_session(user_id)
+                if session_info:
+                    session_data = session_info.get("data")
             
-            # Sadece always-on plugin'i olan kullanıcıları başlat
-            if always_on_plugins:
-                print(f"[SMART] Always-on yükleniyor: user={user_id}, plugins={always_on_plugins}")
+            if not session_data:
+                log.info("Session verisi yok: user=%s", user_id)
+                return False
+            
+            self.session_cache[user_id] = {
+                'data': session_data,
+                'type': user.get("session_type", "telethon")
+            }
+            
+            # Aktif plugin'i olan kullanıcıları başlat
+            if active_plugins or always_on_plugins:
+                # Always-on mu kontrol et
+                is_always_on = bool(always_on_plugins)
                 
-                client = await self.get_or_create_client(user_id, keep_alive=True)
+                client = await self.get_or_create_client(user_id, keep_alive=is_always_on)
+                
                 if client:
-                    self.always_on_users[user_id] = {
-                        'plugins': always_on_plugins,
-                        'enabled_at': time.time()
-                    }
-                    self.last_confirm[user_id] = user.get("last_confirm", time.time())
+                    # Always-on kullanıcıları kaydet
+                    if always_on_plugins:
+                        self.always_on_users[user_id] = {
+                            'plugins': always_on_plugins,
+                            'enabled_at': time.time()
+                        }
+                        self.last_confirm[user_id] = user.get("last_confirm", time.time())
                     
-                    # Plugin'leri yükle
-                    for plugin_name in always_on_plugins:
-                        await self.plugin_manager.activate_plugin(user_id, plugin_name, client)
+                    # Tüm aktif plugin'leri yükle
+                    all_plugins = list(set(active_plugins + always_on_plugins))
+                    plugin_count = 0
                     
+                    for plugin_name in all_plugins:
+                        try:
+                            success = await self.plugin_manager.activate_plugin(user_id, plugin_name, client)
+                            if success:
+                                plugin_count += 1
+                        except Exception as e:
+                            log.error("Plugin yükleme hatası: %s", plugin_name, exc_info=True)
+                    
+                    log.info("user=%s, %s plugin yüklendi", user_id, plugin_count)
                     restored += 1
+                    return True
+                else:
+                    log.error("Client oluşturulamadı: user=%s", user_id)
+                    return False
+            else:
+                # Plugin'i yok, sadece cache'de tut
+                cached += 1
+                return True
         
-        print(f"[SMART] {restored} always-on session geri yüklendi")
-        print(f"[SMART] {len(self.session_cache)} session cache'de (on-demand hazır)")
+        # Paralel olarak restore et
+        tasks = [restore_single_user(user) for user in users]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        log.info("%s kullanıcı aktif (plugin'li)", restored)
+        log.info("%s kullanıcı cache'de (on-demand)", cached)
+        log.info("%s always-on", len(self.always_on_users))
         
         return restored
     
     async def shutdown(self):
         """Tüm client'ları kapat"""
-        print("[SMART] Kapatılıyor...")
+        log.info("Kapatılıyor...")
         
         self.stop_background_tasks()
         
@@ -929,7 +985,7 @@ class SmartSessionManager:
             except:
                 pass
         
-        print("[SMART] Tüm client'lar kapatıldı")
+        log.info("Tüm client'lar kapatıldı")
     
     # ============================================
     # İSTATİSTİKLER

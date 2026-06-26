@@ -32,6 +32,7 @@ userbot_manager = smart_session_manager
 from handlers import register_user_handlers, register_admin_handlers
 from utils import send_log, get_readable_time
 from utils.bot_api import bot_api
+from utils.logger import get_logger
 
 # ============================================
 # GLOBAL DEĞİŞKENLER
@@ -46,9 +47,11 @@ RESTART_FILE = ".restart_info"
 # LOG FONKSİYONU
 # ============================================
 
+_logger = get_logger("main")
+
 def log(text):
     """Konsola log yaz"""
-    print(f"\033[94m[KingTG]\033[0m {text}")
+    _logger.info(text)
 
 # ============================================
 # CALLBACK'LER
@@ -194,6 +197,16 @@ async def main():
     bot_me = await bot.get_me()
     log(f"✅ Bot bağlandı: @{bot_me.username}")
     
+    # Bot username'ini config'e kaydet (pluginler için)
+    config.BOT_USERNAME = bot_me.username
+    
+    # Ayrıca dosyaya da yaz (pluginler için)
+    try:
+        with open('.bot_username', 'w') as f:
+            f.write(bot_me.username)
+    except:
+        pass
+    
     # Handler'ları kaydet
     log("🔄 Handler'lar yükleniyor...")
     register_user_handlers(bot)
@@ -209,14 +222,15 @@ async def main():
     log("🔄 Plugin bağımlılıkları kontrol ediliyor...")
     await plugin_manager.preinstall_all_dependencies()
     
-    # Session'ları geri yükle (sadece always-on)
-    log("🔄 Always-on session'lar yükleniyor...")
+    # Session'ları geri yükle
+    log("🔄 Session'lar geri yükleniyor...")
     restored = await smart_session_manager.restore_sessions()
     
     # İstatistikleri göster
     stats = smart_session_manager.get_stats()
-    log(f"✅ {restored} always-on session aktif")
-    log(f"📦 {stats['session_cache']} session cache'de (on-demand hazır)")
+    log(f"✅ {restored} kullanıcı aktif (plugin'li)")
+    log(f"📦 {stats['session_cache']} session cache'de")
+    log(f"🟢 {stats['always_on_users']} always-on")
     
     # Arka plan görevlerini başlat
     log("🔄 Arka plan görevleri başlatılıyor...")

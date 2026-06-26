@@ -15,7 +15,7 @@ load_dotenv()
 # ============================================
 __version__ = "2.1.0"
 __author__ = "@KingOdi"
-__repo__ = "https://github.com/KingOdi/KingTG-UserBot-Service"
+__repo__ = "https://github.com/KingOdi/userbotproject"
 
 # ============================================
 # TELEGRAM API BİLGİLERİ
@@ -29,7 +29,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 # ============================================
 OWNER_ID = int(os.getenv("OWNER_ID", 0))
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "KingOdi")
-
+BOT_USERNAME = os.getenv("BOT_USERNAME", "KingUser_bot") 
 # ============================================
 # KANALLAR
 # ============================================

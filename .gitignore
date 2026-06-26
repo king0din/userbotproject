@@ -1,45 +1,32 @@
-# ============================================
-# KingTG UserBot Service - Git Ignore
-# ============================================
-
-# Ortam değişkenleri
+# Sırlar
 .env
-
-# Session dosyaları
+.env.*
+.env.txt
+*.env
+# Session
 *.session
 *.session-journal
 sessions/
-
-# Veri dosyaları
+bot_session.session
+# Veri
 data/
 *.json
-
+plugins/otomsg_tasks.json
+plugins/tag_blocked.json
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-env/
 venv/
 .venv/
-ENV/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Log dosyaları
+env/
+# Log
 *.log
 logs/
-
-# Geçici dosyalar
+# Geçici
 .restart_info
+.bot_username
 *.tmp
-*.temp
-
-# OS
+# IDE / OS
+.vscode/
+.idea/
 .DS_Store
-Thumbs.db

@@ -7,6 +7,10 @@ import json
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 import config
+import logging
+
+log = logging.getLogger(f"kingtg.{__name__}")
+
 
 class LocalStorage:
     """JSON dosyalarında veri saklama sınıfı"""
@@ -43,7 +47,7 @@ class LocalStorage:
                 json.dump(data, f, ensure_ascii=False, indent=2, default=str)
             return True
         except Exception as e:
-            print(f"[LOCAL] Dosya kaydetme hatası: {e}")
+            log.error("Dosya kaydetme hatası", exc_info=True)
             return False
     
     # ==========================================

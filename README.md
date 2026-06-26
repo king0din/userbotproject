@@ -147,7 +147,7 @@ def register(client):
 
 ## 🔒 Güvenlik
 
-- Session'lar şifrelenmiş olarak saklanır
+- Session'lar sunucuda saklanır (⚠️ şu an düz metin — şifreleme planlanıyor, bkz. yol haritası)
 - Her kullanıcı sadece kendi hesabını bağlayabilir
 - Oturum sonlandırma otomatik tespit edilir
 - Ban ve kısıtlama sistemi

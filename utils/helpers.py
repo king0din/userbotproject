@@ -9,6 +9,10 @@ from telethon import events, Button
 from telethon.tl.types import User
 import config
 from database import database as db
+from utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 # ==========================================
 # ZAMAN FONKSİYONLARI
@@ -199,7 +203,7 @@ async def send_log(bot, log_type: str, message: str, user_id: int = None):
         await db.add_log(log_type, user_id, message)
         
     except Exception as e:
-        print(f"[LOG] Hata: {e}")
+        log.error("Hata", exc_info=True)
 
 # ==========================================
 # BUTON OLUŞTURUCULAR

@@ -15,6 +15,10 @@ from typing import Optional, Dict, List, Tuple, Set
 from telethon import TelegramClient
 import config
 from database import database as db
+from utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 class PluginManager:
     """Plugin yönetim sistemi"""
@@ -22,6 +26,8 @@ class PluginManager:
     def __init__(self):
         self.loaded_plugins: Dict[str, Dict] = {}
         self.user_active_plugins: Dict[int, Dict[str, any]] = {}
+        # Kullanıcı başına kaydedilen handler'lar
+        self.user_handlers: Dict[int, Dict[str, List]] = {}
         self._retry_count: Dict[str, int] = {}
         self._compat_installed = False
         self._installed_packages: Set[str] = set()  # Kurulu paket cache
@@ -29,7 +35,7 @@ class PluginManager:
     
     async def preinstall_all_dependencies(self):
         """Tüm pluginlerin bağımlılıklarını önceden kur"""
-        print("[PLUGIN] 📦 Bağımlılıklar kontrol ediliyor...")
+        log.info("Bağımlılıklar kontrol ediliyor...")
         
         all_plugins = await db.get_all_plugins()
         if not all_plugins:
@@ -111,7 +117,7 @@ class PluginManager:
         # Eksik paketleri toplu kur
         if to_install:
             unique_packages = list(set(to_install))
-            print(f"[PLUGIN] 📦 {len(unique_packages)} paket kuruluyor: {', '.join(unique_packages)}")
+            log.info("%s paket kuruluyor: %s", len(unique_packages), ', '.join(unique_packages))
             
             try:
                 result = subprocess.run(
@@ -122,15 +128,15 @@ class PluginManager:
                 )
                 
                 if result.returncode == 0:
-                    print(f"[PLUGIN] ✅ Tüm bağımlılıklar kuruldu")
+                    log.info("Tüm bağımlılıklar kuruldu")
                     for pkg in unique_packages:
                         self._installed_packages.add(pkg)
                 else:
-                    print(f"[PLUGIN] ⚠️ Bazı paketler kurulamadı")
+                    log.warning("Bazı paketler kurulamadı")
             except Exception as e:
-                print(f"[PLUGIN] ⚠️ Paket kurulum hatası: {e}")
+                log.warning("Paket kurulum hatası: %s", e)
         else:
-            print("[PLUGIN] ✅ Tüm bağımlılıklar mevcut")
+            log.info("Tüm bağımlılıklar mevcut")
         
         self._packages_checked = True
     
@@ -154,9 +160,9 @@ class PluginManager:
             sys.modules['asena.events'] = userbot_compat.events
             
             self._compat_installed = True
-            print("[PLUGIN] ✅ Uyumluluk katmanı hazır")
+            log.info("Uyumluluk katmanı hazır")
         except Exception as e:
-            print(f"[PLUGIN] ⚠️ Uyumluluk katmanı hatası: {e}")
+            log.warning("Uyumluluk katmanı hatası: %s", e)
     
     def _patch_plugin_content(self, content: str) -> str:
         """Plugin içeriğindeki eski import'ları düzelt"""
@@ -206,7 +212,7 @@ class PluginManager:
             except ImportError:
                 pass
             
-            print(f"[PLUGIN] 📦 {clean_name} kuruluyor...")
+            log.info("%s kuruluyor...", clean_name)
             
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", package_name, "-q", "--disable-pip-version-check"],
@@ -216,11 +222,11 @@ class PluginManager:
             )
             
             if result.returncode == 0:
-                print(f"[PLUGIN] ✅ {clean_name} kuruldu")
+                log.info("%s kuruldu", clean_name)
                 self._installed_packages.add(clean_name)
                 return True, f"{clean_name} kuruldu"
             else:
-                print(f"[PLUGIN] ❌ {clean_name} kurulamadı: {result.stderr}")
+                log.error("%s kurulamadı: %s", clean_name, result.stderr)
                 return False, result.stderr
                 
         except subprocess.TimeoutExpired:
@@ -328,7 +334,7 @@ class PluginManager:
                 except ImportError:
                     package_name = package_mapping.get(module_name, module_name)
                     
-                    print(f"[PLUGIN] ⚠️ '{module_name}' bulunamadı, '{package_name}' kuruluyor...")
+                    log.warning("'%s' bulunamadı, '%s' kuruluyor...", module_name, package_name)
                     
                     success, msg = self.install_package(package_name)
                     
@@ -387,7 +393,7 @@ class PluginManager:
             return info
             
         except Exception as e:
-            print(f"[PLUGIN] Bilgi çıkarma hatası: {e}")
+            log.error("Bilgi çıkarma hatası", exc_info=True)
             return info
     
     async def register_plugin(self, file_path: str, is_public: bool = True,
@@ -463,6 +469,10 @@ class PluginManager:
         if not plugin:
             return False, f"`{plugin_name}` adında bir plugin bulunamadı"
         
+        # Devre dışı kontrolü
+        if plugin.get("is_disabled", False):
+            return False, f"⛔ `{plugin_name}` devre dışı bırakılmış"
+        
         if not plugin.get("is_active", True):
             return False, f"`{plugin_name}` şu anda devre dışı"
         
@@ -513,7 +523,7 @@ class PluginManager:
                 from userbot_compat import events as compat_events
                 compat_events.set_client(client)
             except Exception as e:
-                print(f"[PLUGIN] compat_events hatası: {e}")
+                log.error("compat_events hatası", exc_info=True)
             
             # Modül için namespace oluştur
             module_name = f"plugin_{plugin_name}_{user_id}"
@@ -528,12 +538,32 @@ class PluginManager:
             # Modülü sys.modules'a ekle
             sys.modules[module_name] = module
             
+            # Mevcut handler sayısını kaydet (önceki durum)
+            handlers_before = len(client.list_event_handlers())
+            
             # Kodu çalıştır
             exec(compile(patched_content, file_path, 'exec'), module.__dict__)
             
-            # Register fonksiyonu varsa çağır
+            # Register fonksiyonu varsa çağır (eski stil)
             if hasattr(module, 'register') and callable(module.register):
                 module.register(client)
+            
+            # register_handlers fonksiyonu varsa çağır (yeni stil)
+            if hasattr(module, 'register_handlers') and callable(module.register_handlers):
+                try:
+                    module.register_handlers(client, user_id)
+                    log.info("register_handlers çağrıldı: %s", plugin_name)
+                except Exception as e:
+                    log.error("register_handlers hatası", exc_info=True)
+            
+            # Yeni eklenen handler'ları tespit et ve kaydet
+            handlers_after = client.list_event_handlers()
+            new_handlers = handlers_after[handlers_before:]
+            
+            # Handler'ları kullanıcı ve plugin bazında sakla
+            if user_id not in self.user_handlers:
+                self.user_handlers[user_id] = {}
+            self.user_handlers[user_id][plugin_name] = new_handlers
             
             self.user_active_plugins[user_id][plugin_name] = module
             
@@ -570,7 +600,7 @@ class PluginManager:
                 self._retry_count[retry_key] = self._retry_count.get(retry_key, 0) + 1
                 return await self.activate_plugin(user_id, plugin_name, client)
             
-            print(f"[PLUGIN] Import hatası: {missing_module}")
+            log.error("Import hatası: %s", missing_module, exc_info=True)
             success, msg = self.install_package(missing_module)
             
             if success:
@@ -591,16 +621,98 @@ class PluginManager:
     
     async def deactivate_plugin(self, user_id: int, plugin_name: str) -> Tuple[bool, str]:
         """Kullanıcı için plugin deaktif et"""
-        if user_id not in self.user_active_plugins:
-            return False, f"Aktif plugininiz bulunmuyor"
         
-        if plugin_name not in self.user_active_plugins[user_id]:
-            return False, f"`{plugin_name}` zaten aktif değil"
+        handlers_removed = 0
+        module = None
+        client = None
+        
+        # Modülü bul
+        if user_id in self.user_active_plugins and plugin_name in self.user_active_plugins[user_id]:
+            module = self.user_active_plugins[user_id][plugin_name]
+            client = getattr(module, 'client', None)
+        
+        # Client yoksa smart_session_manager'dan al
+        if not client:
+            try:
+                from userbot.smart_manager import smart_session_manager
+                client = smart_session_manager.get_client(user_id)
+            except:
+                pass
         
         try:
-            module = self.user_active_plugins[user_id][plugin_name]
+            # Önce unregister_handlers fonksiyonu varsa çağır
+            if module and hasattr(module, 'unregister_handlers') and callable(module.unregister_handlers):
+                try:
+                    module.unregister_handlers(client, user_id)
+                    handlers_removed += 1
+                    log.info("unregister_handlers çağrıldı: %s", plugin_name)
+                except Exception as e:
+                    log.error("unregister_handlers hatası", exc_info=True)
             
-            if hasattr(module, 'unregister') and callable(module.unregister):
+            # Handler'ları kaldır
+            if client:
+                module_name = f"plugin_{plugin_name}_{user_id}"
+                all_handlers = list(client.list_event_handlers())  # Kopya al
+                
+                for callback, event in all_handlers:
+                    should_remove = False
+                    
+                    try:
+                        # Callback'in modülünü kontrol et
+                        cb_module = getattr(callback, '__module__', '') or ''
+                        cb_name = getattr(callback, '__name__', '') or ''
+                        cb_qualname = getattr(callback, '__qualname__', '') or ''
+                        
+                        # Bu plugin'e ait mi kontrol et
+                        if module_name in cb_module:
+                            should_remove = True
+                        elif module_name in cb_qualname:
+                            should_remove = True
+                        elif plugin_name in cb_module and str(user_id) in cb_module:
+                            should_remove = True
+                        
+                        # Modül referansı ile kontrol
+                        if module and hasattr(module, cb_name):
+                            module_func = getattr(module, cb_name, None)
+                            if module_func is callback or module_func == callback:
+                                should_remove = True
+                        
+                        if should_remove:
+                            client.remove_event_handler(callback, event)
+                            handlers_removed += 1
+                            log.info("Handler kaldırıldı: %s - %s", plugin_name, cb_name)
+                    except Exception as e:
+                        log.error("Handler kontrol hatası", exc_info=True)
+                
+                # Modüldeki tüm fonksiyonları tara
+                if module:
+                    for attr_name in dir(module):
+                        if attr_name.startswith('_'):
+                            continue
+                        try:
+                            attr = getattr(module, attr_name)
+                            if not callable(attr):
+                                continue
+                            
+                            # Yeniden handler listesini al (değişmiş olabilir)
+                            current_handlers = list(client.list_event_handlers())
+                            for callback, event in current_handlers:
+                                try:
+                                    if callback is attr:
+                                        client.remove_event_handler(callback, event)
+                                        handlers_removed += 1
+                                        log.info("Handler kaldırıldı (ref): %s - %s", plugin_name, attr_name)
+                                except:
+                                    pass
+                        except:
+                            pass
+            
+            # Kayıtlı handler'ları temizle
+            if user_id in self.user_handlers and plugin_name in self.user_handlers[user_id]:
+                del self.user_handlers[user_id][plugin_name]
+            
+            # Unregister fonksiyonu varsa çağır
+            if module and hasattr(module, 'unregister') and callable(module.unregister):
                 try:
                     module.unregister()
                 except:
@@ -611,17 +723,23 @@ class PluginManager:
             if module_name in sys.modules:
                 del sys.modules[module_name]
             
-            del self.user_active_plugins[user_id][plugin_name]
+            # user_active_plugins'den kaldır
+            if user_id in self.user_active_plugins and plugin_name in self.user_active_plugins[user_id]:
+                del self.user_active_plugins[user_id][plugin_name]
             
+            # DB'den kaldır
             user = await db.get_user(user_id)
             active_plugins = user.get("active_plugins", []) if user else []
             if plugin_name in active_plugins:
                 active_plugins.remove(plugin_name)
                 await db.update_user(user_id, {"active_plugins": active_plugins})
             
+            log.info("%s deaktif edildi (user=%s), %s handler kaldırıldı", plugin_name, user_id, handlers_removed)
             return True, f"✅ `{plugin_name}` deaktif edildi"
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return False, f"Hata: `{str(e)}`"
     
     async def get_user_plugins(self, user_id: int) -> Dict:
@@ -637,13 +755,24 @@ class PluginManager:
         }
     
     async def restore_user_plugins(self, user_id: int, client: TelegramClient) -> int:
-        """Kullanıcının pluginlerini geri yükle - PARALEL"""
+        """Kullanıcının pluginlerini geri yükle - PARALEL + Varsayılan aktif pluginler"""
         user = await db.get_user(user_id)
         if not user:
             return 0
         
         active_plugins = user.get("active_plugins", [])
-        if not active_plugins:
+        
+        # Varsayılan aktif pluginleri ekle
+        all_plugins = await db.get_all_plugins()
+        default_active_plugins = [
+            p["name"] for p in all_plugins 
+            if p.get("default_active", False) and not p.get("is_disabled", False)
+        ]
+        
+        # Varsayılan aktif pluginleri kullanıcının listesine ekle (yoksa)
+        plugins_to_load = list(set(active_plugins + default_active_plugins))
+        
+        if not plugins_to_load:
             return 0
         
         async def load_single_plugin(plugin_name):
@@ -657,11 +786,33 @@ class PluginManager:
             return None
         
         # Tüm pluginleri paralel yükle
-        tasks = [load_single_plugin(p) for p in active_plugins]
+        tasks = [load_single_plugin(p) for p in plugins_to_load]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         restored = sum(1 for r in results if r is not None and not isinstance(r, Exception))
         return restored
+    
+    async def activate_default_plugins(self, user_id: int, client: TelegramClient) -> int:
+        """Yeni kullanıcı için varsayılan aktif pluginleri aktif et"""
+        all_plugins = await db.get_all_plugins()
+        default_plugins = [
+            p["name"] for p in all_plugins 
+            if p.get("default_active", False) and not p.get("is_disabled", False)
+        ]
+        
+        if not default_plugins:
+            return 0
+        
+        activated = 0
+        for plugin_name in default_plugins:
+            try:
+                success, _ = await self.activate_plugin(user_id, plugin_name, client)
+                if success:
+                    activated += 1
+            except:
+                pass
+        
+        return activated
     
     async def get_all_plugins_formatted(self, user_id: int = None) -> str:
         """Tüm pluginleri formatla"""
@@ -697,10 +848,30 @@ class PluginManager:
         """Kullanıcının pluginlerini temizle"""
         if user_id in self.user_active_plugins:
             for plugin_name in list(self.user_active_plugins[user_id].keys()):
+                module = self.user_active_plugins[user_id].get(plugin_name)
+                
+                # Handler'ları kaldır
+                if user_id in self.user_handlers and plugin_name in self.user_handlers[user_id]:
+                    handlers = self.user_handlers[user_id][plugin_name]
+                    client = getattr(module, 'client', None) if module else None
+                    
+                    if client and handlers:
+                        for callback, event in handlers:
+                            try:
+                                client.remove_event_handler(callback, event)
+                            except:
+                                pass
+                
+                # sys.modules'dan kaldır
                 module_name = f"plugin_{plugin_name}_{user_id}"
                 if module_name in sys.modules:
                     del sys.modules[module_name]
+            
             del self.user_active_plugins[user_id]
+        
+        # Handler kayıtlarını temizle
+        if user_id in self.user_handlers:
+            del self.user_handlers[user_id]
 
 
 # Global instance
