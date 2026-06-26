@@ -29,6 +29,7 @@ diyelim teker teker değilde 5'er kişi etiketleyerek tag atmak istiyorsunuz oza
 import asyncio
 import copy
 import re
+import random
 import os
 import json
 from telethon.tl.types import (
@@ -341,6 +342,755 @@ def parse_tag_command(q):
     return group_size, message_text, message_entities, is_reply
 
 
+
+# ======================================================================
+# RASTGELE SOZLER  (her kategori kolayca genisletilebilir - daha fazla
+# soz ekledikce "her 50 kiside bir tekrar etmeme" garantisi guclenir)
+# ======================================================================
+TAG_PHRASES = {
+    "gun": [
+        "🌅 Günaydın millet! Yeni güne enerjik başlayalım.",
+        "☀️ Hayırlı sabahlar! Bugün harika şeyler olacak.",
+        "🌞 Günaydın! Kahveler hazır mı?",
+        "🌤️ Sabah sabah herkese selam, günaydın!",
+        "🌅 Yeni gün, yeni umutlar. Günaydın arkadaşlar!",
+        "☕ Günaydın! Güne bir gülümsemeyle başla.",
+        "🌻 Günaydın canlar, bugün kendinize iyi bakın.",
+        "🌄 Günaydın! Bugün de elimizden geleni yapalım.",
+        "✨ Hayırlı sabahlar herkese, güzel bir gün olsun.",
+        "🐦 Kuşlar öttü, güneş doğdu, günaydın!",
+        "🌅 Günaydın! Bugün şansın açık olsun.",
+        "☀️ Sabahın bu güzel saatinde herkese günaydın.",
+        "🌞 Günaydın! Enerjiniz hiç bitmesin.",
+        "🍳 Kahvaltılar hazır mı? Günaydın millet!",
+        "🌼 Günaydın! Güzel bir gün sizi bekliyor.",
+        "🌅 Erken kalkan yol alır derler, günaydın!",
+        "💛 Günaydın! Bugün biraz daha mutlu olalım.",
+        "🌤️ Yeni günün ilk selamı sizlere, günaydın.",
+        "🌞 Günaydın! Pozitif kalmaya devam.",
+        "☕ İlk kahve içildi, günaydın arkadaşlar!",
+        "🌅 Günaydın! Bugün de bol kahkaha olsun.",
+        "🌻 Sabah enerjisiyle herkese günaydın!",
+        "🌅 Günaydın! Bugünü güzelleştirmek senin elinde.",
+        "☕ Kahveni al, gününe başla, günaydın!",
+        "🌞 Günaydın! Küçük adımlar büyük günler yapar.",
+        "🌼 Günaydın! Bugün birine iyilik yap.",
+        "🌈 Günaydın! Hava nasıl olursa olsun, sen parla.",
+        "🛌 Uyandık mı? Günaydın tembeller!",
+        "🌅 Günaydın! Listenin ilk maddesi: gülümse.",
+        "🍞 Taze ekmek kokusuyla günaydın!",
+        "🌞 Günaydın! Bugün biraz erken çıkalım.",
+        "💪 Günaydın! Bugün hedeflere bir adım daha.",
+        "🌅 Günaydın! Dünden bugüne hep daha iyi.",
+        "🌻 Günaydın! Enerjini doğru yerlere harca.",
+        "☀️ Günaydın! Güneş gibi içten ol.",
+        "🌄 Yeni güne merhaba, günaydın millet!",
+        "🍵 Çayını demle, günaydın arkadaşlar!",
+        "🌅 Günaydın! Bugün şükredecek çok şey var.",
+        "🐦 Günaydın! Kuşlar bile keyifli bugün.",
+        "🌞 Günaydın! Telefonları bırakıp güne bakalım.",
+        "🌼 Günaydın! Küçük mutluluklar peşinde koş.",
+        "☕ Günaydın! İlk yudum hep en güzeli.",
+        "🌅 Günaydın! Bugünün kahramanı sensin.",
+        "🌈 Günaydın! Renkli bir gün diliyorum.",
+        "💛 Günaydın! Kendine nazik davran bugün.",
+        "🌄 Günaydın! Dağ gibi sağlam dur.",
+        "🌞 Günaydın! Bugün biraz da kendine vakit ayır.",
+        "🍳 Günaydın! Kahvaltı en önemli öğün, atlama.",
+        "🌅 Günaydın! Bugün de bol enerji.",
+        "🌻 Günaydın! Gülümsemek bedava, bol bol yap.",
+    ],
+    "gec": [
+        "🌙 İyi geceler millet, tatlı rüyalar!",
+        "✨ Günü kapatıyoruz, herkese iyi geceler.",
+        "🌌 İyi geceler! Yarın görüşmek üzere.",
+        "💤 Uyku vakti geldi, tatlı uykular arkadaşlar.",
+        "🌠 İyi geceler! Rüyalarınız güzel olsun.",
+        "🌙 Gece oldu, herkese huzurlu uykular.",
+        "⭐ İyi geceler! Yorgunluk üstünüzden gitsin.",
+        "🌃 Günün son selamı, iyi geceler millet.",
+        "😴 İyi geceler! Yarın daha güzel olacak.",
+        "🌙 Tatlı rüyalar, dinlenmeye bakın.",
+        "✨ İyi geceler! Yıldızlar sizinle olsun.",
+        "🌌 Herkese iyi geceler, kafanızı dinleyin.",
+        "💤 Gözler kapanıyor, iyi geceler arkadaşlar.",
+        "🌠 İyi geceler! Güzel bir uyku çekin.",
+        "🌙 İyi geceler! Yarın enerjik kalkmak için dinlenin.",
+        "⭐ Günü güzel kapatalım, iyi geceler.",
+        "🌃 İyi geceler millet, kendinize iyi bakın.",
+        "😴 Tatlı uykular herkese, iyi geceler.",
+        "🌙 İyi geceler! Endişeleri yarına bırakın.",
+        "✨ Gece yarısı selamı, iyi geceler dostlar.",
+        "💤 İyi geceler! Huzurla uyuyun.",
+        "🌌 İyi geceler! Rüyalarda görüşürüz.",
+        "🌙 İyi geceler! Telefonları bırakıp dinlenin.",
+        "💤 İyi geceler! Yarın için güç toplayın.",
+        "🌌 İyi geceler! Bugünün yorgunluğu yarına kalmasın.",
+        "⭐ İyi geceler! Güzel düşüncelerle uyuyun.",
+        "🌠 İyi geceler! Bir dilek tutmayı unutmayın.",
+        "🌙 İyi geceler! Sabaha dinç uyanın.",
+        "😴 İyi geceler! Gözleriniz kapanıyor.",
+        "🌃 İyi geceler! Şehir uyudu, sıra sizde.",
+        "💫 İyi geceler! Yıldızları sayarken uyuyun.",
+        "🌙 İyi geceler! Kendinize bir mola verin.",
+        "🛌 İyi geceler! Yatak sizi çağırıyor.",
+        "✨ İyi geceler! Yarın yeni bir sayfa.",
+        "🌌 İyi geceler! Huzurla gözlerinizi kapatın.",
+        "⭐ İyi geceler! Bugünü güzel kapatın.",
+        "🌠 İyi geceler! Rüyalarınız umut dolsun.",
+        "😴 İyi geceler! Derin bir nefes alın, uyuyun.",
+        "🌙 İyi geceler! Yarın her şey daha iyi olacak.",
+        "💤 İyi geceler! Dinlenmek de bir başarıdır.",
+        "🌃 İyi geceler! Kafanızı boşaltıp uyuyun.",
+        "✨ İyi geceler! Yastığa başınızı koyun, rahatlayın.",
+        "🌌 İyi geceler! Endişeleri yarına erteleyin.",
+        "⭐ İyi geceler! İyi insanlar iyi uyur.",
+        "🌙 İyi geceler! Bugün yeterince yoruldunuz.",
+        "😴 İyi geceler! Tatlı bir uyku hak ettiniz.",
+        "💫 İyi geceler! Yarın görüşmek üzere.",
+        "🛌 İyi geceler! Sıcacık yatağınızın keyfini çıkarın.",
+        "🌠 İyi geceler! Gece güzeldir, uykunuz da öyle olsun.",
+        "🌙 İyi geceler! Sessizliğin tadını çıkarın.",
+    ],
+    "sor": [
+        "❓ Bugün nasıl geçti? Anlatın bakalım.",
+        "🤔 Sizce bugünün en güzel anı neydi?",
+        "💬 Canınız ne yapmak istiyor şu an?",
+        "❓ Akşam yemeğinde ne var? Merak ettim.",
+        "🤔 Hafta sonu planınız ne?",
+        "💭 En son hangi filmi izlediniz?",
+        "❓ Şu an hangi şarkıyı dinliyorsunuz?",
+        "🤔 Bugün kim ne öğrendi?",
+        "💬 Bir tatil olsa nereye giderdiniz?",
+        "❓ Kahve mi çay mı? Net cevap bekliyorum.",
+        "🤔 Bugün sizi ne mutlu etti?",
+        "💭 En sevdiğiniz mevsim hangisi?",
+        "❓ Şu an aklınızdan ne geçiyor?",
+        "🤔 Bu gruba ne zaman katıldınız, hatırlıyor musunuz?",
+        "💬 Bir süper güç olsa hangisini seçerdiniz?",
+        "❓ Bugün kaç bardak su içtiniz?",
+        "🤔 En son ne zaman kahkaha attınız?",
+        "💭 Hayalinizdeki meslek neydi?",
+        "❓ Şu an mutlu musunuz? Dürüst olun.",
+        "🤔 Bugün kendinize iyi baktınız mı?",
+        "💬 En sevdiğiniz yemek nedir?",
+        "❓ Bu akşam ne yapıyorsunuz?",
+        "❓ Bugünün bir kelimeyle özeti nedir?",
+        "🤔 Şu an bir yere ışınlansanız nereye?",
+        "💬 En sevdiğiniz çocukluk anınız hangisi?",
+        "❓ Bugün öğrendiğiniz yeni bir şey var mı?",
+        "🤔 Sabah insanı mısınız, gece insanı mı?",
+        "💭 Hangi diziyi baştan izlemek isterdiniz?",
+        "❓ Şu an bir tatlı olsa hangisi olurdu?",
+        "🤔 En son ne zaman gerçekten dinlendiniz?",
+        "💬 Bir kitap mı, bir film mi? Hangisi?",
+        "❓ Bugün kaç kez gülümsediniz?",
+        "🤔 Dağ mı deniz mi? Net karar.",
+        "💭 Hangi şehirde yaşamak isterdiniz?",
+        "❓ Şu an yanınızda kim olsun isterdiniz?",
+        "🤔 En sevdiğiniz koku nedir?",
+        "💬 Bir yeteneğiniz olsa hangisi olsun?",
+        "❓ Bugün kendinize ne sözü verdiniz?",
+        "🤔 Yağmuru mu seversiniz, güneşi mi?",
+        "💭 En son ne zaman yeni bir şey denediniz?",
+        "❓ Şu an çalan bir şarkı var mı kafanızda?",
+        "🤔 Hangi mevsimde doğdunuz?",
+        "💬 En sevdiğiniz atıştırmalık nedir?",
+        "❓ Bugün size güzel gelen bir an oldu mu?",
+        "🤔 Bir hayvan olsanız hangisi olurdunuz?",
+        "💭 Hangi ülkeyi gezmek isterdiniz?",
+        "❓ Sabah ilk işiniz ne olur?",
+        "🤔 En çok neye gülersiniz?",
+        "💬 Bugün birine teşekkür ettiniz mi?",
+        "❓ Şu an canınız ne çekiyor?",
+    ],
+    "kom": [
+        "😂 Bugün o kadar yoruldum ki kahvem bile yorgun.",
+        "🤣 Hayat bana limon verdi, ben de unuttum nereye koyduğumu.",
+        "😆 Diyet yapıyorum: sadece üzgünken yemiyorum, hep mutluyum.",
+        "😂 Uyku tulumum yok ama uyku yeteneğim profesyonel.",
+        "🤣 Sabah alarmıyla aramızda eski bir husumet var.",
+        "😆 Para biriktiriyorum, şu an 3 lira oldu, neredeyse zenginim.",
+        "😂 Spor salonuna baktım, o da bana baktı, anlaştık görüşmedik.",
+        "🤣 Planım vardı ama plan beni terk etti.",
+        "😆 Wifi gidince hayatımın anlamını sorguladım.",
+        "😂 Pazartesi yine geldi, davet eden kim?",
+        "🤣 Aynaya baktım, aynaya da 'kötü gün' demişler.",
+        "😆 Bugün hiçbir şey yapmadım, dünden kalanları bitiriyorum.",
+        "😂 Erken yatacaktım ama telefon izin vermedi.",
+        "🤣 Motivasyonum sabah çıktı, hâlâ dönmedi.",
+        "😆 Yemek yapmayı biliyorum, sadece mutfak benden korkuyor.",
+        "😂 Bugün adımsayar açtım: 47 adım, sporcuyum resmen.",
+        "🤣 Çay demledim, unuttum, buz çayı oldu, yeni icat.",
+        "😆 Listeye 'liste yapmak' yazdım, ilk maddeyi tamamladım.",
+        "😂 Kahve içmeden konuşmayın benimle, kural bu.",
+        "🤣 Bugün aynayı sildim, ben de parladım.",
+        "😆 Tatil planı: yatak, atıştırmalık, tekrar yatak.",
+        "😂 Akıllı telefon var ama sahibi hâlâ gelişiyor.",
+        "😂 Bugün enerjim full... şarj aletini bulamıyorum ama.",
+        "🤣 Hayat kısa, ben de uykuyu uzatıyorum.",
+        "😆 Bugün üretken oldum: 3 sekme açtım, hepsini kapattım.",
+        "😂 Diyetteyim, sadece gördüğümü yiyorum.",
+        "🤣 Plan A çöktü, alfabe uzun, idare ederiz.",
+        "😆 Sabah sporu yaptım: yataktan kalktım.",
+        "😂 Bugün kendime söz verdim, sözüme güvenmedim.",
+        "🤣 Telefonum %1, ben %2 enerjiyle hayattayım.",
+        "😆 Kahve içtim, hâlâ uyuyorum, kahve de yorulmuş.",
+        "😂 Bugün takvime baktım, takvim de bana baktı.",
+        "🤣 Düzenli biriyim: her şey düzenli şekilde dağınık.",
+        "😆 Aklımda bir fikir vardı, gitti, gelirse söylerim.",
+        "😂 Bugün erken kalktım, sonra erken pişman oldum.",
+        "🤣 Spor kıyafetim var, spor yapmaya gerek kalmadı.",
+        "😆 Yemek tarifine baktım, malzemeyi gördüm, vazgeçtim.",
+        "😂 Bugün su içtim, sağlıklı yaşam başladı, biter umarım.",
+        "🤣 Alarmı erteledim, hayatı da öyle.",
+        "😆 Bugün hiç stres yapmadım, stresi yarına bıraktım.",
+        "😂 Beynim sınırsız, sadece bağlantı kopuk.",
+        "🤣 Bugün adım attım: buzdolabına kadar.",
+        "😆 Listeyi yaptım, listeyi kaybettim, denge bu.",
+        "😂 Pazartesi geldi, kapıyı açan ben değilim.",
+        "🤣 Uyku borcum o kadar büyük ki faizi var.",
+        "😆 Bugün motive oldum, sonra geçti, normale döndüm.",
+        "😂 Telefonu şarja taktım, ben de fişe girsem keşke.",
+        "🤣 Bugün ayna bana 'kolay gelsin' dedi.",
+        "😆 İş yapacaktım, iş benden önce davrandı.",
+        "😂 Bugün de kahve, yarın da kahve, sistem bu.",
+    ],
+    "sog": [
+        "🥶 Balık neden okula gidemedi? Çünkü oltaya gelmedi.",
+        "🧊 Kazağımı dolaba astım, şimdi o da 'asabi' oldu.",
+        "🥶 Çaydanlık neden mutlu? Çünkü kaynamaktan keyif alıyor.",
+        "🧊 Bilgisayara espri yaptım, 'işlemedi' dedi.",
+        "🥶 Limon neden üzgün? Çünkü içi ekşidi.",
+        "🧊 Saat neden yoruldu? Çünkü hep akrep peşinde.",
+        "🥶 Patates neden ünlü oldu? Çünkü kızarmaktan çekinmedi.",
+        "🧊 Defter neden sustu? Çünkü çizgiyi aştı.",
+        "🥶 Buzdolabı neden konuşmadı? Çünkü içi soğuktu.",
+        "🧊 Kalem neden küstü? Çünkü ucu bana dokundu.",
+        "🥶 Süt neden koştu? Çünkü kaçık oldu.",
+        "🧊 Ampul neden parladı? Çünkü fikri vardı.",
+        "🥶 Pencere neden açıldı? Çünkü cam sıkıldı.",
+        "🧊 Ekmek neden kızdı? Çünkü dilimlendi.",
+        "🥶 Telefon neden titredi? Çünkü mesaj korkuttu.",
+        "🧊 Çorap neden kayboldu? Çünkü tek başına gezmeyi sevdi.",
+        "🥶 Masa neden sessiz? Çünkü ayakları bağlı.",
+        "🧊 Kapı neden gülümsedi? Çünkü kolu okşandı.",
+        "🥶 Bardak neden doldu? Çünkü sabrı taştı.",
+        "🧊 Mum neden eridi? Çünkü içi yandı.",
+        "🥶 Bulut neden ağladı? Çünkü içine attı.",
+        "🧊 Anahtar neden döndü? Çünkü kilitlenip kaldı.",
+        "🥶 Kalem neden yarışı kaybetti? Çünkü ucu kırıldı.",
+        "🧊 Çatal neden küstü? Çünkü kaşığa kaşık attılar.",
+        "🥶 Lamba neden sustu? Çünkü düğmeye basıldı.",
+        "🧊 Tabak neden kızdı? Çünkü hep ortaya konuldu.",
+        "🥶 Pil neden yoruldu? Çünkü hep şarj oldu.",
+        "🧊 Halı neden sessiz? Çünkü hep ezildi.",
+        "🥶 Klima neden mutlu? Çünkü havası var.",
+        "🧊 Perde neden çekildi? Çünkü utandı.",
+        "🥶 Sandalye neden kalkamadı? Çünkü ayakları sabit.",
+        "🧊 Kibrit neden parladı? Çünkü sürtüşme yaşadı.",
+        "🥶 Lastik neden döndü? Çünkü yolu sevdi.",
+        "🧊 Battaniye neden sıcak? Çünkü içine attı.",
+        "🥶 Fincan neden doldu? Çünkü çay ısrarcıydı.",
+        "🧊 Saksı neden büyüdü? Çünkü içinde umut vardı.",
+        "🥶 Kalemtıraş neden döndü? Çünkü baş döndürdü.",
+        "🧊 Yastık neden yumuşadı? Çünkü baş ağrıttı.",
+        "🥶 Kapı zili neden çaldı? Çünkü çalınası geldi.",
+        "🧊 Cam neden buğulandı? Çünkü içi geçti.",
+        "🥶 Çekmece neden kapandı? Çünkü içine kapanıktı.",
+        "🧊 Priz neden şaşırdı? Çünkü fişi gördü.",
+        "🥶 Makas neden ayrıldı? Çünkü araları açıldı.",
+        "🧊 Tencere neden taştı? Çünkü kaynayası geldi.",
+        "🥶 Çorba neden sıcaktı? Çünkü ortam gergindi.",
+        "🧊 Ütü neden kızdı? Çünkü buruşukluğa dayanamadı.",
+        "🥶 Buz neden eridi? Çünkü ortam ısındı.",
+        "🧊 Sünger neden doldu? Çünkü her şeyi içine attı.",
+        "🥶 Musluk neden ağladı? Çünkü damla damla doldu.",
+        "🧊 Terlik neden kayboldu? Çünkü tek ayak üstünde kaldı.",
+    ],
+}
+
+# kategori anahtari -> (buton etiketi, kisa ad)
+_CATS = {
+    "gun": ("🌅 Günaydın", "günaydın"),
+    "gec": ("🌙 İyi Geceler", "iyi geceler"),
+    "sor": ("❓ Soru", "soru"),
+    "kom": ("😂 Komik", "komik"),
+    "sog": ("🥶 Soğuk Espri", "soğuk espri"),
+}
+
+
+def _make_phrase_picker(category):
+    """
+    Bir kategori icin "son K kisi icinde tekrar etmeyen" soz secici dondurur.
+    K = min(50, havuz-1)  -> havuz >= 50 ise ARDISIK 50 kiside ayni soz gelmez.
+    (Bir kisi zaten tek sefer etiketlendigi icin "ayni kisiye ayni soz"
+     kosulu da otomatik saglanir.)
+    """
+    from collections import deque
+    pool = list(TAG_PHRASES.get(category) or ["📢"])
+    K = min(50, max(0, len(pool) - 1))
+    recent = deque(maxlen=K)
+
+    def pick():
+        if len(pool) == 1:
+            return pool[0]
+        choices = [p for p in pool if p not in recent] or pool
+        p = random.choice(choices)
+        if K > 0:
+            recent.append(p)
+        return p
+
+    return pick
+
+
+# ======================================================================
+# PANEL METIN / BUTONLARI
+# ======================================================================
+def _panel_text_step1(has_msg):
+    if has_msg:
+        return ("🏷️ **Etiketleme**\n\n"
+                "Kaç kişilik gruplar halinde etiketleyeyim?\n\n"
+                "⏹️ İşlemi durdurmak için: `.tagstop`")
+    return ("🏷️ **Etiketleme**\n\n"
+            "Mesaj girmediniz / bir mesaj yanıtlamadınız.\n"
+            "Rastgele hangi mesajlarla etiketleyeyim?\n\n"
+            "⏹️ İşlemi durdurmak için: `.tagstop`")
+
+
+def _panel_text_interval():
+    return ("⏱️ Kaç saniyede bir göndereyim?\n\n"
+            "_(Düşük süre flood riskini artırır.)_\n\n"
+            "⏹️ Durdurmak için: `.tagstop`")
+
+
+def _step1_buttons(owner, has_msg):
+    from telethon import Button
+    if has_msg:
+        return [
+            [Button.inline("1'erli", f"tgrp_{owner}_1".encode()),
+             Button.inline("3'erli", f"tgrp_{owner}_3".encode())],
+            [Button.inline("5'erli", f"tgrp_{owner}_5".encode()),
+             Button.inline("10'arlı", f"tgrp_{owner}_10".encode())],
+        ]
+    rows, row = [], []
+    for key, (label, _short) in _CATS.items():
+        row.append(Button.inline(label, f"tcat_{owner}_{key}".encode()))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return rows
+
+
+def _interval_buttons(owner):
+    from telethon import Button
+    return [
+        [Button.inline("2.5 sn", f"tint_{owner}_25".encode()),
+         Button.inline("3 sn", f"tint_{owner}_30".encode())],
+        [Button.inline("5 sn", f"tint_{owner}_50".encode()),
+         Button.inline("6 sn", f"tint_{owner}_60".encode())],
+    ]
+
+
+# ======================================================================
+# BOT / CLIENT ERISIM YARDIMCILARI
+# ======================================================================
+def _get_bot():
+    import sys
+    try:
+        if 'main' in sys.modules:
+            b = getattr(sys.modules['main'], 'bot', None)
+            if b is not None:
+                return b
+        import __main__
+        return getattr(__main__, 'bot', None)
+    except Exception:
+        return None
+
+
+def _get_bot_username():
+    try:
+        import config as cfg
+        u = getattr(cfg, 'BOT_USERNAME', '') or ''
+        if u:
+            return u.lstrip('@')
+    except Exception:
+        pass
+    try:
+        if os.path.exists('.bot_username'):
+            with open('.bot_username') as f:
+                return f.read().strip().lstrip('@')
+    except Exception:
+        pass
+    return ''
+
+
+def _get_user_client(owner_id):
+    try:
+        from userbot.smart_manager import smart_session_manager
+        return smart_session_manager.get_client(owner_id)
+    except Exception:
+        return None
+
+
+def _ensure_state(bot):
+    if not hasattr(bot, "_tag_pending"):
+        bot._tag_pending = {}
+    if not hasattr(bot, "_tag_jobs"):
+        bot._tag_jobs = {}
+
+
+async def _load_blocked_for(client):
+    """Sadece bu hesabin engelli listesini (lokal kume olarak) dondurur."""
+    try:
+        me = await client.get_me()
+        mid = str(me.id)
+        if os.path.exists(BLOCKED_FILE):
+            with open(BLOCKED_FILE) as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return set(data.get(mid, []))
+            if isinstance(data, list):
+                return set(data)
+    except Exception:
+        pass
+    return set()
+
+
+# ======================================================================
+# BOT TARAFI: inline panel + callback'ler (TEK SEFER kaydedilir)
+# ======================================================================
+def _register_tag_bot_handlers(bot):
+    if getattr(bot, "_tag_flow_registered", False):
+        return
+    bot._tag_flow_registered = True
+    _ensure_state(bot)
+
+    from telethon import events
+    import re as _re
+
+    @bot.on(events.InlineQuery())
+    async def _tag_inline(event):
+        m = _re.match(r"tagq_(\d+)$", event.text or "")
+        if not m:
+            return
+        owner = int(m.group(1))
+        _ensure_state(bot)
+        pend = bot._tag_pending.get(owner)
+        has_msg = bool(pend and pend.get("has_msg"))
+        try:
+            result = event.builder.article(
+                title="🏷️ Etiketleme Paneli",
+                description="Seçim yapmak için dokunun",
+                text=_panel_text_step1(has_msg),
+                buttons=_step1_buttons(owner, has_msg),
+            )
+            await event.answer([result], cache_time=0)
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"tgrp_(\d+)_(\d+)"))
+    async def _tag_grp_cb(event):
+        owner = int(event.pattern_match.group(1))
+        n = int(event.pattern_match.group(2))
+        if event.sender_id != owner:
+            await event.answer("Bu panel sana ait değil.", alert=True)
+            return
+        _ensure_state(bot)
+        pend = bot._tag_pending.get(owner)
+        if not pend:
+            await event.answer("Panel zaman aşımına uğradı, tekrar .tag yazın.", alert=True)
+            return
+        pend["group_size"] = max(1, min(10, n))
+        try:
+            await event.edit(_panel_text_interval(), buttons=_interval_buttons(owner))
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"tcat_(\d+)_([a-z]+)"))
+    async def _tag_cat_cb(event):
+        owner = int(event.pattern_match.group(1))
+        key = event.pattern_match.group(2).decode()
+        if event.sender_id != owner:
+            await event.answer("Bu panel sana ait değil.", alert=True)
+            return
+        _ensure_state(bot)
+        pend = bot._tag_pending.get(owner)
+        if not pend or key not in TAG_PHRASES:
+            await event.answer("Panel zaman aşımına uğradı, tekrar .tag yazın.", alert=True)
+            return
+        pend["category"] = key
+        pend["group_size"] = 1  # rastgele söz modunda teker teker
+        try:
+            await event.edit(_panel_text_interval(), buttons=_interval_buttons(owner))
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"tint_(\d+)_(\d+)"))
+    async def _tag_int_cb(event):
+        owner = int(event.pattern_match.group(1))
+        x10 = int(event.pattern_match.group(2))
+        if event.sender_id != owner:
+            await event.answer("Bu panel sana ait değil.", alert=True)
+            return
+        _ensure_state(bot)
+        pend = bot._tag_pending.pop(owner, None)
+        if not pend:
+            await event.answer("Panel zaman aşımına uğradı, tekrar .tag yazın.", alert=True)
+            return
+        job = bot._tag_jobs.get(owner)
+        if job and job.get("active"):
+            await event.answer("Zaten bir etiketleme sürüyor (.tagstop).", alert=True)
+            return
+        interval = x10 / 10.0
+        gsize = pend.get("group_size") or 1
+        task = asyncio.create_task(run_tag_job(
+            owner,
+            pend["chat_id"],
+            pend.get("mode", "all"),
+            gsize,
+            interval,
+            pend.get("message") or "📢",
+            pend.get("entities"),
+            pend.get("category"),
+        ))
+        bot._tag_jobs[owner] = {"active": True, "task": task, "tagged": 0, "total": 0}
+
+        mode_txt = "adminleri" if pend.get("mode") == "admin" else "üyeleri"
+        if pend.get("category"):
+            src = f"rastgele {_CATS[pend['category']][1]} mesajlarıyla"
+        else:
+            src = "girdiğiniz mesajla"
+        try:
+            await event.edit(
+                f"✅ **Etiketleme başladı!**\n\n"
+                f"Tüm {mode_txt}, {gsize}'erli gruplar halinde, {interval:g} sn arayla "
+                f"{src} etiketliyorum.\n\n"
+                f"⏹️ Durdurmak için: `.tagstop`"
+            )
+        except Exception:
+            pass
+
+
+# ======================================================================
+# PANELI GOSTER (userbot komut handler'indan cagrilir)
+# ======================================================================
+async def _show_tag_panel(q, mode, message_text, message_entities, has_msg):
+    owner = (await q.client.get_me()).id
+    bot = _get_bot()
+    if bot is None:
+        try:
+            await q.edit("❌ **Bot bulunamadı, panel açılamadı.**")
+        except Exception:
+            pass
+        return
+    _register_tag_bot_handlers(bot)
+    _ensure_state(bot)
+
+    job = bot._tag_jobs.get(owner)
+    if job and job.get("active"):
+        try:
+            await q.edit("❌ **Zaten bir etiketleme sürüyor!**\nKapatmak için: `.tagstop`")
+        except Exception:
+            pass
+        return
+
+    bot._tag_pending[owner] = {
+        "chat_id": q.chat_id,
+        "mode": mode,
+        "has_msg": bool(has_msg),
+        "message": message_text,
+        "entities": message_entities,
+        "group_size": None,
+        "category": None,
+    }
+
+    bot_username = _get_bot_username()
+
+    # 1) Grup içinde inline panel dene
+    if bot_username:
+        try:
+            results = await q.client.inline_query(bot_username, f"tagq_{owner}")
+            if results:
+                await results[0].click(q.chat_id)
+                try:
+                    await q.delete()
+                except Exception:
+                    pass
+                return
+        except Exception:
+            pass  # inline kapalı olabilir -> özelden gönder
+
+    # 2) Fallback: paneli özelde (bot PM) gönder + grupta bilgilendir
+    try:
+        await bot.send_message(
+            owner,
+            _panel_text_step1(has_msg),
+            buttons=_step1_buttons(owner, has_msg),
+        )
+        try:
+            await q.edit(
+                "⚠️ **Bu grupta satıriçi (inline) gönderim kapalı.**\n"
+                "Seçim panelini sizinle özelden (bot sohbeti) paylaştım, "
+                "lütfen oradan devam edin.\n\n"
+                "⏹️ Durdurmak için: `.tagstop`"
+            )
+        except Exception:
+            pass
+    except Exception:
+        try:
+            await q.edit(
+                "❌ **Panel açılamadı.**\n"
+                "Botla özelden bir kez sohbet başlatmış olmalısınız (`/start`)."
+            )
+        except Exception:
+            pass
+
+
+# ======================================================================
+# ASIL ETIKETLEME ISI (client tabanli, bot callback'inden baslatilir)
+# ======================================================================
+async def run_tag_job(owner_id, chat_id, mode, group_size, interval,
+                      message, entities, category):
+    from telethon.tl.types import ChannelParticipantsAdmins
+    from telethon.errors import (
+        ChatAdminRequiredError, ChannelPrivateError, FloodWaitError
+    )
+
+    bot = _get_bot()
+    client = _get_user_client(owner_id)
+    if client is None:
+        return
+    _ensure_state(bot)
+    job = bot._tag_jobs.setdefault(owner_id, {})
+    job["active"] = True
+    job.setdefault("tagged", 0)
+    job.setdefault("total", 0)
+
+    blocked = await _load_blocked_for(client)
+    try:
+        me = await client.get_me()
+        my_id = me.id
+    except Exception:
+        my_id = None
+
+    picker = _make_phrase_picker(category) if category else None
+    flt = ChannelParticipantsAdmins() if mode == "admin" else None
+
+    try:
+        status = await client.send_message(chat_id, "⏳ **Etiketleme başlıyor...**")
+    except Exception:
+        status = None
+
+    # Katılımcıları topla
+    participants = []
+    try:
+        async for u in client.iter_participants(chat_id, filter=flt):
+            if not job.get("active"):
+                break
+            if getattr(u, "bot", False) or getattr(u, "deleted", False):
+                continue
+            if my_id is not None and u.id == my_id:
+                continue
+            if u.id in blocked:
+                continue
+            participants.append(u)
+            if len(participants) >= 5000:
+                break
+    except (ChatAdminRequiredError, ChannelPrivateError):
+        if status:
+            try:
+                await status.edit("❌ **Üye listesine erişilemedi** (yönetici olmalısınız).")
+            except Exception:
+                pass
+        job["active"] = False
+        return
+    except Exception:
+        pass
+
+    total = len(participants)
+    job["total"] = total
+    if total == 0:
+        if status:
+            try:
+                await status.edit("❌ **Etiketlenecek kimse bulunamadı.**")
+            except Exception:
+                pass
+        job["active"] = False
+        return
+
+    tagged = 0
+    for i in range(0, total, group_size):
+        if not job.get("active"):
+            break
+        group = participants[i:i + group_size]
+        if not group:
+            continue
+
+        if picker:
+            msg_text = picker()
+            msg_ents = None
+        else:
+            msg_text = message
+            msg_ents = entities
+
+        separator = "\n\n"
+        start_offset = telegram_text_length(msg_text) + 2
+        try:
+            mention_text, mention_entities, ok_users = await build_mention_text_and_entities(
+                client, group, start_offset
+            )
+            full_message = f"{msg_text}{separator}{mention_text}"
+            all_entities = []
+            if msg_ents:
+                all_entities.extend(copy.deepcopy(msg_ents))
+            all_entities.extend(mention_entities)
+            if len(full_message) <= 4096:
+                await client.send_message(
+                    chat_id,
+                    full_message,
+                    formatting_entities=all_entities if all_entities else None,
+                    silent=True,
+                )
+                tagged += len(ok_users)
+                job["tagged"] = tagged
+        except FloodWaitError as e:
+            if status:
+                try:
+                    await status.edit(f"⏳ **FloodWait:** {e.seconds}s bekleniyor...")
+                except Exception:
+                    pass
+            await asyncio.sleep(e.seconds)
+            continue
+        except Exception:
+            continue
+
+        if status and (i % max(1, total // 10) == 0 or i + group_size >= total):
+            pct = min(100, (i + group_size) * 100 // total)
+            try:
+                await status.edit(
+                    f"⏳ **Etiketleniyor...** %{pct}\n"
+                    f"✅ {tagged}/{total}\n"
+                    f"⏱️ {interval:g}s\n\n"
+                    f"⏹️ Durdurmak için: `.tagstop`"
+                )
+            except Exception:
+                pass
+
+        await asyncio.sleep(interval)
+
+    finished = bool(job.get("active"))
+    job["active"] = False
+    if status:
+        try:
+            head = "✅ **Etiketleme tamamlandı!**" if finished else "⏹️ **Etiketleme durduruldu.**"
+            await status.edit(f"{head}\n✅ Etiketlenen: {tagged}/{total}")
+        except Exception:
+            pass
+
+
 @r(outgoing=True, pattern="^.tag(?: |$)(.*)")
 async def tag_all(q):
     """Tüm üyeleri etiketler"""
@@ -370,6 +1120,7 @@ async def tag_all(q):
         message_entities = reply_msg.entities
         is_reply = True
     
+    has_msg = bool(message_text)
     if not message_text:
         message_text = "📢"
     
@@ -405,50 +1156,7 @@ async def tag_all(q):
         await q.edit(f"❌ **Katılımcı listesi alınamadı:** `{str(e)}`")
         return
     
-    tag_data.update({
-        "mode": "all",
-        "message": message_text,
-        "message_entities": message_entities,
-        "group_size": group_size,
-        "started_by": q.sender_id,
-        "chat_id": q.chat_id,
-        "tagged_count": 0,
-        "skipped_count": 0,
-        "total_count": 0,
-        "is_reply": is_reply
-    })
-    
-    tag_active = True
-    
-    group_text = f" (📦 {group_size}'li grup)" if group_size > 1 else ""
-    
-    try:
-        status_msg = await q.edit(f"✅ **Etiketleme başlatıldı!**\n\n"
-                                 f"📝 **Mesaj:** `{message_text[:50]}{'...' if len(message_text) > 50 else ''}`\n"
-                                 f"👥 **Mod:** Tüm üyeler{group_text}\n"
-                                 f"⏱️ **Bekleme:** 2.5s (güvenli)\n\n"
-                                 f"Durdurmak için: `.tagstop`")
-    except:
-        status_msg = q
-    
-    tag_data["current_task"] = asyncio.create_task(
-        tag_process(q, chat, "all", status_msg, group_size)
-    )
-    
-    try:
-        await tag_data["current_task"]
-    except asyncio.CancelledError:
-        try:
-            await status_msg.edit(f"⏹️ **Etiketleme durduruldu!**\n\n"
-                                 f"✅ Etiketlenen: {tag_data['tagged_count']}\n"
-                                 f"❌ Atlanan: {tag_data['skipped_count']}")
-        except:
-            pass
-    except Exception as e:
-        try:
-            await status_msg.edit(f"❌ **Hata oluştu:** `{str(e)}`")
-        except:
-            pass
+    await _show_tag_panel(q, "all", message_text, message_entities, has_msg)
 
 
 @r(outgoing=True, pattern="^.tagadmin(?: |$)(.*)")
@@ -480,6 +1188,7 @@ async def tag_admins(q):
         message_entities = reply_msg.entities
         is_reply = True
     
+    has_msg = bool(message_text)
     if not message_text:
         message_text = "📢 Adminler!"
     
@@ -501,50 +1210,7 @@ async def tag_admins(q):
         await q.edit(f"❌ **Admin kontrolü yapılamadı:** `{str(e)}`")
         return
     
-    tag_data.update({
-        "mode": "admin",
-        "message": message_text,
-        "message_entities": message_entities,
-        "group_size": group_size,
-        "started_by": q.sender_id,
-        "chat_id": q.chat_id,
-        "tagged_count": 0,
-        "skipped_count": 0,
-        "total_count": 0,
-        "is_reply": is_reply
-    })
-    
-    tag_active = True
-    
-    group_text = f" (📦 {group_size}'li grup)" if group_size > 1 else ""
-    
-    try:
-        status_msg = await q.edit(f"✅ **Admin Etiketleme Başlatıldı!**\n\n"
-                                 f"📝 **Mesaj:** `{message_text[:50]}{'...' if len(message_text) > 50 else ''}`\n"
-                                 f"👑 **Mod:** Sadece Adminler{group_text}\n"
-                                 f"⏱️ **Bekleme:** 2.5s (güvenli)\n\n"
-                                 f"Durdurmak için: `.tagstop`")
-    except:
-        status_msg = q
-    
-    tag_data["current_task"] = asyncio.create_task(
-        tag_process(q, chat, "admin", status_msg, group_size)
-    )
-    
-    try:
-        await tag_data["current_task"]
-    except asyncio.CancelledError:
-        try:
-            await status_msg.edit(f"⏹️ **Etiketleme durduruldu!**\n\n"
-                                 f"✅ Etiketlenen: {tag_data['tagged_count']}\n"
-                                 f"❌ Atlanan: {tag_data['skipped_count']}")
-        except:
-            pass
-    except Exception as e:
-        try:
-            await status_msg.edit(f"❌ **Hata oluştu:** `{str(e)}`")
-        except:
-            pass
+    await _show_tag_panel(q, "admin", message_text, message_entities, has_msg)
 
 
 async def tag_process(q, chat, mode, status_msg, group_size=1):
@@ -753,35 +1419,39 @@ async def tag_process(q, chat, mode, status_msg, group_size=1):
 async def tag_stop(q):
     """Etiketlemeyi durdurur"""
     global tag_active, tag_data
-    
+
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
         return
-    
-    if not tag_active:
+
+    bot = _get_bot()
+    job = None
+    if bot is not None and hasattr(bot, "_tag_jobs"):
+        job = bot._tag_jobs.get(userbot_id)
+
+    active = bool(job and job.get("active")) or tag_active
+    if not active:
         try:
             await q.edit("❌ **Şu anda aktif bir etiketleme yok!**")
         except:
             pass
         return
-    
-    if q.sender_id != tag_data["started_by"]:
+
+    # Yeni buton akışı işini durdur (döngü son mesajdan sonra nazikçe biter)
+    if job:
+        job["active"] = False
+
+    # Eski akış (varsa)
+    tag_active = False
+    if tag_data.get("current_task"):
         try:
-            await q.edit("❌ **Bu etiketlemeyi sadece başlatan kişi durdurabilir!**")
+            tag_data["current_task"].cancel()
         except:
             pass
-        return
-    
-    tag_active = False
-    
-    if tag_data["current_task"]:
-        tag_data["current_task"].cancel()
-    
+
     try:
-        await q.edit(f"⏹️ **Etiketleme durduruldu!**\n\n"
-                    f"✅ Etiketlenen: {tag_data['tagged_count']}\n"
-                    f"❌ Atlanan: {tag_data['skipped_count']}\n"
-                    f"👥 Toplam Katılımcı: {tag_data['total_count']}")
+        await q.edit("⏹️ **Etiketleme durduruluyor...**\n"
+                     "Son gönderilen mesajdan sonra duracak.")
     except:
         pass
 
@@ -790,56 +1460,39 @@ async def tag_stop(q):
 async def tag_status(q):
     """Etiketleme durumunu gösterir"""
     global tag_active, tag_data
-    
+
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
         return
-    
-    if tag_active:
-        mode_text = "👥 Tüm Üyeler" if tag_data["mode"] == "all" else "👑 Sadece Adminler"
-        group_text = f" (📦 {tag_data['group_size']}'li grup)" if tag_data["group_size"] > 1 else ""
-        
-        has_premium_emoji = False
-        if tag_data.get("message_entities"):
-            for entity in tag_data["message_entities"]:
-                if isinstance(entity, MessageEntityCustomEmoji):
-                    has_premium_emoji = True
-                    break
-        
-        status_text = f"🟢 **ETİKETLEME AKTİF**\n\n"
-        status_text += f"📝 **Mesaj:** `{tag_data['message'][:50]}{'...' if len(tag_data['message']) > 50 else ''}`\n"
-        status_text += f"👤 **Mod:** {mode_text}{group_text}\n"
-        status_text += f"✅ **Etiketlenen:** {tag_data['tagged_count']}\n"
-        status_text += f"❌ **Atlanan:** {tag_data['skipped_count']}\n"
-        status_text += f"👥 **Toplam:** {tag_data['total_count']}\n"
-        status_text += f"⏱️ **Bekleme:** 2.5s (güvenli)\n"
-        
-        if blocked_users:
-            status_text += f"🚫 **Engelli:** {len(blocked_users)} kişi\n"
-        
-        if has_premium_emoji:
-            status_text += f"✨ **Premium Emoji:** Destekleniyor\n"
-        
-        if tag_data["is_reply"]:
-            status_text += f"📎 **Kaynak:** Yanıtlanan mesaj\n"
-        
-        status_text += f"\nDurdurmak için: `.tagstop`"
+
+    bot = _get_bot()
+    job = None
+    if bot is not None and hasattr(bot, "_tag_jobs"):
+        job = bot._tag_jobs.get(userbot_id)
+
+    if job and job.get("active"):
+        tagged = job.get("tagged", 0)
+        total = job.get("total", 0)
+        status_text = ("🟢 **ETİKETLEME AKTİF**\n\n"
+                       f"✅ **Etiketlenen:** {tagged}/{total}\n\n"
+                       "⏹️ Durdurmak için: `.tagstop`")
+    elif tag_active:
+        mode_text = "👥 Tüm Üyeler" if tag_data.get("mode") == "all" else "👑 Sadece Adminler"
+        status_text = ("🟢 **ETİKETLEME AKTİF**\n\n"
+                       f"👤 **Mod:** {mode_text}\n"
+                       f"✅ **Etiketlenen:** {tag_data.get('tagged_count', 0)}\n\n"
+                       "⏹️ Durdurmak için: `.tagstop`")
     else:
         await load_my_blocked_users(q.client)
-        
-        status_text = "🔴 **ETİKETLEME PASİF**\n\n"
-        status_text += "**Kullanım:**\n"
-        status_text += "• `.tag <mesaj>` - Tüm üyeleri etiketler\n"
-        status_text += "• `.tag <numara> <mesaj>` - Grup halinde etiketler\n"
-        status_text += "• `.tagadmin <mesaj>` - Sadece adminleri etiketler\n"
-        status_text += "• `.tagadmin <numara> <mesaj>` - Adminleri grup halinde etiketler\n"
-        status_text += "• `.tagstop` - Aktif etiketlemeyi durdurur\n\n"
-        
+        status_text = ("🔴 **ETİKETLEME PASİF**\n\n"
+                       "**Kullanım:**\n"
+                       "• `.tag <mesaj>` → Mesajla etiketle (buton paneli açılır)\n"
+                       "• `.tag` (boş) → Rastgele mesajlarla etiketle (kategori seçersin)\n"
+                       "• `.tagadmin <mesaj>` → Sadece adminleri etiketle\n"
+                       "• `.tagstop` → Aktif etiketlemeyi durdurur\n")
         if blocked_users:
-            status_text += f"🚫 **Engelli Kullanıcılar:** {len(blocked_users)} kişi\n\n"
-        
-        status_text += "**Varsayılan:** 1 kişi teker teker etiketlenir\n"
-    
+            status_text += f"\n🚫 **Engelli:** {len(blocked_users)} kişi\n"
+
     try:
         await q.edit(status_text)
     except:
