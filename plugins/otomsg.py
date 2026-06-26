@@ -406,6 +406,168 @@ async def _restore_tasks(client, me_id: int):
 
 
 # ==========================================
+# BUTONLU SAYFALAMA (liste cokmesini onler)
+# ==========================================
+
+OMSG_PAGE_SIZE = 5
+
+
+def _get_bot():
+    import sys
+    try:
+        if 'main' in sys.modules:
+            b = getattr(sys.modules['main'], 'bot', None)
+            if b is not None:
+                return b
+        import __main__
+        return getattr(__main__, 'bot', None)
+    except Exception:
+        return None
+
+
+def _get_bot_username():
+    try:
+        import config as cfg
+        u = getattr(cfg, 'BOT_USERNAME', '') or ''
+        if u:
+            return u.lstrip('@')
+    except Exception:
+        pass
+    try:
+        if os.path.exists('.bot_username'):
+            with open('.bot_username') as f:
+                return f.read().strip().lstrip('@')
+    except Exception:
+        pass
+    return ''
+
+
+def _render_omsg_lines(owner_id):
+    """Bu hesabin gorevlerini (JSON'dan, paylasimli) satir listesi olarak dondurur."""
+    raw = _load_tasks_raw().get(str(owner_id), {})
+    lines = []
+    for tid, t in raw.items():
+        repeat_text = "sınırsız" if t.get("repeat_count", 0) == 0 else f"{t.get('repeat_count')} kere"
+        status = t.get("status", "?")
+        emoji = {"running": "🟢", "stopped": "⏸️", "completed": "✅", "error": "⚠️"}.get(status, "⚪")
+        msg = t.get("message", "") or ""
+        msg_short = (msg[:60] + "…") if len(msg) > 60 else msg
+        interval = t.get("interval_label", str(t.get("interval_seconds", "?")) + "s")
+        lines.append(
+            f"🆔 `{tid}` · {emoji} {status}\n"
+            f"💬 {t.get('chat_title','?')} (`{t.get('chat_id','?')}`)\n"
+            f"⏱️ {interval} · 🔁 {repeat_text} · 📨 {t.get('sent_count', 0)}\n"
+            f"📝 `{msg_short}`"
+        )
+    return lines
+
+
+def _render_omsg_page(owner_id, page):
+    """(text, total_pages, total) dondurur."""
+    lines = _render_omsg_lines(owner_id)
+    total = len(lines)
+    if total == 0:
+        return "📭 **Görev yok.**", 0, 0
+    ps = OMSG_PAGE_SIZE
+    total_pages = (total + ps - 1) // ps
+    page = max(0, min(page, total_pages - 1))
+    chunk = lines[page * ps:(page + 1) * ps]
+    header = f"**📋 OtoMsg Görevleri** — sayfa {page + 1}/{total_pages} (toplam {total})\n"
+    body = "\n━━━━━━━━\n".join(chunk)
+    foot = "\n\n▶️ Hepsini başlat: `.otomsgstartall`  ·  ⏸️ Hepsini durdur: `.otomsgstopall`"
+    return header + "\n" + body + foot, total_pages, total
+
+
+def _omsg_page_buttons(owner, page, total_pages):
+    from telethon import Button
+    rows = []
+    nav = []
+    if page > 0:
+        nav.append(Button.inline("◀️", f"omsgpg_{owner}_{page - 1}".encode()))
+    nav.append(Button.inline(f"{page + 1}/{total_pages}", f"omsgpg_{owner}_{page}".encode()))
+    if page < total_pages - 1:
+        nav.append(Button.inline("▶️", f"omsgpg_{owner}_{page + 1}".encode()))
+    if nav:
+        rows.append(nav)
+    rows.append([
+        Button.inline("🔄 Yenile", f"omsgpg_{owner}_{page}".encode()),
+        Button.inline("❌ Kapat", f"omsgcls_{owner}".encode()),
+    ])
+    return rows
+
+
+def _register_otomsg_bot_handlers(bot):
+    if getattr(bot, "_otomsg_pag_registered", False):
+        return
+    bot._otomsg_pag_registered = True
+    from telethon import events
+    import re as _re
+
+    @bot.on(events.InlineQuery())
+    async def _omsg_inline(event):
+        m = _re.match(r"omsgl_(\d+)$", event.text or "")
+        if not m:
+            return
+        owner = int(m.group(1))
+        text, total_pages, total = _render_omsg_page(owner, 0)
+        try:
+            result = event.builder.article(
+                title="📋 OtoMsg Görevleri",
+                description=f"{total} görev",
+                text=text,
+                buttons=_omsg_page_buttons(owner, 0, total_pages) if total_pages else None,
+            )
+            await event.answer([result], cache_time=0)
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"omsgpg_(\d+)_(\d+)"))
+    async def _omsg_pg_cb(event):
+        owner = int(event.pattern_match.group(1))
+        page = int(event.pattern_match.group(2))
+        if event.sender_id != owner:
+            await event.answer("Bu liste sana ait değil.", alert=True)
+            return
+        text, total_pages, total = _render_omsg_page(owner, page)
+        try:
+            await event.edit(text, buttons=_omsg_page_buttons(owner, page, total_pages) if total_pages else None)
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"omsgcls_(\d+)"))
+    async def _omsg_cls_cb(event):
+        owner = int(event.pattern_match.group(1))
+        if event.sender_id != owner:
+            await event.answer("Bu liste sana ait değil.", alert=True)
+            return
+        try:
+            await event.edit("✅ Liste kapatıldı.")
+        except Exception:
+            pass
+
+
+async def _show_otomsg_list_panel(q, owner):
+    """Inline (bot uzerinden) butonlu liste panelini gosterir. Basarisizsa False."""
+    bot = _get_bot()
+    if bot is not None:
+        _register_otomsg_bot_handlers(bot)
+    bu = _get_bot_username()
+    if bot is not None and bu:
+        try:
+            results = await q.client.inline_query(bu, f"omsgl_{owner}")
+            if results:
+                await results[0].click(q.chat_id)
+                try:
+                    await q.delete()
+                except Exception:
+                    pass
+                return True
+        except Exception:
+            pass
+    return False
+
+
+# ==========================================
 # KOMUTLAR
 # ==========================================
 
@@ -563,36 +725,43 @@ async def otomsg_status(q):
 
 @r(outgoing=True, pattern=r"^\.otomsgl$")
 async def otomsg_list(q):
-    """Görev listesini detaylı göster."""
+    """Görev listesini butonlu/sayfalı gösterir (uzun listede çökmez)."""
     me = await q.client.get_me()
     if q.sender_id != me.id:
         return
 
     await load_my_tasks(q.client)
-
     if not tasks_data:
         await q.edit("📭 **Görev yok.**")
         return
 
-    lines = ["**📋 OtoMsg Görev Listesi**\n"]
-    for task_id, t in tasks_data.items():
-        repeat_text = "sınırsız" if t["repeat_count"] == 0 else f"{t['repeat_count']} kere"
-        created = time.strftime("%d.%m.%Y %H:%M", time.localtime(t["created_at"])) if t.get("created_at") else "?"
-        last_sent = time.strftime("%d.%m.%Y %H:%M", time.localtime(t["last_sent"])) if t.get("last_sent") else "Henüz gönderilmedi"
-        lines.append(
-            f"━━━━━━━━━━━━━━━\n"
-            f"🆔 **ID:** `{task_id}`\n"
-            f"💬 **Chat:** {t['chat_title']} (`{t['chat_id']}`)\n"
-            f"⏱️ **Aralık:** {t.get('interval_label', str(t.get('interval_seconds', t.get('interval_minutes',0)*60))+'s')}\n"
-            f"🔁 **Tekrar:** {repeat_text}\n"
-            f"📨 **Gönderilen:** {t.get('sent_count', 0)}\n"
-            f"📅 **Oluşturuldu:** {created}\n"
-            f"📬 **Son gönderim:** {last_sent}\n"
-            f"📊 **Durum:** {t.get('status', '?')}\n"
-            f"📝 **Mesaj:** `{t['message'][:80]}{'...' if len(t['message']) > 80 else ''}`"
-        )
+    # 1) Butonlu inline panel dene
+    ok = await _show_otomsg_list_panel(q, me.id)
+    if ok:
+        return
 
-    await q.edit("\n".join(lines))
+    # 2) Fallback: inline kapalıysa parçalı düz mesajlar (4096 limitini aşmaz)
+    lines = _render_omsg_lines(me.id)
+    blocks = []
+    cur = f"**📋 OtoMsg Görevleri** (toplam {len(lines)})\n"
+    for ln in lines:
+        piece = "\n━━━━━━━━\n" + ln
+        if len(cur) + len(piece) > 3800:
+            blocks.append(cur)
+            cur = ""
+        cur += piece
+    if cur:
+        blocks.append(cur)
+
+    try:
+        await q.edit(blocks[0])
+    except Exception:
+        pass
+    for b in blocks[1:]:
+        try:
+            await q.respond(b)
+        except Exception:
+            pass
 
 
 @r(outgoing=True, pattern=r"^\.otomsgdel(?: |$)(.*)")
@@ -788,6 +957,67 @@ async def otomsg_start(q):
     )
 
 
+@r(outgoing=True, pattern=r"^\.otomsgstartall$")
+async def otomsg_start_all(q):
+    """Tüm (tamamlanmamış) görevleri tek seferde başlatır."""
+    me = await q.client.get_me()
+    if q.sender_id != me.id:
+        return
+
+    await load_my_tasks(q.client)
+    if not tasks_data:
+        await q.edit("📭 **Görev yok.**")
+        return
+
+    started = 0
+    already = 0
+    for task_id, t in tasks_data.items():
+        if t.get("status") == "completed":
+            continue
+        t["status"] = "running"
+        t["last_error"] = None
+        if task_id not in running_tasks or running_tasks[task_id].done():
+            await _start_task(q.client, task_id, q.chat_id)
+            started += 1
+        else:
+            already += 1
+    await save_my_tasks(q.client)
+
+    await q.edit(
+        f"▶️ **Tüm görevler başlatıldı!**\n\n"
+        f"🆕 Yeni başlatılan: {started}\n"
+        f"🟢 Zaten çalışan: {already}"
+    )
+
+
+@r(outgoing=True, pattern=r"^\.otomsgstopall$")
+async def otomsg_stop_all(q):
+    """Tüm çalışan görevleri tek seferde durdurur."""
+    me = await q.client.get_me()
+    if q.sender_id != me.id:
+        return
+
+    await load_my_tasks(q.client)
+    if not tasks_data:
+        await q.edit("📭 **Görev yok.**")
+        return
+
+    stopped = 0
+    for task_id, t in tasks_data.items():
+        if t.get("status") == "running":
+            t["status"] = "stopped"
+            stopped += 1
+        if task_id in running_tasks:
+            try:
+                running_tasks[task_id].cancel()
+            except Exception:
+                pass
+            running_tasks.pop(task_id, None)
+    await save_my_tasks(q.client)
+
+    await q.edit(f"⏸️ **Tüm görevler durduruldu!**\n\nDurdurulan: {stopped}")
+
+
 @r(outgoing=True, pattern=r"^\.otomsghelp$")
 async def otomsg_help(q):
     """Detaylı yardım mesajı."""
@@ -835,11 +1065,13 @@ Göndermek istediğin mesajı **yanıtlayıp** şunu yaz:
 
 **📊 DURUM & LİSTE:**
 `.otomsgs` → Tüm görevlerin kısa durumu
-`.otomsgl` → Tüm görevlerin detaylı listesi
+`.otomsgl` → Tüm görevlerin **butonlu/sayfalı** listesi (uzun listede çökmez)
 
 **🎮 KONTROL:**
 `.otomsgstop <id>` → Görevi geçici durdur
 `.otomsgstart <id>` → Durdurulan görevi başlat
+`.otomsgstartall` → **Tüm** görevleri başlat (toplu)
+`.otomsgstopall` → **Tüm** görevleri durdur (toplu)
 `.otomsgdel <id>` → Görevi kalıcı sil
 
 **🚨 HATA YÖNETİMİ:**
@@ -868,17 +1100,28 @@ Bot yeniden başlasa bile aktif görevler devam eder.
 # ==========================================
 
 async def _on_start(client):
-    """Bot başlayınca çalışan görevleri yeniden yükle."""
+    """Bot/userbot başlayınca BU HESABIN çalışan görevlerini yeniden başlatır."""
     try:
+        # Client tam bağlanana kadar kısa bekle
+        await asyncio.sleep(5)
         me = await client.get_me()
         await _restore_tasks(client, me.id)
     except Exception:
         pass
 
 
-# Userbot'un start hook'una bağla (varsa)
+# Bu plugin örneğine bağlı USERBOT client'ını YÜK ANINDA yakala (bot değil!).
+# (Her hesap için plugin ayrı exec edildiğinden, set_client ile bağlanan
+#  doğru userbot client'ı bu noktada get_client() ile alınır.)
 try:
-    bot.loop.create_task(_on_start(bot))
+    from userbot.events import get_client as _get_bound_client
+    _omsg_my_client = _get_bound_client()
+except Exception:
+    _omsg_my_client = None
+
+try:
+    _omsg_loop = getattr(_omsg_my_client, "loop", None) or bot.loop
+    _omsg_loop.create_task(_on_start(_omsg_my_client if _omsg_my_client is not None else bot))
 except Exception:
     pass
 
@@ -895,6 +1138,8 @@ Help.add_command("otomsgstop <id>", None, "Görevi geçici durdurur")
 Help.add_command("otomsgstart <id>", None, "Durdurulan görevi yeniden başlatır")
 Help.add_command("otomsgkopyala <id> <yeni_chat>", None, "Görevin ayarlarını yeni bir chat için kopyalar")
 Help.add_command("otomsgdel <id>", None, "Görevi kalıcı olarak siler")
+Help.add_command("otomsgstartall", None, "Tüm görevleri tek seferde başlatır")
+Help.add_command("otomsgstopall", None, "Tüm görevleri tek seferde durdurur")
 Help.add_command("otomsghelp", None, "Detaylı yardım mesajı gösterir")
 Help.add_info("Gruplara/kanallara otomatik zamanlanmış mesaj gönderme — Hata yönetimli & çoklu chat!")
 Help.add()

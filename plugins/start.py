@@ -63,13 +63,17 @@ def get_bot():
     return None
 
 def register_bot_handlers(bot):
-    """Bot'a inline handler'ları kaydet (bir kez)"""
-    global _bot_handlers_registered
+    """Bot'a inline handler'ları TÜM hesaplar için yalnızca BİR kez kaydet."""
     
-    if _bot_handlers_registered or not bot:
+    if not bot:
+        return
+    # Her hesap start.py'yi ayrı modül olarak yüklediğinden modül-global
+    # bayrak ÇİFT KAYDA yol açıyordu (menü kendi kendine ileri-geri gidiyordu).
+    # Bayrağı paylaşılan bot nesnesinde tutmak bunu önler.
+    if getattr(bot, "_inline_start_registered", False):
         return
     
-    _bot_handlers_registered = True
+    bot._inline_start_registered = True
     
     # ==========================================
     # INLINE QUERY HANDLER

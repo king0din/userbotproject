@@ -1127,12 +1127,29 @@ async def run_tag_job(owner_id, chat_id, mode, group_size, interval,
 
     finished = bool(job.get("active"))
     job["active"] = False
+    # Üstteki ilerleme mesajını kısaca kapat (özet en alta gider)
     if status:
         try:
-            head = "✅ **Etiketleme tamamlandı!**" if finished else "⏹️ **Etiketleme durduruldu.**"
-            await status.edit(f"{head}\n✅ Etiketlenen: {tagged}/{total}")
+            await status.edit("✅ **Etiketleme bitti.**" if finished else "⏹️ **Etiketleme durduruldu.**")
         except Exception:
             pass
+    # Bitiş özetini EN ALTA yeni mesaj olarak gönder
+    try:
+        head = "✅ **Etiketleme işlemi sona erdi.**" if finished else "⏹️ **Etiketleme durduruldu.**"
+        await client.send_message(
+            chat_id,
+            f"{head}\n{total} kişiden {tagged} kişi etiketlendi.",
+            silent=True,
+        )
+    except Exception:
+        pass
+    # "Destekleyen @bot" satırını EN SON gönder
+    try:
+        _bu = _get_bot_username()
+        if _bu:
+            await client.send_message(chat_id, f"Destekleyen @{_bu}", silent=True)
+    except Exception:
+        pass
 
 
 @r(outgoing=True, pattern="^.tag(?: |$)(.*)")
