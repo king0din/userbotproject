@@ -349,264 +349,264 @@ def parse_tag_command(q):
 # ======================================================================
 TAG_PHRASES = {
     "gun": [
-        "🌅 Günaydın millet! Yeni güne enerjik başlayalım.",
-        "☀️ Hayırlı sabahlar! Bugün harika şeyler olacak.",
-        "🌞 Günaydın! Kahveler hazır mı?",
-        "🌤️ Sabah sabah herkese selam, günaydın!",
-        "🌅 Yeni gün, yeni umutlar. Günaydın arkadaşlar!",
-        "☕ Günaydın! Güne bir gülümsemeyle başla.",
-        "🌻 Günaydın canlar, bugün kendinize iyi bakın.",
-        "🌄 Günaydın! Bugün de elimizden geleni yapalım.",
-        "✨ Hayırlı sabahlar herkese, güzel bir gün olsun.",
-        "🐦 Kuşlar öttü, güneş doğdu, günaydın!",
-        "🌅 Günaydın! Bugün şansın açık olsun.",
-        "☀️ Sabahın bu güzel saatinde herkese günaydın.",
-        "🌞 Günaydın! Enerjiniz hiç bitmesin.",
-        "🍳 Kahvaltılar hazır mı? Günaydın millet!",
-        "🌼 Günaydın! Güzel bir gün sizi bekliyor.",
-        "🌅 Erken kalkan yol alır derler, günaydın!",
-        "💛 Günaydın! Bugün biraz daha mutlu olalım.",
-        "🌤️ Yeni günün ilk selamı sizlere, günaydın.",
-        "🌞 Günaydın! Pozitif kalmaya devam.",
-        "☕ İlk kahve içildi, günaydın arkadaşlar!",
-        "🌅 Günaydın! Bugün de bol kahkaha olsun.",
-        "🌻 Sabah enerjisiyle herkese günaydın!",
-        "🌅 Günaydın! Bugünü güzelleştirmek senin elinde.",
-        "☕ Kahveni al, gününe başla, günaydın!",
-        "🌞 Günaydın! Küçük adımlar büyük günler yapar.",
-        "🌼 Günaydın! Bugün birine iyilik yap.",
-        "🌈 Günaydın! Hava nasıl olursa olsun, sen parla.",
-        "🛌 Uyandık mı? Günaydın tembeller!",
-        "🌅 Günaydın! Listenin ilk maddesi: gülümse.",
-        "🍞 Taze ekmek kokusuyla günaydın!",
-        "🌞 Günaydın! Bugün biraz erken çıkalım.",
-        "💪 Günaydın! Bugün hedeflere bir adım daha.",
-        "🌅 Günaydın! Dünden bugüne hep daha iyi.",
-        "🌻 Günaydın! Enerjini doğru yerlere harca.",
-        "☀️ Günaydın! Güneş gibi içten ol.",
-        "🌄 Yeni güne merhaba, günaydın millet!",
-        "🍵 Çayını demle, günaydın arkadaşlar!",
-        "🌅 Günaydın! Bugün şükredecek çok şey var.",
-        "🐦 Günaydın! Kuşlar bile keyifli bugün.",
-        "🌞 Günaydın! Telefonları bırakıp güne bakalım.",
-        "🌼 Günaydın! Küçük mutluluklar peşinde koş.",
-        "☕ Günaydın! İlk yudum hep en güzeli.",
-        "🌅 Günaydın! Bugünün kahramanı sensin.",
-        "🌈 Günaydın! Renkli bir gün diliyorum.",
-        "💛 Günaydın! Kendine nazik davran bugün.",
-        "🌄 Günaydın! Dağ gibi sağlam dur.",
-        "🌞 Günaydın! Bugün biraz da kendine vakit ayır.",
-        "🍳 Günaydın! Kahvaltı en önemli öğün, atlama.",
-        "🌅 Günaydın! Bugün de bol enerji.",
-        "🌻 Günaydın! Gülümsemek bedava, bol bol yap.",
+        "{mention} günaydın, naber?",
+        "{mention} günaydın, iyi uyudun mu?",
+        "{mention} hadi kalk artık, günaydın 😄",
+        "{mention} günaydın, kahveni içtin mi?",
+        "{mention} günaydın be, bugün ne var ne yok?",
+        "{mention} kalktın mı sen, günaydın",
+        "{mention} günaydın, güzel bir gün olsun sana",
+        "{mention} selam, günaydın bakalım",
+        "{mention} günaydın, keyifler nasıl?",
+        "{mention} aç gözlerini, günaydın",
+        "{mention} günaydın, erkenci kuş",
+        "{mention} günaydın, kahvaltı ettin mi?",
+        "{mention} günaydın, bol şans bugün",
+        "{mention} hadi bakalım günaydın, başlayalım güne",
+        "{mention} günaydın, umarım güzel uyumuşsundur",
+        "{mention} günaydın, çayını koydun mu?",
+        "{mention} günaydın, nasıl gidiyor?",
+        "{mention} günaydın, bugün biraz daha iyi olsun",
+        "{mention} merhaba, günaydın diyeyim dedim",
+        "{mention} günaydın, yataktan çıkabildin mi?",
+        "{mention} günaydın, kolay gelsin bugün",
+        "{mention} günaydın, ne planın var bugün?",
+        "{mention} günaydın, üşenme kalk 😅",
+        "{mention} günaydın, gününe güzel başla",
+        "{mention} günaydın, sabah sabah selam",
+        "{mention} günaydın, hava güzelmiş bugün",
+        "{mention} günaydın, keyfin yerinde mi?",
+        "{mention} günaydın, hadi güne",
+        "{mention} günaydın, iyi ki varsın",
+        "{mention} günaydın, bol kahveli bir gün olsun",
+        "{mention} günaydın, nasıl bir uyku çektin?",
+        "{mention} günaydın, bugünü güzel geçir",
+        "{mention} günaydın, daha uyuyor musun yoksa?",
+        "{mention} günaydın, sana da iyi bir gün",
+        "{mention} günaydın, kalk gün ortası oldu 😄",
+        "{mention} günaydın, bugün işler nasıl?",
+        "{mention} günaydın, çabuk uyan da sohbet edelim",
+        "{mention} günaydın, sabahın hayrına",
+        "{mention} günaydın, dinlenebildin mi?",
+        "{mention} günaydın, hadi bir kahve içelim",
+        "{mention} günaydın, moralin yüksek olsun",
+        "{mention} günaydın, gözünü ovuştur ve kalk",
+        "{mention} günaydın, naber bakalım",
+        "{mention} günaydın, güzel bir gün seni bekliyor",
+        "{mention} günaydın, kahven sade mi sütlü mü?",
+        "{mention} günaydın, bugün kendine iyi davran",
+        "{mention} günaydın, hadi gözünü aç",
+        "{mention} günaydın, sabah oldu bile",
+        "{mention} günaydın, iyi günler sana",
+        "{mention} günaydın, ne haber, nasılsın?",
     ],
     "gec": [
-        "🌙 İyi geceler millet, tatlı rüyalar!",
-        "✨ Günü kapatıyoruz, herkese iyi geceler.",
-        "🌌 İyi geceler! Yarın görüşmek üzere.",
-        "💤 Uyku vakti geldi, tatlı uykular arkadaşlar.",
-        "🌠 İyi geceler! Rüyalarınız güzel olsun.",
-        "🌙 Gece oldu, herkese huzurlu uykular.",
-        "⭐ İyi geceler! Yorgunluk üstünüzden gitsin.",
-        "🌃 Günün son selamı, iyi geceler millet.",
-        "😴 İyi geceler! Yarın daha güzel olacak.",
-        "🌙 Tatlı rüyalar, dinlenmeye bakın.",
-        "✨ İyi geceler! Yıldızlar sizinle olsun.",
-        "🌌 Herkese iyi geceler, kafanızı dinleyin.",
-        "💤 Gözler kapanıyor, iyi geceler arkadaşlar.",
-        "🌠 İyi geceler! Güzel bir uyku çekin.",
-        "🌙 İyi geceler! Yarın enerjik kalkmak için dinlenin.",
-        "⭐ Günü güzel kapatalım, iyi geceler.",
-        "🌃 İyi geceler millet, kendinize iyi bakın.",
-        "😴 Tatlı uykular herkese, iyi geceler.",
-        "🌙 İyi geceler! Endişeleri yarına bırakın.",
-        "✨ Gece yarısı selamı, iyi geceler dostlar.",
-        "💤 İyi geceler! Huzurla uyuyun.",
-        "🌌 İyi geceler! Rüyalarda görüşürüz.",
-        "🌙 İyi geceler! Telefonları bırakıp dinlenin.",
-        "💤 İyi geceler! Yarın için güç toplayın.",
-        "🌌 İyi geceler! Bugünün yorgunluğu yarına kalmasın.",
-        "⭐ İyi geceler! Güzel düşüncelerle uyuyun.",
-        "🌠 İyi geceler! Bir dilek tutmayı unutmayın.",
-        "🌙 İyi geceler! Sabaha dinç uyanın.",
-        "😴 İyi geceler! Gözleriniz kapanıyor.",
-        "🌃 İyi geceler! Şehir uyudu, sıra sizde.",
-        "💫 İyi geceler! Yıldızları sayarken uyuyun.",
-        "🌙 İyi geceler! Kendinize bir mola verin.",
-        "🛌 İyi geceler! Yatak sizi çağırıyor.",
-        "✨ İyi geceler! Yarın yeni bir sayfa.",
-        "🌌 İyi geceler! Huzurla gözlerinizi kapatın.",
-        "⭐ İyi geceler! Bugünü güzel kapatın.",
-        "🌠 İyi geceler! Rüyalarınız umut dolsun.",
-        "😴 İyi geceler! Derin bir nefes alın, uyuyun.",
-        "🌙 İyi geceler! Yarın her şey daha iyi olacak.",
-        "💤 İyi geceler! Dinlenmek de bir başarıdır.",
-        "🌃 İyi geceler! Kafanızı boşaltıp uyuyun.",
-        "✨ İyi geceler! Yastığa başınızı koyun, rahatlayın.",
-        "🌌 İyi geceler! Endişeleri yarına erteleyin.",
-        "⭐ İyi geceler! İyi insanlar iyi uyur.",
-        "🌙 İyi geceler! Bugün yeterince yoruldunuz.",
-        "😴 İyi geceler! Tatlı bir uyku hak ettiniz.",
-        "💫 İyi geceler! Yarın görüşmek üzere.",
-        "🛌 İyi geceler! Sıcacık yatağınızın keyfini çıkarın.",
-        "🌠 İyi geceler! Gece güzeldir, uykunuz da öyle olsun.",
-        "🌙 İyi geceler! Sessizliğin tadını çıkarın.",
+        "{mention} iyi geceler, tatlı rüyalar",
+        "{mention} iyi geceler, rahat bir uyku çek",
+        "{mention} hadi iyi geceler, yarın görüşürüz",
+        "{mention} iyi geceler, güzel uykular sana",
+        "{mention} iyi geceler, yorgunsundur, dinlen",
+        "{mention} iyi geceler, kafanı dinle biraz",
+        "{mention} iyi geceler, yarın daha iyi olacak",
+        "{mention} iyi geceler, gözlerin kapanıyordur",
+        "{mention} iyi geceler, mışıl mışıl uyu",
+        "{mention} iyi geceler, bugünlük bu kadar",
+        "{mention} iyi geceler, yatağa geçme vakti",
+        "{mention} iyi geceler, rüyanda güzel şeyler gör",
+        "{mention} iyi geceler, telefonu bırak da uyu 😄",
+        "{mention} iyi geceler, yarın enerjik kalk",
+        "{mention} iyi geceler, huzurlu uykular",
+        "{mention} iyi geceler, kendine iyi bak",
+        "{mention} iyi geceler, hadi gözünü kapat",
+        "{mention} iyi geceler, güzel bir uyku hak ettin",
+        "{mention} iyi geceler, yorgunluğun geçsin",
+        "{mention} iyi geceler, sabah görüşmek üzere",
+        "{mention} iyi geceler, deliksiz bir uyku dilerim",
+        "{mention} iyi geceler, bugünü geride bırak",
+        "{mention} iyi geceler, yastığa kafanı koy ve rahatla",
+        "{mention} iyi geceler, hayırlı geceler",
+        "{mention} iyi geceler, uykun bölünmesin",
+        "{mention} iyi geceler, yarın yeni bir gün",
+        "{mention} iyi geceler, tatlı tatlı uyu",
+        "{mention} iyi geceler, dinlenmeye bak",
+        "{mention} iyi geceler, gece güzeldir, uykun da öyle olsun",
+        "{mention} iyi geceler, biraz dinlen artık",
+        "{mention} iyi geceler, gözün açık kalmasın",
+        "{mention} iyi geceler, rüyalar tatlı olsun",
+        "{mention} iyi geceler, derin bir uyku çek",
+        "{mention} iyi geceler, yorulduysan dinlen",
+        "{mention} iyi geceler, yarına güçlü uyan",
+        "{mention} iyi geceler, kapat gözlerini",
+        "{mention} iyi geceler, sıcak yatağın keyfini çıkar",
+        "{mention} iyi geceler, güzel düşlere dal",
+        "{mention} iyi geceler, sabaha dinç çık",
+        "{mention} iyi geceler, bugün yoruldun, uyu artık",
+        "{mention} iyi geceler, rahat uykular",
+        "{mention} iyi geceler, yıldızları say ve uyu",
+        "{mention} iyi geceler, kafanı boşalt biraz",
+        "{mention} iyi geceler, hadi uykuya",
+        "{mention} iyi geceler, erken kalkacaksan dinlen",
+        "{mention} iyi geceler, mutlu uyu",
+        "{mention} iyi geceler, yarın bol enerji",
+        "{mention} iyi geceler, gece yarısı oldu, uyu",
+        "{mention} iyi geceler, tatlı uykular dilerim",
+        "{mention} iyi geceler, görüşürüz yarın",
     ],
     "sor": [
-        "❓ Bugün nasıl geçti? Anlatın bakalım.",
-        "🤔 Sizce bugünün en güzel anı neydi?",
-        "💬 Canınız ne yapmak istiyor şu an?",
-        "❓ Akşam yemeğinde ne var? Merak ettim.",
-        "🤔 Hafta sonu planınız ne?",
-        "💭 En son hangi filmi izlediniz?",
-        "❓ Şu an hangi şarkıyı dinliyorsunuz?",
-        "🤔 Bugün kim ne öğrendi?",
-        "💬 Bir tatil olsa nereye giderdiniz?",
-        "❓ Kahve mi çay mı? Net cevap bekliyorum.",
-        "🤔 Bugün sizi ne mutlu etti?",
-        "💭 En sevdiğiniz mevsim hangisi?",
-        "❓ Şu an aklınızdan ne geçiyor?",
-        "🤔 Bu gruba ne zaman katıldınız, hatırlıyor musunuz?",
-        "💬 Bir süper güç olsa hangisini seçerdiniz?",
-        "❓ Bugün kaç bardak su içtiniz?",
-        "🤔 En son ne zaman kahkaha attınız?",
-        "💭 Hayalinizdeki meslek neydi?",
-        "❓ Şu an mutlu musunuz? Dürüst olun.",
-        "🤔 Bugün kendinize iyi baktınız mı?",
-        "💬 En sevdiğiniz yemek nedir?",
-        "❓ Bu akşam ne yapıyorsunuz?",
-        "❓ Bugünün bir kelimeyle özeti nedir?",
-        "🤔 Şu an bir yere ışınlansanız nereye?",
-        "💬 En sevdiğiniz çocukluk anınız hangisi?",
-        "❓ Bugün öğrendiğiniz yeni bir şey var mı?",
-        "🤔 Sabah insanı mısınız, gece insanı mı?",
-        "💭 Hangi diziyi baştan izlemek isterdiniz?",
-        "❓ Şu an bir tatlı olsa hangisi olurdu?",
-        "🤔 En son ne zaman gerçekten dinlendiniz?",
-        "💬 Bir kitap mı, bir film mi? Hangisi?",
-        "❓ Bugün kaç kez gülümsediniz?",
-        "🤔 Dağ mı deniz mi? Net karar.",
-        "💭 Hangi şehirde yaşamak isterdiniz?",
-        "❓ Şu an yanınızda kim olsun isterdiniz?",
-        "🤔 En sevdiğiniz koku nedir?",
-        "💬 Bir yeteneğiniz olsa hangisi olsun?",
-        "❓ Bugün kendinize ne sözü verdiniz?",
-        "🤔 Yağmuru mu seversiniz, güneşi mi?",
-        "💭 En son ne zaman yeni bir şey denediniz?",
-        "❓ Şu an çalan bir şarkı var mı kafanızda?",
-        "🤔 Hangi mevsimde doğdunuz?",
-        "💬 En sevdiğiniz atıştırmalık nedir?",
-        "❓ Bugün size güzel gelen bir an oldu mu?",
-        "🤔 Bir hayvan olsanız hangisi olurdunuz?",
-        "💭 Hangi ülkeyi gezmek isterdiniz?",
-        "❓ Sabah ilk işiniz ne olur?",
-        "🤔 En çok neye gülersiniz?",
-        "💬 Bugün birine teşekkür ettiniz mi?",
-        "❓ Şu an canınız ne çekiyor?",
+        "{mention} naber, nasılsın?",
+        "{mention} bugün ne yaptın bakalım?",
+        "{mention} kahve mi çay mı, hangisi?",
+        "{mention} akşama ne yiyorsun?",
+        "{mention} hafta sonu planın ne?",
+        "{mention} en son hangi diziyi izledin?",
+        "{mention} şu an ne dinliyorsun?",
+        "{mention} nasıl gidiyor hayat?",
+        "{mention} bir tatil olsa nereye giderdin?",
+        "{mention} bugün keyfin nasıl?",
+        "{mention} en sevdiğin mevsim hangisi?",
+        "{mention} şu an aklında ne var?",
+        "{mention} bu gruba ne zaman katıldın hatırlıyor musun?",
+        "{mention} canın ne yapmak istiyor?",
+        "{mention} bugün kaç kahve içtin?",
+        "{mention} en son ne zaman güldün?",
+        "{mention} dağ mı deniz mi?",
+        "{mention} bugün nasıldı, anlat",
+        "{mention} ne işle meşgulsün şu an?",
+        "{mention} sabahçı mısın gececi mi?",
+        "{mention} en sevdiğin yemek ne?",
+        "{mention} bu akşam ne yapıyorsun?",
+        "{mention} hangi şehirde yaşamak isterdin?",
+        "{mention} bugün seni ne mutlu etti?",
+        "{mention} film mi kitap mı?",
+        "{mention} su içtin mi bugün?",
+        "{mention} en sevdiğin içecek ne?",
+        "{mention} bir süper gücün olsa ne olurdu?",
+        "{mention} bugün havalar nasıl orada?",
+        "{mention} ne zamandır buradasın?",
+        "{mention} şu sıralar en sevdiğin şarkı ne?",
+        "{mention} bugün kendine vakit ayırdın mı?",
+        "{mention} yağmuru mu seversin güneşi mi?",
+        "{mention} en son ne öğrendin?",
+        "{mention} canın tatlı mı çekiyor tuzlu mu?",
+        "{mention} bugün planların tuttu mu?",
+        "{mention} hangi ülkeyi gezmek isterdin?",
+        "{mention} şu an mutlu musun?",
+        "{mention} en sevdiğin atıştırmalık ne?",
+        "{mention} bugün nasıl bir gündü?",
+        "{mention} sabah ilk işin ne olur?",
+        "{mention} en çok neye gülersin?",
+        "{mention} bir hayvan olsan ne olurdun?",
+        "{mention} bugün birine iyilik yaptın mı?",
+        "{mention} şu an canın ne çekiyor?",
+        "{mention} hangi diziyi baştan izlerdin?",
+        "{mention} bugün enerjin nasıl?",
+        "{mention} en sevdiğin koku ne?",
+        "{mention} ne yapıyorsun şu an?",
+        "{mention} bugün gününü nasıl geçirdin?",
     ],
     "kom": [
-        "😂 Bugün o kadar yoruldum ki kahvem bile yorgun.",
-        "🤣 Hayat bana limon verdi, ben de unuttum nereye koyduğumu.",
-        "😆 Diyet yapıyorum: sadece üzgünken yemiyorum, hep mutluyum.",
-        "😂 Uyku tulumum yok ama uyku yeteneğim profesyonel.",
-        "🤣 Sabah alarmıyla aramızda eski bir husumet var.",
-        "😆 Para biriktiriyorum, şu an 3 lira oldu, neredeyse zenginim.",
-        "😂 Spor salonuna baktım, o da bana baktı, anlaştık görüşmedik.",
-        "🤣 Planım vardı ama plan beni terk etti.",
-        "😆 Wifi gidince hayatımın anlamını sorguladım.",
-        "😂 Pazartesi yine geldi, davet eden kim?",
-        "🤣 Aynaya baktım, aynaya da 'kötü gün' demişler.",
-        "😆 Bugün hiçbir şey yapmadım, dünden kalanları bitiriyorum.",
-        "😂 Erken yatacaktım ama telefon izin vermedi.",
-        "🤣 Motivasyonum sabah çıktı, hâlâ dönmedi.",
-        "😆 Yemek yapmayı biliyorum, sadece mutfak benden korkuyor.",
-        "😂 Bugün adımsayar açtım: 47 adım, sporcuyum resmen.",
-        "🤣 Çay demledim, unuttum, buz çayı oldu, yeni icat.",
-        "😆 Listeye 'liste yapmak' yazdım, ilk maddeyi tamamladım.",
-        "😂 Kahve içmeden konuşmayın benimle, kural bu.",
-        "🤣 Bugün aynayı sildim, ben de parladım.",
-        "😆 Tatil planı: yatak, atıştırmalık, tekrar yatak.",
-        "😂 Akıllı telefon var ama sahibi hâlâ gelişiyor.",
-        "😂 Bugün enerjim full... şarj aletini bulamıyorum ama.",
-        "🤣 Hayat kısa, ben de uykuyu uzatıyorum.",
-        "😆 Bugün üretken oldum: 3 sekme açtım, hepsini kapattım.",
-        "😂 Diyetteyim, sadece gördüğümü yiyorum.",
-        "🤣 Plan A çöktü, alfabe uzun, idare ederiz.",
-        "😆 Sabah sporu yaptım: yataktan kalktım.",
-        "😂 Bugün kendime söz verdim, sözüme güvenmedim.",
-        "🤣 Telefonum %1, ben %2 enerjiyle hayattayım.",
-        "😆 Kahve içtim, hâlâ uyuyorum, kahve de yorulmuş.",
-        "😂 Bugün takvime baktım, takvim de bana baktı.",
-        "🤣 Düzenli biriyim: her şey düzenli şekilde dağınık.",
-        "😆 Aklımda bir fikir vardı, gitti, gelirse söylerim.",
-        "😂 Bugün erken kalktım, sonra erken pişman oldum.",
-        "🤣 Spor kıyafetim var, spor yapmaya gerek kalmadı.",
-        "😆 Yemek tarifine baktım, malzemeyi gördüm, vazgeçtim.",
-        "😂 Bugün su içtim, sağlıklı yaşam başladı, biter umarım.",
-        "🤣 Alarmı erteledim, hayatı da öyle.",
-        "😆 Bugün hiç stres yapmadım, stresi yarına bıraktım.",
-        "😂 Beynim sınırsız, sadece bağlantı kopuk.",
-        "🤣 Bugün adım attım: buzdolabına kadar.",
-        "😆 Listeyi yaptım, listeyi kaybettim, denge bu.",
-        "😂 Pazartesi geldi, kapıyı açan ben değilim.",
-        "🤣 Uyku borcum o kadar büyük ki faizi var.",
-        "😆 Bugün motive oldum, sonra geçti, normale döndüm.",
-        "😂 Telefonu şarja taktım, ben de fişe girsem keşke.",
-        "🤣 Bugün ayna bana 'kolay gelsin' dedi.",
-        "😆 İş yapacaktım, iş benden önce davrandı.",
-        "😂 Bugün de kahve, yarın da kahve, sistem bu.",
+        "{mention} yine mi buradasın, hiç mi işin yok 😄",
+        "{mention} seni görmeyeli özlemişim, neredeydin?",
+        "{mention} bugün de online, helal sana",
+        "{mention} kaybolmuşsun, nerelerdeydin bakalım",
+        "{mention} az çalış biraz, yorulacaksın 😅",
+        "{mention} sessiz kalma, bir şeyler yaz",
+        "{mention} seni etiketledim, kaçış yok artık",
+        "{mention} buralarda mısın yoksa uyudun mu?",
+        "{mention} bir merhaba bile mi yok kanka",
+        "{mention} bu sessizlik de ne, konuşsana 😄",
+        "{mention} çay koy bize de",
+        "{mention} nerede kaybettik seni?",
+        "{mention} bir haber ver, merak ettik",
+        "{mention} yine kayıplara karıştın",
+        "{mention} aç telefonu, seni arıyoruz",
+        "{mention} bu kadar sessizlik suç sayılır 😄",
+        "{mention} seni buraya almışlar, hayırdır",
+        "{mention} uyuma, sohbet var",
+        "{mention} biraz ortaya çık bakalım",
+        "{mention} seni de görelim arada",
+        "{mention} yaz bir şeyler, parmakların mı yoruldu",
+        "{mention} hayalet gibisin, görünmez oldun",
+        "{mention} buraya gel, muhabbet kuruyoruz",
+        "{mention} seni etiketlemesem unutacaktın bizi",
+        "{mention} online görünüp yazmamak ne iş 😄",
+        "{mention} az gülümse, bedava",
+        "{mention} neredesin, yine kahve mi içiyorsun",
+        "{mention} bir selam çak en azından",
+        "{mention} seni bulmak define avı gibi",
+        "{mention} grup seni özledi, dön artık",
+        "{mention} bu sessizliğin şifresi ne 😅",
+        "{mention} yaz da bir hayat belirtisi görelim",
+        "{mention} kaçma, yakaladım seni",
+        "{mention} biraz da sen konuş, biz yorulduk",
+        "{mention} seni görünce keyifler yerine geldi",
+        "{mention} telefonu bırak demiyorum ama yaz biraz",
+        "{mention} burada mısın gerçekten?",
+        "{mention} merhaba de, zor değil 😄",
+        "{mention} seni etiketledim, görmezden gelme",
+        "{mention} nerelerde geziyorsun bakalım",
+        "{mention} az ortaya çık, özledik",
+        "{mention} sessiz sedasız geçme, selam ver",
+        "{mention} bir kahve ısmarla bari",
+        "{mention} grup seni bekliyor",
+        "{mention} uyandın mı yoksa hâlâ rüyada mısın",
+        "{mention} yaz bir şey, sıkıldık 😅",
+        "{mention} seni de aramıza alalım",
+        "{mention} kaybolma, buradayız",
+        "{mention} merhaba demeye üşenme",
+        "{mention} hadi bir laf et bakalım",
     ],
     "sog": [
-        "🥶 Balık neden okula gidemedi? Çünkü oltaya gelmedi.",
-        "🧊 Kazağımı dolaba astım, şimdi o da 'asabi' oldu.",
-        "🥶 Çaydanlık neden mutlu? Çünkü kaynamaktan keyif alıyor.",
-        "🧊 Bilgisayara espri yaptım, 'işlemedi' dedi.",
-        "🥶 Limon neden üzgün? Çünkü içi ekşidi.",
-        "🧊 Saat neden yoruldu? Çünkü hep akrep peşinde.",
-        "🥶 Patates neden ünlü oldu? Çünkü kızarmaktan çekinmedi.",
-        "🧊 Defter neden sustu? Çünkü çizgiyi aştı.",
-        "🥶 Buzdolabı neden konuşmadı? Çünkü içi soğuktu.",
-        "🧊 Kalem neden küstü? Çünkü ucu bana dokundu.",
-        "🥶 Süt neden koştu? Çünkü kaçık oldu.",
-        "🧊 Ampul neden parladı? Çünkü fikri vardı.",
-        "🥶 Pencere neden açıldı? Çünkü cam sıkıldı.",
-        "🧊 Ekmek neden kızdı? Çünkü dilimlendi.",
-        "🥶 Telefon neden titredi? Çünkü mesaj korkuttu.",
-        "🧊 Çorap neden kayboldu? Çünkü tek başına gezmeyi sevdi.",
-        "🥶 Masa neden sessiz? Çünkü ayakları bağlı.",
-        "🧊 Kapı neden gülümsedi? Çünkü kolu okşandı.",
-        "🥶 Bardak neden doldu? Çünkü sabrı taştı.",
-        "🧊 Mum neden eridi? Çünkü içi yandı.",
-        "🥶 Bulut neden ağladı? Çünkü içine attı.",
-        "🧊 Anahtar neden döndü? Çünkü kilitlenip kaldı.",
-        "🥶 Kalem neden yarışı kaybetti? Çünkü ucu kırıldı.",
-        "🧊 Çatal neden küstü? Çünkü kaşığa kaşık attılar.",
-        "🥶 Lamba neden sustu? Çünkü düğmeye basıldı.",
-        "🧊 Tabak neden kızdı? Çünkü hep ortaya konuldu.",
-        "🥶 Pil neden yoruldu? Çünkü hep şarj oldu.",
-        "🧊 Halı neden sessiz? Çünkü hep ezildi.",
-        "🥶 Klima neden mutlu? Çünkü havası var.",
-        "🧊 Perde neden çekildi? Çünkü utandı.",
-        "🥶 Sandalye neden kalkamadı? Çünkü ayakları sabit.",
-        "🧊 Kibrit neden parladı? Çünkü sürtüşme yaşadı.",
-        "🥶 Lastik neden döndü? Çünkü yolu sevdi.",
-        "🧊 Battaniye neden sıcak? Çünkü içine attı.",
-        "🥶 Fincan neden doldu? Çünkü çay ısrarcıydı.",
-        "🧊 Saksı neden büyüdü? Çünkü içinde umut vardı.",
-        "🥶 Kalemtıraş neden döndü? Çünkü baş döndürdü.",
-        "🧊 Yastık neden yumuşadı? Çünkü baş ağrıttı.",
-        "🥶 Kapı zili neden çaldı? Çünkü çalınası geldi.",
-        "🧊 Cam neden buğulandı? Çünkü içi geçti.",
-        "🥶 Çekmece neden kapandı? Çünkü içine kapanıktı.",
-        "🧊 Priz neden şaşırdı? Çünkü fişi gördü.",
-        "🥶 Makas neden ayrıldı? Çünkü araları açıldı.",
-        "🧊 Tencere neden taştı? Çünkü kaynayası geldi.",
-        "🥶 Çorba neden sıcaktı? Çünkü ortam gergindi.",
-        "🧊 Ütü neden kızdı? Çünkü buruşukluğa dayanamadı.",
-        "🥶 Buz neden eridi? Çünkü ortam ısındı.",
-        "🧊 Sünger neden doldu? Çünkü her şeyi içine attı.",
-        "🥶 Musluk neden ağladı? Çünkü damla damla doldu.",
-        "🧊 Terlik neden kayboldu? Çünkü tek ayak üstünde kaldı.",
+        "{mention} sana bir fıkra: balık neden okula gidemedi? oltaya gelmedi 🥶",
+        "{mention} soğuk bir tane: limonun derdi neymiş? içi ekşimiş",
+        "{mention} bunu duydun mu, saat neden yorulur? hep akrep peşinde",
+        "{mention} sana özel: çaydanlık neden mutlu? kaynamaya bayılıyor",
+        "{mention} bir tane patlatayım: ampul neden parladı? aklına fikir geldi",
+        "{mention} dinle: defter neden sustu? çizgiyi aştı",
+        "{mention} hazır mısın: ekmek neden küstü? dilimlendi",
+        "{mention} şuna gül: buzdolabı neden konuşmaz? içi soğuk",
+        "{mention} sana bir tane: kalem neden kırıldı? baskıya dayanamadı",
+        "{mention} soğuktan donduracak: süt neden kaçtı? kaçık oldu",
+        "{mention} al sana espri: pencere neden açıldı? cam sıkıldı",
+        "{mention} bak: mum neden eridi? içten içe yandı",
+        "{mention} bir tane daha: bulut neden ağladı? içine attı",
+        "{mention} dinle bakalım: anahtar neden döndü? kilitlenip kaldı",
+        "{mention} şunu duy: priz neden şaşırdı? fişi gördü",
+        "{mention} sana özel: makas neden ayrıldı? araları açıldı",
+        "{mention} gülmek yasak: tencere neden taştı? kaynayası geldi",
+        "{mention} al bakalım: ütü neden kızdı? buruşukluğa dayanamadı",
+        "{mention} bir soğuk: sünger neden doldu? her şeyi içine attı",
+        "{mention} dinle: musluk neden ağladı? damla damla doldu",
+        "{mention} sana fıkra: terlik neden kayboldu? tek ayak üstünde kaldı",
+        "{mention} hazır ol: lamba neden sustu? düğmeye basıldı",
+        "{mention} şunu beğen: tabak neden kızdı? hep ortaya kondu",
+        "{mention} bir tane: pil neden yoruldu? hep şarj oldu",
+        "{mention} al sana: halı neden sessiz? hep ezildi",
+        "{mention} dinle: klima neden mutlu? havası var",
+        "{mention} gül bakalım: perde neden çekildi? utandı",
+        "{mention} sana özel: kibrit neden parladı? biraz sürtüşme yaşadı",
+        "{mention} bir soğuk espri: battaniye neden sıcak? içine attı",
+        "{mention} şunu duy: fincan neden doldu? çay ısrarcıydı",
+        "{mention} al bakalım: saksı neden büyüdü? içinde umut vardı",
+        "{mention} dinle: yastık neden yumuşadı? baş ağrıttı",
+        "{mention} sana fıkra: cam neden buğulandı? içi geçti",
+        "{mention} bir tane daha: çekmece neden kapandı? içine kapanıktı",
+        "{mention} hazır mısın: çorba neden sıcaktı? ortam gergindi",
+        "{mention} şunu beğen: buz neden eridi? ortam ısındı",
+        "{mention} al sana espri: kapı neden gülümsedi? kolu okşandı",
+        "{mention} dinle bakalım: bardak neden doldu? sabrı taştı",
+        "{mention} gül: sandalye neden kalkamadı? ayakları sabit",
+        "{mention} sana özel: lastik neden döndü? yolu sevdi",
+        "{mention} bir soğuk: kalemtıraş neden döndü? başını döndürdü",
+        "{mention} şunu duy: zil neden çaldı? çalınası geldi",
+        "{mention} al bakalım: masa neden sessiz? ayakları bağlı",
+        "{mention} dinle: çatal neden küstü? kaşığa kaşık attılar",
+        "{mention} sana fıkra: telefon neden titredi? mesaj korkuttu",
+        "{mention} bir tane: çorap neden kayboldu? yalnız gezmeyi sevdi",
+        "{mention} hazır ol: kazak neden asabi? dolaba asıldı",
+        "{mention} şunu beğen: patates neden ünlü? kızarmaktan çekinmedi",
+        "{mention} al sana: bilgisayara espri yaptım, 'işlemedi' dedi",
+        "{mention} son bir tane: limon neden üzgün? içi ekşidi",
     ],
 }
 
@@ -949,6 +949,57 @@ async def _show_tag_panel(q, mode, message_text, message_entities, has_msg):
             pass
 
 
+async def _compose_message(client, template, template_entities, group):
+    """
+    Etiket mesajini kurar.
+    - template icinde {mention} varsa: etiket(ler) tam o konuma yerlestirilir;
+      placeholder sonrasi entity'ler (premium emoji vb.) UTF-16 farkina gore kaydirilir.
+    - {mention} yoksa: eski davranis -> mesaj + bos satir + altta etiketler.
+    Donus: (final_text, final_entities, ok_users)
+    """
+    PH = "{mention}"
+    if PH in template:
+        idx = template.index(PH)
+        before = template[:idx]
+        after = template[idx + len(PH):]
+        before_u16 = telegram_text_length(before)
+        ph_u16 = telegram_text_length(PH)
+
+        mention_text, mention_entities, ok_users = await build_mention_text_and_entities(
+            client, group, before_u16
+        )
+        m_u16 = telegram_text_length(mention_text)
+        shift = m_u16 - ph_u16
+
+        final_text = before + mention_text + after
+        final_entities = []
+        for e in (template_entities or []):
+            e_start = e.offset
+            e_end = e.offset + e.length
+            if e_end <= before_u16:
+                final_entities.append(copy.deepcopy(e))
+            elif e_start >= before_u16 + ph_u16:
+                ne = copy.deepcopy(e)
+                ne.offset = e_start + shift
+                final_entities.append(ne)
+            # placeholder ile cakisan entity'ler atlanir
+        final_entities.extend(mention_entities)
+        return final_text, final_entities, ok_users
+
+    # {mention} yok -> klasik: mesaj + bos satir + altta etiketler
+    separator = "\n\n"
+    start_offset = telegram_text_length(template) + telegram_text_length(separator)
+    mention_text, mention_entities, ok_users = await build_mention_text_and_entities(
+        client, group, start_offset
+    )
+    final_text = f"{template}{separator}{mention_text}"
+    final_entities = []
+    if template_entities:
+        final_entities.extend(copy.deepcopy(template_entities))
+    final_entities.extend(mention_entities)
+    return final_text, final_entities, ok_users
+
+
 # ======================================================================
 # ASIL ETIKETLEME ISI (client tabanli, bot callback'inden baslatilir)
 # ======================================================================
@@ -1036,17 +1087,10 @@ async def run_tag_job(owner_id, chat_id, mode, group_size, interval,
             msg_text = message
             msg_ents = entities
 
-        separator = "\n\n"
-        start_offset = telegram_text_length(msg_text) + 2
         try:
-            mention_text, mention_entities, ok_users = await build_mention_text_and_entities(
-                client, group, start_offset
+            full_message, all_entities, ok_users = await _compose_message(
+                client, msg_text, msg_ents, group
             )
-            full_message = f"{msg_text}{separator}{mention_text}"
-            all_entities = []
-            if msg_ents:
-                all_entities.extend(copy.deepcopy(msg_ents))
-            all_entities.extend(mention_entities)
             if len(full_message) <= 4096:
                 await client.send_message(
                     chat_id,
@@ -1488,6 +1532,7 @@ async def tag_status(q):
                        "**Kullanım:**\n"
                        "• `.tag <mesaj>` → Mesajla etiketle (buton paneli açılır)\n"
                        "• `.tag` (boş) → Rastgele mesajlarla etiketle (kategori seçersin)\n"
+                       "• Mesaja `{mention}` koyarsan etiket oraya gelir\n"
                        "• `.tagadmin <mesaj>` → Sadece adminleri etiketle\n"
                        "• `.tagstop` → Aktif etiketlemeyi durdurur\n")
         if blocked_users:
@@ -1712,67 +1757,46 @@ async def tag_help(q):
         return
     
     help_text = """
-**📢 TAG PLUGİN - YARDIM**
+**📢 TAG PLUGİN — YARDIM**
 
-**📌 TEMEL KOMUTLAR:**
-• `.tag <mesaj>` - Tüm üyeleri etiketler (teker teker)
-• `.tagadmin <mesaj>` - Sadece adminleri etiketler (teker teker)
+`.tag` artık **butonlu panel** ile çalışır.
 
-**🎯 GRUP ETİKETLEME:**
-• `.tag <numara> <mesaj>` - Grup halinde etiketler
-• `.tagadmin <numara> <mesaj>` - Adminleri grup halinde etiketler
-• **Sayı aralığı:** 1-10
+**🎯 NASIL ÇALIŞIR:**
+1) Bir grupta `.tag` yaz (dilersen yanına mesaj yaz ya da bir mesajı yanıtla).
+2) Açılan panelden seç:
+ • Mesaj girdiysen → kaç kişilik grup (1 / 3 / 5 / 10)
+ • Mesaj girmediysen → rastgele mesaj türü (günaydın, iyi geceler, soru, komik, soğuk espri)
+3) Sonra kaç saniyede bir göndereceğini seç (2.5 / 3 / 5 / 6 sn).
+4) Etiketleme başlar.
+
+**🏷️ ETİKETİ İSTEDİĞİN YERE KOY:**
+Mesajının içine `{mention}` yaz, etiket tam oraya gelir:
+ • `merhaba {mention} nasılsın` → "merhaba [kişi] nasılsın"
+ • `{mention} iyi geceler` → "[kişi] iyi geceler"
+`{mention}` yazmazsan etiket eskisi gibi mesajın altına eklenir.
+(En kişisel his için 1'erli gönderim önerilir.)
 
 **📎 YANITLI KULLANIM:**
-Bir mesajı yanıtlayıp:
-• `.tag` - Yanıtlanan mesajı tüm üyelere gönderir
-• `.tag <numara>` - Yanıtlanan mesajı grup halinde gönderir
-• `.tagadmin` - Yanıtlanan mesajı adminlere gönderir
-• `.tagadmin <numara>` - Yanıtlanan mesajı adminlere grup halinde gönderir
+Bir mesajı yanıtlayıp `.tag` yaz → o mesaj kullanılır (premium emoji korunur).
+İçine `{mention}` koyarsan yine istediğin yere etiket gelir.
 
-**✨ PREMİUM EMOJİ DESTEĞİ:**
-Hem komutla yazılan hem de yanıtlanan mesajdaki premium emojiler korunur!
+**👑 SADECE ADMİNLER:**
+`.tagadmin` → aynı panel, ama yalnızca grup adminlerini etiketler.
 
-**🚫 ENGELLEME SİSTEMİ:**
-• `.tagban <id>` - ID ile engelle
-• `.tagban @username` - Username ile engelle
-• `[mesajı yanıtla] .tagban` - Reply ile engelle
-• `.tagunban <id/@username>` - Engeli kaldır
-• `.tagbanlistremove` - Tüm engelleri temizle
-• `.tagbanlist` - Engellileri listele
+**🚫 ENGELLEME:**
+ • `.tagban <id/@kullanıcı>` veya bir mesajı yanıtlayıp `.tagban`
+ • `.tagunban <id/@kullanıcı>`
+ • `.tagbanlist` / `.tagbanlistremove`
 
 **🛑 KONTROL:**
-• `.tagstop` - Aktif etiketlemeyi durdurur
-• `.tagstat` - Etiketleme durumunu gösterir
+ • `.tagstop` → durdurur (gönderilen son mesajdan sonra biter)
+ • `.tagstat` → durumu gösterir
 
-**💡 ÖRNEKLER:**
-1) Teker teker etiketleme:
-   `.tag Merhaba arkadaşlar!`
-   `.tagadmin Toplantı zamanı!`
-
-2) Grup etiketleme:
-   `.tag 5 Merhaba herkese!` (5'li gruplar)
-   `.tagadmin 3 Toplantı var!` (3'lü gruplar)
-
-3) Yanıtlı kullanım:
-   [Bir mesajı yanıtla] `.tag`
-   [Bir mesajı yanıtla] `.tag 4`
-   [Bir mesajı yanıtla] `.tagadmin 2`
-
-4) Engelleme:
-   `.tagban 123456789`
-   `.tagban @kullaniciadi`
-   [Mesajı yanıtla] `.tagban`
-
-**⚙️ TEKNİK:**
-• **Varsayılan grup boyutu:** 1 (teker teker)
-• **Bekleme süresi:** 2.5s (güvenli)
-• **Max grup boyutu:** 10
-• Botlar otomatik atlanır
-• Bot sahibi etiketlenmez
-• Engellenenler etiketlenmez
-• Sadece başlatan durdurabilir
-• Flood korumalı
+**⚙️ NOTLAR:**
+ • Botlar, silinmiş hesaplar, sen ve engellediklerin atlanır.
+ • Üyeleri görebilmek için grupta yönetici olman gerekebilir.
+ • Grupta inline (satıriçi) gönderim kapalıysa panel sana özelden gelir.
+ • Rastgele sözler her kişiye farklı gelir; her 50 kişide söz tekrar etmez.
 """
     
     try:
@@ -1786,10 +1810,10 @@ Hem komutla yazılan hem de yanıtlanan mesajdaki premium emojiler korunur!
 # ==========================================
 
 Help = CmdHelp('tag')
-Help.add_command('tag <mesaj>', None, 'Üyeleri teker teker etiketler (premium emoji destekli)')
-Help.add_command('tag <numara> <mesaj>', None, 'Üyeleri grup halinde etiketler (örn: .tag 5 Merhaba)')
-Help.add_command('tagadmin <mesaj>', None, 'Adminleri teker teker etiketler')
-Help.add_command('tagadmin <numara> <mesaj>', None, 'Adminleri grup halinde etiketler')
+Help.add_command('tag <mesaj>', None, 'Buton paneli açar; mesajla üyeleri etiketler ({mention} ile konum)')
+Help.add_command('tag', None, 'Mesajsız: rastgele mesaj kategorisi + süre paneli açar')
+Help.add_command('tagadmin <mesaj>', None, 'Buton paneli açar; sadece adminleri etiketler')
+Help.add_command('tagadmin', None, 'Mesajsız: adminler için kategori + süre paneli açar')
 Help.add_command('tagban <id/@username>', None, 'Kullanıcıyı etiketlemeden engelle (reply destekli)')
 Help.add_command('tagunban <id/@username>', None, 'Kullanıcının engelini kaldır (reply destekli)')
 Help.add_command('tagbanlistremove', None, 'Tüm engelleri temizle')
