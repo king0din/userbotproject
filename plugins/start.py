@@ -62,6 +62,75 @@ def get_bot():
         pass
     return None
 
+def _filter_accessible(all_plugins, uid):
+    """ip_plugins ile AYNI sıralı/filtreli erişilebilir plugin listesi (index tutarlılığı için)."""
+    return [
+        p for p in all_plugins
+        if not p.get("is_disabled")
+        and (p.get("is_public", True) or uid in p.get("allowed_users", []))
+        and uid not in p.get("restricted_users", [])
+    ]
+
+
+async def _render_plugin_detail(event, target_user_id, gi, full=False):
+    """Tek bir plugin için detay panelini ÇİZER (sadece edit, answer çağırmaz)."""
+    user_data = await db.get_user(event.sender_id)
+    active_plugins = user_data.get("active_plugins", []) if user_data else []
+    all_plugins = await db.get_all_plugins()
+    accessible = _filter_accessible(all_plugins, event.sender_id)
+
+    if gi < 0 or gi >= len(accessible):
+        try:
+            await event.edit(
+                "⚠️ **Plugin bulunamadı** (liste değişmiş olabilir).",
+                buttons=[[Button.inline("🔙 Listeye Dön", f"ip_plugins_{target_user_id}_0".encode())]],
+            )
+        except Exception:
+            pass
+        return
+
+    p = accessible[gi]
+    name = p.get("name", "?")
+    on = name in active_plugins
+    page = gi // 8
+    desc = p.get("description") or "Açıklama yok."
+    cmds = p.get("commands", []) or []
+    status = "🟢 **Yüklü (aktif)**" if on else "🔴 **Yüklü değil**"
+
+    text = f"🔌 **{name}**\n\n{status}\n\n📝 {desc}"
+    if full:
+        if cmds:
+            cmd_list = "\n".join(f"• `.{c}`" for c in cmds)
+            text += f"\n\n**Komutlar ({len(cmds)}):**\n{cmd_list}"
+        else:
+            text += "\n\n_Komut bilgisi yok._"
+    else:
+        if cmds:
+            preview = ", ".join(f"`.{c}`" for c in cmds[:3])
+            extra = f" +{len(cmds) - 3}" if len(cmds) > 3 else ""
+            text += f"\n\n🔧 {preview}{extra}"
+
+    buttons = []
+    if p.get("default_active"):
+        buttons.append([Button.inline("⭐ Zorunlu Plugin", f"ipt_{target_user_id}_{gi}".encode())])
+    elif on:
+        buttons.append([Button.inline("⛔ Plugini Kapat", f"ipt_{target_user_id}_{gi}".encode())])
+    else:
+        buttons.append([Button.inline("✅ Plugini Yükle", f"ipt_{target_user_id}_{gi}".encode())])
+
+    if full:
+        buttons.append([Button.inline("🔼 Özet", f"ipd_{target_user_id}_{gi}".encode())])
+    else:
+        buttons.append([Button.inline("📄 Plugin Detayı", f"ipi_{target_user_id}_{gi}".encode())])
+
+    buttons.append([Button.inline("🔙 Listeye Dön", f"ip_plugins_{target_user_id}_{page}".encode())])
+
+    try:
+        await event.edit(text, buttons=buttons)
+    except Exception:
+        pass
+
+
 def register_bot_handlers(bot):
     """Bot'a inline handler'ları TÜM hesaplar için yalnızca BİR kez kaydet."""
     
@@ -147,76 +216,159 @@ def register_bot_handlers(bot):
     
     @bot.on(events.CallbackQuery(pattern=rb"ip_plugins_(\d+)_?(\d*)"))
     async def ip_plugins_cb(event):
-        """Tüm pluginler - sayfalı"""
+        """Tüm pluginler — her biri buton (🟢/🔴), sayfalı."""
         match = event.pattern_match
         target_user_id = int(match.group(1).decode())
         page = int(match.group(2).decode()) if match.group(2) else 0
-        
+
         if target_user_id != event.sender_id:
             await event.answer("❌ Bu panel size ait değil!", alert=True)
             return
-        
+
         user_data = await db.get_user(event.sender_id)
         active_plugins = user_data.get("active_plugins", []) if user_data else []
         all_plugins = await db.get_all_plugins()
-        
-        accessible = [p for p in all_plugins if not p.get("is_disabled") and 
-                     (p.get("is_public", True) or event.sender_id in p.get("allowed_users", [])) and
-                     event.sender_id not in p.get("restricted_users", [])]
-        
-        # Sayfalama
+        accessible = _filter_accessible(all_plugins, event.sender_id)
+
         per_page = 8
         total = len(accessible)
         total_pages = (total + per_page - 1) // per_page if total > 0 else 1
         page = max(0, min(page, total_pages - 1))
         start = page * per_page
-        end = start + per_page
-        page_plugins = accessible[start:end]
-        
+        page_plugins = accessible[start:start + per_page]
+
         if not accessible:
             text = "📭 **Henüz plugin yok.**"
+            buttons = [[Button.inline("🔙 Geri", f"ip_main_{target_user_id}".encode())]]
         else:
-            text = f"🔌 **Tüm Pluginler** ({total} adet)\n"
-            text += f"📄 Sayfa {page + 1}/{total_pages}\n\n"
-            
-            for p in page_plugins:
+            loaded = sum(1 for p in accessible if p.get("name") in active_plugins)
+            text = (
+                f"🔌 **Pluginler** — {total} adet · 🟢 {loaded} yüklü\n"
+                f"📄 Sayfa {page + 1}/{total_pages}\n\n"
+                f"Bir plugine dokun → aç/kapat & detay"
+            )
+            buttons = []
+            for i, p in enumerate(page_plugins):
+                gi = start + i
                 name = p.get("name", "?")
-                status = "🟢" if name in active_plugins else "⚪"
-                default = "⭐" if p.get("default_active") else ""
-                cmds = ", ".join([f"`.{c}`" for c in p.get("commands", [])[:2]])
-                text += f"{status}{default} **{name}**"
-                if cmds:
-                    text += f" → {cmds}"
-                text += "\n"
-            
-            text += f"\n━━━━━━━━━━━━━━━━━━━━\n"
-            text += f"📥 `.pload <isim>` | 📤 `.punload <isim>`"
-        
-        # Butonlar
-        buttons = []
-        
-        # Sayfalama butonları
-        if total_pages > 1:
-            nav_row = []
+                on = name in active_plugins
+                emoji = "🟢" if on else "🔴"
+                star = "⭐" if p.get("default_active") else ""
+                label = f"{emoji} {star}{name}".strip()
+                buttons.append([Button.inline(label[:60], f"ipd_{target_user_id}_{gi}".encode())])
+
+            nav = []
             if page > 0:
-                nav_row.append(Button.inline("◀️ Önceki", f"ip_plugins_{target_user_id}_{page-1}".encode()))
-            nav_row.append(Button.inline(f"📄 {page+1}/{total_pages}", b"noop"))
+                nav.append(Button.inline("◀️", f"ip_plugins_{target_user_id}_{page - 1}".encode()))
+            if total_pages > 1:
+                nav.append(Button.inline(f"📄 {page + 1}/{total_pages}", f"ip_plugins_{target_user_id}_{page}".encode()))
             if page < total_pages - 1:
-                nav_row.append(Button.inline("Sonraki ▶️", f"ip_plugins_{target_user_id}_{page+1}".encode()))
-            buttons.append(nav_row)
-        
-        buttons.append([
-            Button.inline("📦 Yüklü", f"ip_active_{target_user_id}_0".encode()),
-            Button.inline("📢 Kanal", f"ip_channel_{target_user_id}".encode())
-        ])
-        buttons.append([Button.inline("🔙 Geri", f"ip_main_{target_user_id}".encode())])
-        
+                nav.append(Button.inline("▶️", f"ip_plugins_{target_user_id}_{page + 1}".encode()))
+            if nav:
+                buttons.append(nav)
+
+            buttons.append([
+                Button.inline("📦 Yüklü", f"ip_active_{target_user_id}_0".encode()),
+                Button.inline("🔙 Geri", f"ip_main_{target_user_id}".encode()),
+            ])
+
         try:
             await event.edit(text, buttons=buttons)
-        except:
+        except Exception:
             pass
         await event.answer()
-    
+
+    @bot.on(events.CallbackQuery(pattern=rb"ipd_(\d+)_(\d+)"))
+    async def ip_pdetail_cb(event):
+        """Bir plugine dokununca: detay paneli (özet)."""
+        target_user_id = int(event.pattern_match.group(1).decode())
+        gi = int(event.pattern_match.group(2).decode())
+        if target_user_id != event.sender_id:
+            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            return
+        await _render_plugin_detail(event, target_user_id, gi, full=False)
+        try:
+            await event.answer()
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"ipi_(\d+)_(\d+)"))
+    async def ip_pinfo_cb(event):
+        """Plugin Detayı: tüm açıklama + komutlar."""
+        target_user_id = int(event.pattern_match.group(1).decode())
+        gi = int(event.pattern_match.group(2).decode())
+        if target_user_id != event.sender_id:
+            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            return
+        await _render_plugin_detail(event, target_user_id, gi, full=True)
+        try:
+            await event.answer()
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"ipt_(\d+)_(\d+)"))
+    async def ip_ptoggle_cb(event):
+        """Plugini aç/kapat (yükle/kaldır) ve paneli yenile."""
+        target_user_id = int(event.pattern_match.group(1).decode())
+        gi = int(event.pattern_match.group(2).decode())
+        if target_user_id != event.sender_id:
+            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            return
+
+        all_plugins = await db.get_all_plugins()
+        accessible = _filter_accessible(all_plugins, event.sender_id)
+        if gi < 0 or gi >= len(accessible):
+            await event.answer("Plugin bulunamadı.", alert=True)
+            return
+        p = accessible[gi]
+        name = p.get("name")
+
+        user_data = await db.get_user(event.sender_id)
+        active = list(user_data.get("active_plugins", []) if user_data else [])
+
+        from userbot.plugins import plugin_manager
+        try:
+            from userbot.smart_manager import smart_session_manager
+            client = smart_session_manager.get_client(event.sender_id)
+        except Exception:
+            client = None
+
+        if name in active:
+            # KAPAT
+            if p.get("default_active"):
+                await event.answer("⭐ Zorunlu plugin, kapatılamaz.", alert=True)
+                return
+            active.remove(name)
+            await db.update_user(event.sender_id, {"active_plugins": active})
+            try:
+                await plugin_manager.deactivate_plugin(event.sender_id, name)
+            except Exception:
+                pass
+            try:
+                await event.answer(f"⛔ {name} kapatıldı")
+            except Exception:
+                pass
+        else:
+            # YÜKLE
+            if p.get("is_disabled"):
+                await event.answer("⛔ Bu plugin devre dışı.", alert=True)
+                return
+            active.append(name)
+            await db.update_user(event.sender_id, {"active_plugins": active})
+            ok, msg = True, ""
+            if client is not None:
+                try:
+                    ok, msg = await plugin_manager.activate_plugin(event.sender_id, name, client)
+                except Exception as e:
+                    ok, msg = False, str(e)
+            try:
+                await event.answer(f"✅ {name} yüklendi" if ok else f"❌ {str(msg)[:60]}")
+            except Exception:
+                pass
+
+        # Paneli yenile (durum güncellensin)
+        await _render_plugin_detail(event, target_user_id, gi, full=False)
+
     @bot.on(events.CallbackQuery(pattern=rb"ip_active_(\d+)_?(\d*)"))
     async def ip_active_cb(event):
         """Yüklü pluginler - sayfalı"""
