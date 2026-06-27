@@ -649,13 +649,20 @@ def _make_phrase_picker(category):
 # ======================================================================
 def _panel_text_step1(has_msg):
     if has_msg:
-        return ("🏷️ **Etiketleme**\n\n"
-                "Kaç kişilik gruplar halinde etiketleyeyim?\n\n"
-                "⏹️ İşlemi durdurmak için: `.tagstop`")
+        return _panel_text_groupsize()
     return ("🏷️ **Etiketleme**\n\n"
             "Mesaj girmediniz / bir mesaj yanıtlamadınız.\n"
             "Rastgele hangi mesajlarla etiketleyeyim?\n\n"
             "⏹️ İşlemi durdurmak için: `.tagstop`")
+
+
+def _panel_text_groupsize():
+    return ("🏷️ **Etiketleme**\n\n"
+            "Kaç kişilik gruplar halinde etiketleyeyim?\n\n"
+            "💡 **1 önerilir** — sözlü/kişisel etiketlerde her kişiyi tek tek, "
+            "ona özelmiş gibi etiketler (mention önde olur). 1'den büyük seçersen "
+            "etiketler mesajın **altına toplu** eklenir.\n\n"
+            "⏹️ Durdurmak için: `.tagstop`")
 
 
 def _panel_text_interval():
@@ -664,15 +671,17 @@ def _panel_text_interval():
             "⏹️ Durdurmak için: `.tagstop`")
 
 
+def _group_size_buttons(owner):
+    from telethon import Button
+    row1 = [Button.inline(str(n), f"tgrp_{owner}_{n}".encode()) for n in range(1, 6)]
+    row2 = [Button.inline(str(n), f"tgrp_{owner}_{n}".encode()) for n in range(6, 11)]
+    return [row1, row2]
+
+
 def _step1_buttons(owner, has_msg):
     from telethon import Button
     if has_msg:
-        return [
-            [Button.inline("1'erli", f"tgrp_{owner}_1".encode()),
-             Button.inline("3'erli", f"tgrp_{owner}_3".encode())],
-            [Button.inline("5'erli", f"tgrp_{owner}_5".encode()),
-             Button.inline("10'arlı", f"tgrp_{owner}_10".encode())],
-        ]
+        return _group_size_buttons(owner)
     rows, row = [], []
     for key, (label, _short) in _CATS.items():
         row.append(Button.inline(label, f"tcat_{owner}_{key}".encode()))
@@ -822,9 +831,9 @@ def _register_tag_bot_handlers(bot):
             await event.answer("Panel zaman aşımına uğradı, tekrar .tag yazın.", alert=True)
             return
         pend["category"] = key
-        pend["group_size"] = 1  # rastgele söz modunda teker teker
+        # Grup boyutunu kullanıcı seçsin (sözlü modda da: 1 önerilir)
         try:
-            await event.edit(_panel_text_interval(), buttons=_interval_buttons(owner))
+            await event.edit(_panel_text_groupsize(), buttons=_group_size_buttons(owner))
         except Exception:
             pass
 
@@ -1082,6 +1091,9 @@ async def run_tag_job(owner_id, chat_id, mode, group_size, interval,
 
         if picker:
             msg_text = picker()
+            if group_size > 1:
+                # Çok kişilik grup -> etiketleri ALTA koy ({mention} kaldırılır)
+                msg_text = msg_text.replace("{mention}", "").replace("  ", " ").strip()
             msg_ents = None
         else:
             msg_text = message

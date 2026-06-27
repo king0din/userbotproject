@@ -131,7 +131,8 @@ async def resolve_chat(client, chat_raw: str):
     for attempt in attempts:
         try:
             entity = await client.get_entity(attempt)
-            chat_id = entity.id
+            from telethon import utils as _tl_utils
+            chat_id = _tl_utils.get_peer_id(entity)
             chat_title = getattr(entity, "title", None) or getattr(entity, "first_name", str(chat_id))
             return entity, chat_id, chat_title
         except Exception as e:
@@ -254,11 +255,64 @@ def _error_summary(e: Exception) -> str:
 # GÖREV ÇALIŞMA DÖNGÜSÜ
 # ==========================================
 
-async def _task_loop(client, task_id: str, notify_chat_id: int):
+async def _resolve_target(client, chat_id):
+    """Hedef peer'ı güvenli biçimde çözer.
+
+    Eski görevlerde ID işaretsiz (ham) saklanmış olabilir; pozitif ham ID'yi
+    Telethon kullanıcı (PeerUser) sanıp 'input entity bulunamadı' hatası verir.
+    Bu yüzden işaretli (-100..) formu, PeerChannel/PeerChat/PeerUser varyantlarını
+    sırayla dener; hiçbiri tutmazsa dialogs'u bir kez tazeleyip tekrar dener.
+    Bulursa input entity döner, bulamazsa None.
+    """
+    from telethon.tl.types import PeerChannel, PeerChat, PeerUser
+    cands = [chat_id]
+    try:
+        n = int(chat_id)
+        a = abs(n)
+        s = str(a)
+        if s.startswith("100") and len(s) > 10:
+            inner = int(s[3:])
+            cands.append(int("-100" + s[3:]))
+            cands.append(PeerChannel(inner))
+            cands.append(inner)
+        else:
+            cands.append(int("-100" + s))   # ham kanal ID'sini -100 ile dene
+            cands.append(PeerChannel(a))
+            cands.append(PeerChat(a))
+        if n > 0:
+            cands.append(PeerUser(a))
+    except Exception:
+        pass
+
+    async def _try():
+        for c in cands:
+            try:
+                return await client.get_input_entity(c)
+            except Exception:
+                continue
+        return None
+
+    ent = await _try()
+    if ent is not None:
+        return ent
+    # Son çare: dialogs'u tazele (entity cache'ini doldurur) ve tekrar dene
+    try:
+        async for _d in client.iter_dialogs(limit=500):
+            pass
+    except Exception:
+        pass
+    return await _try()
+
+
+async def _task_loop(client, task_id: str, notify_chat_id: int, initial_delay: int = 0):
     """
     Belirtilen görevi çalıştıran ana döngü.
     notify_chat_id: Sorun olursa hata bildirimi gönderilecek chat (komutu yazan chat).
     """
+    # Toplu başlatmada aynı anda atıp spam tetiklememek için kademeli gecikme
+    if initial_delay and initial_delay > 0:
+        await asyncio.sleep(initial_delay)
+
     task = tasks_data.get(task_id)
     if not task:
         return
@@ -270,6 +324,26 @@ async def _task_loop(client, task_id: str, notify_chat_id: int):
     sent      = task.get("sent_count", 0)
     consecutive_errors = 0
     MAX_CONSECUTIVE = 5  # üst üste bu kadar hata olursa görevi oto-durdur
+
+    # Hedef peer'ı güvenli çöz (eski/işaretsiz ID'ler PeerUser sanılıp hata veriyordu)
+    target = await _resolve_target(client, chat_id)
+    if target is None:
+        tasks_data[task_id]["status"] = "error"
+        tasks_data[task_id]["last_error"] = "Hedef sohbet çözümlenemedi (ekli değil ya da ID geçersiz)"
+        await save_my_tasks(client)
+        try:
+            await client.send_message(
+                notify_chat_id,
+                f"🚨 **OtoMsg Görev #{task_id} başlatılamadı!**\n\n"
+                f"💬 **Chat:** `{chat_id}`\n"
+                f"❌ Hedef sohbet çözümlenemedi.\n"
+                f"   • Userbot bu gruba/kanala ekli mi?\n"
+                f"   • En güvenlisi: o grupta `.otomsg <mesaj> <dakika>` yazın."
+            )
+        except Exception:
+            pass
+        running_tasks.pop(task_id, None)
+        return
 
     while True:
         # Görev silinmiş mi kontrol et
@@ -313,7 +387,7 @@ async def _task_loop(client, task_id: str, notify_chat_id: int):
 
         # Mesajı gönder
         try:
-            await client.send_message(chat_id, message)
+            await client.send_message(target, message)
             sent += 1
             consecutive_errors = 0
             tasks_data[task_id]["sent_count"] = sent
@@ -351,7 +425,7 @@ async def _task_loop(client, task_id: str, notify_chat_id: int):
             await asyncio.sleep(wait)
             # Slow mode bittikten sonra tekrar gönder
             try:
-                await client.send_message(chat_id, message)
+                await client.send_message(target, message)
                 sent += 1
                 tasks_data[task_id]["sent_count"] = sent
                 tasks_data[task_id]["last_sent"] = int(time.time())
@@ -387,12 +461,12 @@ async def _task_loop(client, task_id: str, notify_chat_id: int):
     running_tasks.pop(task_id, None)
 
 
-async def _start_task(client, task_id: str, notify_chat_id: int):
+async def _start_task(client, task_id: str, notify_chat_id: int, initial_delay: int = 0):
     """Görev döngüsünü başlat ve running_tasks'a ekle."""
     if task_id in running_tasks:
         return
     task_obj = asyncio.create_task(
-        _task_loop(client, task_id, notify_chat_id)
+        _task_loop(client, task_id, notify_chat_id, initial_delay)
     )
     running_tasks[task_id] = task_obj
 
@@ -400,9 +474,11 @@ async def _start_task(client, task_id: str, notify_chat_id: int):
 async def _restore_tasks(client, me_id: int):
     """Bot yeniden başlayınca 'running' durumdaki görevleri yeniden başlat."""
     await load_my_tasks(client)
+    i = 0
     for task_id, task in tasks_data.items():
         if task.get("status") == "running":
-            await _start_task(client, task_id, me_id)
+            await _start_task(client, task_id, me_id, initial_delay=i * 5)
+            i += 1
 
 
 # ==========================================
@@ -686,6 +762,88 @@ async def otomsg_add(q):
         f"Durdurmak için: `.otomsgstop {task_id}`\n"
         f"Silmek için: `.otomsgdel {task_id}`"
     )
+
+
+@r(outgoing=True, pattern=r"(?s)^\.otomsg (?!ekle(?: |$))(.+?)\s+(\d+)\s*$")
+async def otomsg_quick_add(q):
+    """Hızlı ekleme: bulunduğun grupta `.otomsg <mesaj> <dakika>` yaz → o gruba ekler.
+    Komut silinir, grupta hiçbir bildirim çıkmaz, onay bota (yoksa Kayıtlı Mesajlar'a) gider."""
+    me = await q.client.get_me()
+    if q.sender_id != me.id:
+        return
+
+    message = q.pattern_match.group(1).strip()
+    minutes = int(q.pattern_match.group(2))
+
+    # Onay + görev bildirimleri buraya gider (GRUBA DEĞİL): bot varsa bot, yoksa Kayıtlı Mesajlar
+    bu = _get_bot_username()
+    notify_to = f"@{bu}" if bu else "me"
+
+    # Komutu hemen sil (grupta iz kalmasın)
+    try:
+        await q.delete()
+    except Exception:
+        pass
+
+    if not message:
+        try:
+            await q.client.send_message(notify_to, "❌ OtoMsg: mesaj boş olamaz.")
+        except Exception:
+            pass
+        return
+    if minutes < 1:
+        try:
+            await q.client.send_message(notify_to, "❌ OtoMsg: dakika en az 1 olmalı.")
+        except Exception:
+            pass
+        return
+
+    await load_my_tasks(q.client)
+
+    # Bulunduğumuz grup = hedef
+    chat_id = q.chat_id
+    try:
+        chat = await q.get_chat()
+        chat_title = getattr(chat, "title", None) or getattr(chat, "first_name", None) or str(chat_id)
+    except Exception:
+        chat_title = str(chat_id)
+
+    interval_seconds = minutes * 60
+    interval_label = f"{minutes} dakika"
+
+    task_id = _next_task_id()
+    tasks_data[task_id] = {
+        "chat_id": chat_id,
+        "chat_title": chat_title,
+        "chat_raw": str(chat_id),
+        "interval_seconds": interval_seconds,
+        "interval_label": interval_label,
+        "repeat_count": 0,  # sınırsız
+        "message": message,
+        "sent_count": 0,
+        "status": "running",
+        "created_at": int(time.time()),
+        "last_sent": None,
+        "last_error": None,
+    }
+    await save_my_tasks(q.client)
+
+    # Döngüyü başlat — bildirimler GRUBA değil notify_to'ya gider
+    await _start_task(q.client, task_id, notify_to)
+
+    # Onayı bota gönder (grupta DEĞİL)
+    try:
+        await q.client.send_message(
+            notify_to,
+            f"✅ **OtoMsg eklendi** (hızlı)\n\n"
+            f"🆔 Görev: `{task_id}`\n"
+            f"💬 Grup: {chat_title} (`{chat_id}`)\n"
+            f"⏱️ Aralık: {interval_label} · 🔁 sınırsız\n"
+            f"📄 Mesaj: `{message[:80]}{'…' if len(message) > 80 else ''}`\n\n"
+            f"⏸️ Durdur: `.otomsgstop {task_id}`   🗑️ Sil: `.otomsgdel {task_id}`"
+        )
+    except Exception:
+        pass
 
 
 @r(outgoing=True, pattern=r"^\.otomsgs$")
@@ -977,7 +1135,7 @@ async def otomsg_start_all(q):
         t["status"] = "running"
         t["last_error"] = None
         if task_id not in running_tasks or running_tasks[task_id].done():
-            await _start_task(q.client, task_id, q.chat_id)
+            await _start_task(q.client, task_id, q.chat_id, initial_delay=started * 5)
             started += 1
         else:
             already += 1
@@ -1026,6 +1184,12 @@ async def otomsg_help(q):
         return
 
     help_text = """**⚙️ OtoMsg PLUGİN — YARDIM**
+
+**⚡ HIZLI EKLEME (önerilen):**
+Eklemek istediğin grupta şunu yaz:
+`.otomsg <mesaj> <dakika>`
+→ Komut **silinir**, grupta bildirim **çıkmaz**, onay **sana (bota)** gelir.
+Örnek: `.otomsg Grup aktif kalsın 30`
 
 **📌 GÖREV EKLEME — Normal:**
 `.otomsg ekle <chat> <aralık_dk> <tekrar> <mesaj>`
@@ -1131,6 +1295,7 @@ except Exception:
 # ==========================================
 
 Help = CmdHelp("otomsg")
+Help.add_command("otomsg <mesaj> <dakika>", None, "HIZLI: bulunduğun gruba oto mesaj ekler (komut silinir, onay bota gider)")
 Help.add_command("otomsg ekle <chat> <aralık_dk> <tekrar> <mesaj>", None, "Otomatik mesaj görevi ekler")
 Help.add_command("otomsgs", None, "Tüm görevlerin durumunu gösterir")
 Help.add_command("otomsgl", None, "Görev listesini detaylı gösterir")
