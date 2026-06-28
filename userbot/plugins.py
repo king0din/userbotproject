@@ -619,7 +619,7 @@ class PluginManager:
             traceback.print_exc()
             return False, f"❌ Plugin hatası:\n`{str(e)}`"
     
-    async def deactivate_plugin(self, user_id: int, plugin_name: str) -> Tuple[bool, str]:
+    async def deactivate_plugin(self, user_id: int, plugin_name: str, reason: str = "disable") -> Tuple[bool, str]:
         """Kullanıcı için plugin deaktif et"""
         
         handlers_removed = 0
@@ -717,6 +717,14 @@ class PluginManager:
                     module.unregister()
                 except:
                     pass
+
+            # Kullanıcı verilerini temizle (depoda çöp birikmesini önler)
+            if module and hasattr(module, 'cleanup_user_data') and callable(module.cleanup_user_data):
+                try:
+                    module.cleanup_user_data(user_id, reason)
+                    log.info("cleanup_user_data çağrıldı: %s (reason=%s)", plugin_name, reason)
+                except Exception:
+                    log.error("cleanup_user_data hatası: %s", plugin_name, exc_info=True)
             
             # sys.modules'dan kaldır
             module_name = f"plugin_{plugin_name}_{user_id}"
@@ -742,6 +750,22 @@ class PluginManager:
             traceback.print_exc()
             return False, f"Hata: `{str(e)}`"
     
+    async def purge_user_data(self, user_id: int, reason: str = "logout") -> int:
+        """Kullanıcının YÜKLÜ tüm pluginlerindeki verilerini temizler (çıkış/silme).
+        Her plugin kendi cleanup_user_data'sını uygular; kurtarma/yapılandırma reason'a göre korunur."""
+        cleaned = 0
+        modules = dict(self.user_active_plugins.get(user_id, {}))
+        for plugin_name, module in modules.items():
+            if module and hasattr(module, 'cleanup_user_data') and callable(module.cleanup_user_data):
+                try:
+                    module.cleanup_user_data(user_id, reason)
+                    cleaned += 1
+                except Exception:
+                    log.error("purge cleanup hatası: %s", plugin_name, exc_info=True)
+        if cleaned:
+            log.info("purge_user_data: user=%s, %s plugin temizlendi (reason=%s)", user_id, cleaned, reason)
+        return cleaned
+
     async def get_user_plugins(self, user_id: int) -> Dict:
         """Kullanıcının plugin durumunu getir"""
         user = await db.get_user(user_id)

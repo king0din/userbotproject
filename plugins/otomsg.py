@@ -180,6 +180,19 @@ def _save_tasks_raw(data: dict):
         pass
 
 
+def cleanup_user_data(user_id, reason="disable"):
+    """Kullanıcının oto-mesaj görevlerini temizle. Çıkışta korunur (yapılandırma); devre dışı/silmede silinir."""
+    try:
+        if reason == "logout":
+            return
+        raw = _load_tasks_raw()
+        if str(user_id) in raw:
+            raw.pop(str(user_id), None)
+            _save_tasks_raw(raw)
+    except Exception:
+        pass
+
+
 async def load_my_tasks(client):
     """Kendi hesabıma ait görevleri yükle."""
     global tasks_data, _loaded_user_id

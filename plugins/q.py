@@ -732,6 +732,7 @@ def register(client):
         
         await event.edit("🎨")
         
+        path = None
         try:
             messages_data = []
             
@@ -798,6 +799,12 @@ def register(client):
                 
         except Exception as e:
             await event.edit(f"❌ `{e}`")
+        finally:
+            if path and os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except Exception:
+                    pass
     
     
     @client.on(events.NewMessage(outgoing=True, pattern=r'^\.qs(?:\s+(.*))?$'))
@@ -811,6 +818,7 @@ def register(client):
         
         await event.edit("🎨")
         
+        path = None
         try:
             if reply.sticker:
                 await event.edit("📥 **Sticker indiriliyor...**")
@@ -912,6 +920,12 @@ def register(client):
             import traceback
             error_detail = traceback.format_exc()
             await event.edit(f"❌ Hata: `{type(e).__name__}: {str(e)[:50]}`")
+        finally:
+            if path and os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except Exception:
+                    pass
     
     
     @client.on(events.NewMessage(outgoing=True, pattern=r'^\.qd$'))

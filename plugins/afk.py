@@ -42,6 +42,10 @@ if not os.path.exists(AFK_PROFILE_DIR):
 # AFK emoji ID
 AFK_EMOJI_ID = 5431438062250892883
 
+# Klonlarken/geri dönerken en fazla bu kadar fotoğraf işlenir
+# (100+ fotoğraflı profillerde çökme ve uzun beklemeyi önler)
+MAX_PHOTOS = 10
+
 # Orijinal profil bilgileri
 ORIGINAL_PROFILE = {
     "first_name": None,
@@ -104,15 +108,36 @@ def _user_photo_dir(uid):
     return d
 
 
-async def download_all_profile_photos(client, user_id, save_dir, prefix="photo"):
+def cleanup_user_data(user_id, reason="disable"):
+    """Kullanıcının AFK verilerini temizle (çıkış/devre dışı/silme).
+    AFK aktifken silmez (yoksa gerçek profile dönülemez); aksi halde foto klasörü + kayıt silinir."""
+    import shutil
+    try:
+        state = _load_state(user_id)
+        if state.get("is_afk") and reason != "delete":
+            return
+        pdir = os.path.join(AFK_PROFILE_DIR, str(user_id))
+        if os.path.isdir(pdir):
+            shutil.rmtree(pdir, ignore_errors=True)
+        data = _afk_load_all()
+        if str(user_id) in data:
+            data.pop(str(user_id), None)
+            _afk_save_all(data)
+    except Exception:
+        pass
+
+
+async def download_all_profile_photos(client, user_id, save_dir, prefix="photo", max_count=None):
     """Tüm profil fotoğraflarını indir"""
     photos_info = []
     try:
-        result = await client(GetUserPhotosRequest(user_id=user_id, offset=0, max_id=0, limit=100))
+        result = await client(GetUserPhotosRequest(user_id=user_id, offset=0, max_id=0, limit=(max_count or 100)))
         if not result.photos:
             return photos_info
         
         for idx, photo in enumerate(result.photos):
+            if max_count and len(photos_info) >= max_count:
+                break
             try:
                 is_video = hasattr(photo, 'video_sizes') and photo.video_sizes
                 if is_video:
@@ -188,7 +213,7 @@ async def afk_mode(event):
             except Exception:
                 pass
 
-        ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, pdir, "original")
+        ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, pdir, "original", max_count=MAX_PHOTOS)
         ORIGINAL_PROFILE["photo_count"] = len(ORIGINAL_PROFILE["photos"])
 
         if hasattr(me, 'emoji_status') and me.emoji_status and hasattr(me.emoji_status, 'document_id'):

@@ -2,6 +2,8 @@
 # Mesajın ham verisini gösterir
 # Kullanım: .raw (mesajı yanıtla)
 
+import os
+import tempfile
 from userbot.events import register
 from userbot import CMD_HELP
 
@@ -23,18 +25,24 @@ async def raw_data(event):
         
         # Çok uzunsa dosya olarak gönder
         if len(raw) > 4000:
-            with open("raw_data.txt", "w", encoding="utf-8") as f:
-                f.write(raw)
-            
-            await event.client.send_file(
-                event.chat_id,
-                "raw_data.txt",
-                caption="`📄 Raw data (dosya olarak)`",
-                reply_to=reply.id
-            )
-            await event.delete()
-            import os
-            os.remove("raw_data.txt")
+            tmp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+                    f.write(raw)
+                    tmp_path = f.name
+                await event.client.send_file(
+                    event.chat_id,
+                    tmp_path,
+                    caption="`📄 Raw data (dosya olarak)`",
+                    reply_to=reply.id
+                )
+                await event.delete()
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
         else:
             await event.edit(f"```\n{raw}\n```")
     

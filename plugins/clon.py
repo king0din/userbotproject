@@ -45,6 +45,10 @@ if not os.path.exists(ORIGINAL_PROFILE_DIR):
 # Premium olmayan kullanıcı klonlanınca bu emoji kullanılır
 INVISIBLE_EMOJI_ID = 5420560971674435677
 
+# Klonlarken/geri dönerken en fazla bu kadar fotoğraf işlenir
+# (100+ fotoğraflı profillerde çökme ve uzun beklemeyi önler)
+MAX_PHOTOS = 10
+
 ORIGINAL_PROFILE = {
     "first_name": None,
     "last_name": None,
@@ -106,13 +110,34 @@ def _clear_state(uid):
     _clon_save_all(data)
 
 
-async def download_all_profile_photos(client, user_id, save_dir, prefix="photo"):
+def cleanup_user_data(user_id, reason="disable"):
+    """Kullanıcının klon verilerini temizle (çıkış/devre dışı/silme).
+    Kayıtlı orijinal profil varken silmez (.unclon ile dönülebilmeli); geçici klasör her zaman temizlenir."""
+    import shutil
+    try:
+        clone_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "clone_temp")
+        if os.path.isdir(clone_dir):
+            shutil.rmtree(clone_dir, ignore_errors=True)
+        state = _load_state(user_id)
+        if state.get("is_saved") and reason != "delete":
+            return
+        data = _clon_load_all()
+        if str(user_id) in data:
+            data.pop(str(user_id), None)
+            _clon_save_all(data)
+    except Exception:
+        pass
+
+
+async def download_all_profile_photos(client, user_id, save_dir, prefix="photo", max_count=None):
     photos_info = []
     try:
-        result = await client(GetUserPhotosRequest(user_id=user_id, offset=0, max_id=0, limit=100))
+        result = await client(GetUserPhotosRequest(user_id=user_id, offset=0, max_id=0, limit=(max_count or 100)))
         if not result.photos:
             return photos_info
         for idx, photo in enumerate(result.photos):
+            if max_count and len(photos_info) >= max_count:
+                break
             try:
                 is_video = hasattr(photo, 'video_sizes') and photo.video_sizes
                 if is_video:
@@ -255,7 +280,7 @@ async def do_clone(event, input_str):
                 except Exception:
                     pass
 
-            ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, ORIGINAL_PROFILE_DIR, "original")
+            ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, ORIGINAL_PROFILE_DIR, "original", max_count=MAX_PHOTOS)
             ORIGINAL_PROFILE["photo_count"] = len(ORIGINAL_PROFILE["photos"])
 
             if hasattr(me, 'emoji_status') and me.emoji_status and hasattr(me.emoji_status, 'document_id'):
@@ -300,7 +325,7 @@ async def do_clone(event, input_str):
             except Exception:
                 pass
 
-        target_photos = await download_all_profile_photos(event.client, user_id, clone_dir, "clone")
+        target_photos = await download_all_profile_photos(event.client, user_id, clone_dir, "clone", max_count=MAX_PHOTOS)
 
         await event.client(functions.account.UpdateProfileRequest(first_name=first_name, last_name=last_name, about=user_bio))
         await delete_all_my_photos(event.client)
@@ -316,6 +341,13 @@ async def do_clone(event, input_str):
                             await event.client(UploadProfilePhotoRequest(file=pfile))
                     except Exception:
                         pass
+
+        # Hedefin indirilen fotoğrafları profile yüklendi — yerel kopyaları temizle (çöp bırakma)
+        for _cf in os.listdir(clone_dir):
+            try:
+                os.remove(os.path.join(clone_dir, _cf))
+            except Exception:
+                pass
 
         emoji_status_msg = ""
         try:
@@ -445,7 +477,7 @@ async def save_my_profile(event):
             except Exception:
                 pass
 
-        ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, ORIGINAL_PROFILE_DIR, "original")
+        ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, ORIGINAL_PROFILE_DIR, "original", max_count=MAX_PHOTOS)
         ORIGINAL_PROFILE["photo_count"] = len(ORIGINAL_PROFILE["photos"])
 
         if hasattr(me, 'emoji_status') and me.emoji_status and hasattr(me.emoji_status, 'document_id'):

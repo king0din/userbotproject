@@ -77,6 +77,22 @@ def _save_voice(uid, code):
     except Exception:
         pass
 
+
+def cleanup_user_data(user_id, reason="disable"):
+    """Kullanıcının ses tercihini temizle. Çıkışta korunur (tercih); devre dışı/silmede silinir."""
+    try:
+        if reason == "logout":
+            return
+        if os.path.exists(_VOICE_FILE):
+            with open(_VOICE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if str(user_id) in data:
+                data.pop(str(user_id), None)
+                with open(_VOICE_FILE, "w", encoding="utf-8") as f:
+                    json.dump(data, f)
+    except Exception:
+        pass
+
 # Chunk boyutu (karakter)
 CHUNK_SIZE = 4000
 
@@ -261,6 +277,7 @@ def register(client):
         if char_count <= CHUNK_SIZE:
             await event.edit(f"🎙️ **Ses oluşturuluyor...**\n`{char_count} karakter`")
             
+            tmp_path = None
             try:
                 with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
                     tmp_path = tmp.name
@@ -285,14 +302,14 @@ def register(client):
                     )
                 
                 await event.delete()
-                os.unlink(tmp_path)
-                
             except Exception as e:
                 await event.edit(f"❌ **Hata:** `{e}`")
-                try:
-                    os.unlink(tmp_path)
-                except:
-                    pass
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
             return
         
         # Uzun metin - parçalara böl

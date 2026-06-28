@@ -451,7 +451,7 @@ class SmartSessionManager:
         client = self.active_clients.get(user_id)
         if client and plugins:
             for plugin_name in plugins:
-                await self.plugin_manager.deactivate_plugin(user_id, plugin_name)
+                await self.plugin_manager.deactivate_plugin(user_id, plugin_name, reason="logout")
         
         # Always-on'dan çıkar
         await self.disable_always_on(user_id)
@@ -582,6 +582,11 @@ class SmartSessionManager:
             
             # 7 günden eski silinen hesapları tamamen sil
             if time.time() - deleted_at > 7 * 24 * 60 * 60:
+                # Önce kullanıcının tüm plugin verilerini temizle (kalıcı silme)
+                try:
+                    await self.plugin_manager.purge_user_data(user_id, "delete")
+                except Exception:
+                    pass
                 await db.delete_user(user_id)
                 count += 1
         
@@ -840,6 +845,12 @@ class SmartSessionManager:
     async def logout(self, user_id: int, terminate_session: bool = False) -> bool:
         """Çıkış yap"""
         try:
+            # Çıkışta kullanıcının çöp verilerini temizle (kurtarma/yapılandırma korunur)
+            try:
+                await self.plugin_manager.purge_user_data(user_id, "logout")
+            except Exception:
+                pass
+
             if user_id in self.active_clients:
                 client = self.active_clients[user_id]
                 
