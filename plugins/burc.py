@@ -20,7 +20,7 @@ Bu komutla girilen burcuaylık olarak yorumlayın (yorumlar aylık değişir)
 """
 
 from telethon import events
-import requests
+import aiohttp
 
 # Burç emojileri
 BURC_EMOJI = {
@@ -49,6 +49,19 @@ def get_emoji(burc_adi):
     return '🔮'
 
 
+async def _fetch_json(url):
+    """aiohttp ile JSON çek — event loop'u BLOKLAMAZ (eski requests senkrondu, botu donduruyordu)."""
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    return await resp.json(content_type=None), 200
+                return None, resp.status
+    except Exception:
+        return None, 0
+
+
 def register(client):
     
     # Günlük burç yorumu
@@ -70,10 +83,9 @@ def register(client):
         await event.edit(f"🔮 Yükleniyor...")
         
         try:
-            response = requests.get(f"https://burc-yorumlari.vercel.app/get/{burc_name}", timeout=10)
+            data, _status = await _fetch_json(f"https://burc-yorumlari.vercel.app/get/{burc_name}")
             
-            if response.status_code == 200:
-                data = response.json()
+            if _status == 200 and data is not None:
                 if data and len(data) > 0:
                     b = data[0]
                     
@@ -107,10 +119,9 @@ def register(client):
         await event.edit(f"🔮 Yükleniyor...")
         
         try:
-            response = requests.get(f"https://burc-yorumlari.vercel.app/get/{burc_name}/haftalik", timeout=10)
+            data, _status = await _fetch_json(f"https://burc-yorumlari.vercel.app/get/{burc_name}/haftalik")
             
-            if response.status_code == 200:
-                data = response.json()
+            if _status == 200 and data is not None:
                 if data and len(data) > 0:
                     b = data[0]
                     
@@ -144,10 +155,9 @@ def register(client):
         await event.edit(f"🔮 Yükleniyor...")
         
         try:
-            response = requests.get(f"https://burc-yorumlari.vercel.app/get/{burc_name}/aylik", timeout=10)
+            data, _status = await _fetch_json(f"https://burc-yorumlari.vercel.app/get/{burc_name}/aylik")
             
-            if response.status_code == 200:
-                data = response.json()
+            if _status == 200 and data is not None:
                 if data and len(data) > 0:
                     b = data[0]
                     

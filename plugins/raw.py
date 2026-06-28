@@ -2,7 +2,6 @@
 # Mesajın ham verisini gösterir
 # Kullanım: .raw (mesajı yanıtla)
 
-from telethon import events
 from userbot.events import register
 from userbot import CMD_HELP
 

@@ -31,7 +31,6 @@ __commands__ = ["start", "panel", "plugins", "pluginler", "pload", "punload", "m
 
 # Handler referanslarını sakla (global)
 _handlers = {}
-_bot_handlers_registered = False
 
 def get_bot_username():
     """Bot username'ini al"""
@@ -131,6 +130,84 @@ async def _render_plugin_detail(event, target_user_id, gi, full=False):
         pass
 
 
+# ── TÜM KOMUTLAR KATALOĞU (keşfedilebilirlik için) ─────────────────
+ALL_COMMANDS = [
+    ("🏷️ Etiketleme", [
+        (".tag", "Gruptaki herkesi etiketle (butonlu akış)"),
+        (".tagadmin", "Sadece yöneticileri etiketle"),
+        (".tagstop", "Etiketlemeyi durdur"),
+        (".tagstat", "Etiketleme durumunu göster"),
+        (".tagban / .tagunban", "Kişiyi hariç tut / geri al"),
+        (".tagbanlist", "Hariç tutulanları listele"),
+        (".taghelp", "Etiketleme yardımı"),
+    ]),
+    ("📨 Otomatik Mesaj", [
+        (".otomsg <mesaj> <dakika>", "HIZLI: bulunduğun gruba oto mesaj ekle"),
+        (".otomsg ekle <chat> <dk> <tekrar> <mesaj>", "Detaylı görev ekle"),
+        (".otomsgl", "Görevleri listele (butonlu sayfalı)"),
+        (".otomsgs", "Görev durumlarını göster"),
+        (".otomsgstop / .otomsgstart <id>", "Görevi durdur / başlat"),
+        (".otomsgstartall / .otomsgstopall", "Tümünü başlat / durdur"),
+        (".otomsgdel <id>", "Görevi sil"),
+        (".otomsghelp", "Oto mesaj yardımı"),
+    ]),
+    ("🎭 Profil", [
+        (".afk / .unafk", "AFK moduna geç / dön (kalıcı)"),
+        (".clon <yanıt/@/id>", "Birinin profilini klonla"),
+        (".unclon", "Orijinal profile dön"),
+        (".saveme", "Mevcut profilini kaydet"),
+        (".cloninfo", "Kayıtlı profili göster"),
+        (".resetclon", "Klon verilerini sıfırla"),
+    ]),
+    ("🎉 Eğlence", [
+        (".burc <burç>", "Günlük burç yorumu"),
+        (".burch / .burca <burç>", "Haftalık / aylık burç"),
+        (".ses <metin>", "Metni sese çevir (TTS)"),
+        (".sesler", "Mevcut sesleri listele"),
+        (".sesayar <ses>", "Sesi değiştir (örn: kadın)"),
+        (".q", "Mesajı alıntı sticker'ı yap"),
+        (".qs", "Alıntıyı sticker paketine kaydet"),
+        (".qd / .qpaket / .qrenkler", "Sticker sil / paket bilgisi / renkler"),
+    ]),
+    ("🛠️ Araçlar", [
+        (".raw", "Mesajın ham verisini göster"),
+        (".emojiid", "Custom emoji ID'lerini göster"),
+        (".userid", "Kullanıcı bilgisi"),
+        (".id / .ping / .alive", "Sohbet-ID / gecikme / bot durumu"),
+    ]),
+    ("⚙️ Sistem", [
+        (".start", "Butonlu kontrol paneli"),
+        (".plugins", "Plugin listesi"),
+        (".pload / .punload <isim>", "Plugin yükle / kaldır"),
+        (".mystats", "İstatistiklerin"),
+        (".uhelp", "Komut yardımı"),
+    ]),
+]
+
+
+def _cmdcat_buttons(uid):
+    rows, row = [], []
+    for i, (cat, _cmds) in enumerate(ALL_COMMANDS):
+        row.append(Button.inline(cat, f"ip_cmdcat_{uid}_{i}".encode()))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([Button.inline("🔙 Geri", f"ip_main_{uid}".encode())])
+    return rows
+
+
+def _render_cmd_category(idx):
+    cat, cmds = ALL_COMMANDS[idx]
+    lines = [f"**{cat}**", ""]
+    for cmd, desc in cmds:
+        lines.append(f"`{cmd}`\n  └ {desc}")
+    lines.append("")
+    lines.append("💡 Komutlar `.` ile başlar.")
+    return "\n".join(lines)
+
+
 def register_bot_handlers(bot):
     """Bot'a inline handler'ları TÜM hesaplar için yalnızca BİR kez kaydet."""
     
@@ -188,7 +265,7 @@ def register_bot_handlers(bot):
                         Button.inline("📦 Yüklü Pluginler", f"ip_active_{user_id}_0".encode())
                     ])
                 buttons.append([
-                    Button.inline("❓ Userbot Yardım", f"ip_help_{user_id}".encode()),
+                    Button.inline("📚 Tüm Komutlar", f"ip_help_{user_id}".encode()),
                     Button.inline("📢 Plugin Kanalı", f"ip_channel_{user_id}".encode())
                 ])
                 if bot_username:
@@ -440,35 +517,42 @@ def register_bot_handlers(bot):
     
     @bot.on(events.CallbackQuery(pattern=rb"ip_help_(\d+)"))
     async def ip_help_cb(event):
-        """Yardım"""
+        """Tüm Komutlar — kategori menüsü"""
         target_user_id = int(event.pattern_match.group(1).decode())
         if target_user_id != event.sender_id:
             await event.answer("❌ Bu panel size ait değil!", alert=True)
             return
-        
-        text = "📚 **Userbot Yardım**\n\n"
-        text += "**🎛️ Panel:**\n"
-        text += "`.start` → Kontrol paneli\n"
-        text += "`.plugins` → Plugin listesi\n"
-        text += "`.mystats` → İstatistikler\n\n"
-        text += "**🔌 Plugin:**\n"
-        text += "`.pload <isim>` → Yükle\n"
-        text += "`.punload <isim>` → Kaldır\n\n"
-        text += "━━━━━━━━━━━━━━━━━━━━\n"
-        text += "💡 Komutlar `.` ile başlar"
-        
-        buttons = [
-            [Button.inline("🔌 Pluginler", f"ip_plugins_{target_user_id}_0".encode()),
-             Button.inline("📦 Yüklü", f"ip_active_{target_user_id}_0".encode())],
-            [Button.inline("🔙 Geri", f"ip_main_{target_user_id}".encode())]
-        ]
-        
+
+        text = (
+            "📚 **Tüm Komutlar**\n\n"
+            "Bir kategori seç; komutları ve ne işe yaradıklarını gör.\n"
+            "💡 Tüm komutlar `.` ile başlar."
+        )
         try:
-            await event.edit(text, buttons=buttons)
-        except:
+            await event.edit(text, buttons=_cmdcat_buttons(target_user_id))
+        except Exception:
             pass
         await event.answer()
-    
+
+    @bot.on(events.CallbackQuery(pattern=rb"ip_cmdcat_(\d+)_(\d+)"))
+    async def ip_cmdcat_cb(event):
+        """Bir kategorinin komutlarını göster"""
+        target_user_id = int(event.pattern_match.group(1).decode())
+        idx = int(event.pattern_match.group(2).decode())
+        if target_user_id != event.sender_id:
+            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            return
+        if idx < 0 or idx >= len(ALL_COMMANDS):
+            await event.answer("Kategori bulunamadı.", alert=True)
+            return
+        text = _render_cmd_category(idx)
+        buttons = [[Button.inline("🔙 Kategoriler", f"ip_help_{target_user_id}".encode())]]
+        try:
+            await event.edit(text, buttons=buttons)
+        except Exception:
+            pass
+        await event.answer()
+
     @bot.on(events.CallbackQuery(pattern=rb"ip_channel_(\d+)"))
     async def ip_channel_cb(event):
         """Plugin kanalı"""

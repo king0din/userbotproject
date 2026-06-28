@@ -36,16 +36,46 @@ Not: Türkçe için ülke kodu girmenize gerek yok sadece cinsiyet yazmanız yet
 """
 
 from telethon import events
-import asyncio
 import os
 import tempfile
 import edge_tts
+import json
 
 # Varsayılan ses (Türkçe erkek)
 DEFAULT_VOICE = "tr-TR-AhmetNeural"
 
 # Mevcut ses ayarı
 current_voice = DEFAULT_VOICE
+
+
+# ── SES TERCİHİ KALICILIĞI (restart'ta seçtiğin ses kaybolmasın) ──
+_VOICE_FILE = os.path.join(os.path.dirname(__file__), "ses_voice.json")
+
+
+def _load_voice(uid):
+    try:
+        if os.path.exists(_VOICE_FILE):
+            with open(_VOICE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f).get(str(uid))
+    except Exception:
+        pass
+    return None
+
+
+def _save_voice(uid, code):
+    data = {}
+    try:
+        if os.path.exists(_VOICE_FILE):
+            with open(_VOICE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+    except Exception:
+        pass
+    data[str(uid)] = code
+    try:
+        with open(_VOICE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
 
 # Chunk boyutu (karakter)
 CHUNK_SIZE = 4000
@@ -178,9 +208,13 @@ async def get_text_from_file(client, message):
 
 def register(client):
     
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.ses(?:\s+(.+))?$'))
+    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.(?:ses|tts)(?:\s+(.+))?$'))
     async def tts_cmd(event):
         global current_voice
+        me = await event.client.get_me()
+        _saved = _load_voice(me.id)
+        if _saved:
+            current_voice = _saved
         
         text = event.pattern_match.group(1)
         
@@ -355,6 +389,11 @@ def register(client):
     
     @client.on(events.NewMessage(outgoing=True, pattern=r'^\.sesler$'))
     async def list_voices(event):
+        global current_voice
+        me = await event.client.get_me()
+        _saved = _load_voice(me.id)
+        if _saved:
+            current_voice = _saved
         text = "🎙️ **Mevcut Sesler**\n\n"
         
         text += "**🇹🇷 Türkçe:**\n"
@@ -380,17 +419,14 @@ def register(client):
         
         if voice_input in ALL_VOICES:
             current_voice = ALL_VOICES[voice_input]
-            await event.edit(f"✅ Ses değiştirildi: `{current_voice}`")
         elif voice_input.count("-") >= 2:
             # Direkt ses kodu girilmiş olabilir (örn: tr-TR-AhmetNeural)
             current_voice = voice_input
-            await event.edit(f"✅ Ses değiştirildi: `{current_voice}`")
         else:
             await event.edit(f"❌ Ses bulunamadı: `{voice_input}`\n\n💡 Mevcut sesler için: `.sesler`")
-    
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.tts(?:\s+(.+))?$'))
-    async def tts_alias(event):
-        """Alias for .ses command - aynı işlevi görür"""
-        # .ses komutunu simüle et
-        event.pattern_match = type('obj', (object,), {'group': lambda self, x: event.text[4:].strip() if x == 1 and len(event.text) > 4 else None})()
-        await tts_cmd(event)
+            return
+
+        # Başarılı: kalıcı kaydet + bildir
+        me = await event.client.get_me()
+        _save_voice(me.id, current_voice)
+        await event.edit(f"✅ Ses değiştirildi: `{current_voice}` (kalıcı)")

@@ -51,7 +51,7 @@ from telethon.tl.types import (
     MessageEntityUrl, MessageEntityMention, MessageEntityHashtag,
     MessageEntityBotCommand, MessageEntityEmail, MessageEntityPhone,
     MessageEntityPre, MessageEntitySpoiler, MessageEntityCustomEmoji,
-    UserProfilePhoto, UserProfilePhotoEmpty
+    UserProfilePhotoEmpty
 )
 from telethon.tl.functions.messages import GetStickerSetRequest
 from telethon.tl.functions.users import GetFullUserRequest

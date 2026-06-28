@@ -33,8 +33,6 @@ from telethon.errors import (
     SlowModeWaitError,
     UserNotParticipantError,
     PeerIdInvalidError,
-    MsgIdInvalidError,
-    RPCError,
 )
 from userbot import bot
 from userbot.events import register as r
