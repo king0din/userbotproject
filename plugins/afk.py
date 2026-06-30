@@ -26,6 +26,9 @@ from telethon.tl.types import InputPhoto, EmojiStatus, EmojiStatusEmpty
 from telethon.tl import functions
 from userbot.events import register
 from userbot import CMD_HELP
+from utils.logger import get_logger
+
+log = get_logger(__name__)
 
 try:
     from userbot import TEMP_DOWNLOAD_DIRECTORY
@@ -69,8 +72,8 @@ def _afk_load_all():
         if os.path.exists(_AFK_STATE_FILE):
             with open(_AFK_STATE_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except Exception:
-        pass
+    except Exception as _e:
+        log.debug(f"AFK durumu okunamadı: {_e}")
     return {}
 
 
@@ -78,8 +81,8 @@ def _afk_save_all(data):
     try:
         with open(_AFK_STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f)
-    except Exception:
-        pass
+    except Exception as _e:
+        log.warning(f"AFK durumu kaydedilemedi: {_e}")
 
 
 def _default_profile():
@@ -149,7 +152,7 @@ async def download_all_profile_photos(client, user_id, save_dir, prefix="photo",
                                 if downloaded:
                                     photos_info.append((downloaded, True))
                                     break
-                            except:
+                            except Exception:
                                 file_path = os.path.join(save_dir, f"{prefix}_{idx}.jpg")
                                 downloaded = await client.download_media(photo, file=file_path)
                                 if downloaded:
@@ -160,10 +163,11 @@ async def download_all_profile_photos(client, user_id, save_dir, prefix="photo",
                     downloaded = await client.download_media(photo, file=file_path)
                     if downloaded:
                         photos_info.append((downloaded, False))
-            except:
+            except Exception as _e:
+                log.debug(f"profil fotoğrafı atlandı: {_e}")
                 continue
-    except:
-        pass
+    except Exception as _e:
+        log.warning(f"profil fotoğrafları indirilemedi: {_e}")
     return photos_info
 
 
@@ -179,8 +183,8 @@ async def delete_all_my_photos(client):
                 await client(DeletePhotosRequest(id=input_photos))
             else:
                 break
-    except:
-        pass
+    except Exception as _e:
+        log.warning(f"profil fotoğrafları silinemedi: {_e}")
 
 
 @register(outgoing=True, pattern=r"^\.afk$")

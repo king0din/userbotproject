@@ -617,10 +617,11 @@ _CATS = {
     "sor": ("❓ Soru", "soru"),
     "kom": ("😂 Komik", "komik"),
     "sog": ("🥶 Soğuk Espri", "soğuk espri"),
+    "ozel": ("✏️ Özel", "özel"),
 }
 
 
-def _make_phrase_picker(category):
+def _make_phrase_picker(category, custom_pool=None):
     """
     Bir kategori icin "son K kisi icinde tekrar etmeyen" soz secici dondurur.
     K = min(50, havuz-1)  -> havuz >= 50 ise ARDISIK 50 kiside ayni soz gelmez.
@@ -628,7 +629,7 @@ def _make_phrase_picker(category):
      kosulu da otomatik saglanir.)
     """
     from collections import deque
-    pool = list(TAG_PHRASES.get(category) or ["📢"])
+    pool = list(custom_pool) if custom_pool else list(TAG_PHRASES.get(category) or ["📢"])
     K = min(50, max(0, len(pool) - 1))
     recent = deque(maxlen=K)
 
@@ -642,6 +643,103 @@ def _make_phrase_picker(category):
         return p
 
     return pick
+
+
+# ======================================================================
+# OZEL IFADELER (kullanici basina, kalici)
+# ======================================================================
+_TAG_CUSTOM_FILE = os.path.join(os.path.dirname(__file__), "tag_custom.json")
+
+
+def _tag_load_custom_all():
+    try:
+        if os.path.exists(_TAG_CUSTOM_FILE):
+            with open(_TAG_CUSTOM_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _tag_save_custom_all(data):
+    try:
+        with open(_TAG_CUSTOM_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _tag_load_custom(uid):
+    v = _tag_load_custom_all().get(str(uid), [])
+    return v if isinstance(v, list) else []
+
+
+def _tag_set_custom(uid, phrases):
+    data = _tag_load_custom_all()
+    data[str(uid)] = phrases
+    _tag_save_custom_all(data)
+
+
+@r(outgoing=True, pattern=r"(?s)^\.tagekle (.+)$")
+async def tag_custom_add(event):
+    """Özel etiketleme ifadesi ekle. İçinde {mention} yoksa başa eklenir."""
+    me = await event.client.get_me()
+    if event.sender_id != me.id:
+        return
+    phrase = (event.pattern_match.group(1) or "").strip()
+    if not phrase:
+        await event.edit("❌ İfade boş olamaz.")
+        return
+    if "{mention}" not in phrase:
+        phrase = "{mention} " + phrase
+    phrases = _tag_load_custom(me.id)
+    if len(phrases) >= 100:
+        await event.edit("❌ En fazla 100 özel ifade olabilir.")
+        return
+    phrases.append(phrase)
+    _tag_set_custom(me.id, phrases)
+    await event.edit(f"✅ Özel ifade eklendi ({len(phrases)} ifade).\n`{phrase}`")
+
+
+@r(outgoing=True, pattern=r"^\.tagliste$")
+async def tag_custom_list(event):
+    """Özel ifadeleri listele."""
+    me = await event.client.get_me()
+    if event.sender_id != me.id:
+        return
+    phrases = _tag_load_custom(me.id)
+    if not phrases:
+        await event.edit("📭 Özel ifaden yok. Ekle: `.tagekle <ifade>` (içinde {mention} kullanabilirsin).")
+        return
+    lines = [f"`{i + 1}.` {ph}" for i, ph in enumerate(phrases)]
+    await event.edit("✏️ **Özel İfadelerin:**\n\n" + "\n".join(lines) +
+                     "\n\n🏷️ Kullanmak için `.tag` yaz → **✏️ Özel** kategorisini seç.")
+
+
+@r(outgoing=True, pattern=r"^\.tagsil (\d+)$")
+async def tag_custom_del(event):
+    """Numarayla özel ifade sil."""
+    me = await event.client.get_me()
+    if event.sender_id != me.id:
+        return
+    phrases = _tag_load_custom(me.id)
+    n = int(event.pattern_match.group(1))
+    if n < 1 or n > len(phrases):
+        await event.edit(f"❌ Geçersiz numara. 1–{len(phrases)} arası ver (`.tagliste` ile bak).")
+        return
+    removed = phrases.pop(n - 1)
+    _tag_set_custom(me.id, phrases)
+    await event.edit(f"🗑️ Silindi: `{removed}`\nKalan: {len(phrases)} ifade.")
+
+
+@r(outgoing=True, pattern=r"^\.tagtemizle$")
+async def tag_custom_clear(event):
+    """Tüm özel ifadeleri sil."""
+    me = await event.client.get_me()
+    if event.sender_id != me.id:
+        return
+    _tag_set_custom(me.id, [])
+    await event.edit("🧹 Tüm özel ifaden silindi.")
 
 
 # ======================================================================
@@ -827,8 +925,11 @@ def _register_tag_bot_handlers(bot):
             return
         _ensure_state(bot)
         pend = bot._tag_pending.get(owner)
-        if not pend or key not in TAG_PHRASES:
+        if not pend or (key not in TAG_PHRASES and key != "ozel"):
             await event.answer("Panel zaman aşımına uğradı, tekrar .tag yazın.", alert=True)
+            return
+        if key == "ozel" and not _tag_load_custom(owner):
+            await event.answer("Önce `.tagekle <ifade>` ile özel ifade ekle.", alert=True)
             return
         pend["category"] = key
         # Grup boyutunu kullanıcı seçsin (sözlü modda da: 1 önerilir)
@@ -1036,7 +1137,12 @@ async def run_tag_job(owner_id, chat_id, mode, group_size, interval,
     except Exception:
         my_id = None
 
-    picker = _make_phrase_picker(category) if category else None
+    if category == "ozel":
+        picker = _make_phrase_picker(category, custom_pool=_tag_load_custom(owner_id))
+    elif category:
+        picker = _make_phrase_picker(category)
+    else:
+        picker = None
     flt = ChannelParticipantsAdmins() if mode == "admin" else None
 
     try:

@@ -332,6 +332,7 @@ async def _task_loop(client, task_id: str, notify_chat_id: int, initial_delay: i
     interval  = task.get("interval_seconds") or task.get("interval_minutes", 1) * 60
     max_count = task["repeat_count"]           # 0 = sınırsız
     message   = task["message"]
+    media_path = task.get("media_path")
     sent      = task.get("sent_count", 0)
     consecutive_errors = 0
     MAX_CONSECUTIVE = 5  # üst üste bu kadar hata olursa görevi oto-durdur
@@ -398,7 +399,7 @@ async def _task_loop(client, task_id: str, notify_chat_id: int, initial_delay: i
 
         # Mesajı gönder
         try:
-            await client.send_message(target, message)
+            await _om_send(client, target, media_path, message)
             sent += 1
             consecutive_errors = 0
             tasks_data[task_id]["sent_count"] = sent
@@ -436,7 +437,7 @@ async def _task_loop(client, task_id: str, notify_chat_id: int, initial_delay: i
             await asyncio.sleep(wait)
             # Slow mode bittikten sonra tekrar gönder
             try:
-                await client.send_message(target, message)
+                await _om_send(client, target, media_path, message)
                 sent += 1
                 tasks_data[task_id]["sent_count"] = sent
                 tasks_data[task_id]["last_sent"] = int(time.time())
@@ -583,6 +584,184 @@ def _omsg_page_buttons(owner, page, total_pages):
     return rows
 
 
+# ── BUTONLU EKLEME AKIŞI (.otomsg <metin> → butonlarla aralık + adet) ──
+import uuid as _uuid
+
+OM_MAX_TASKS = 50  # kullanıcı başına maksimum görev sayısı
+OM_COUNT_CHOICES = [5, 30, 60, 120, 300, 500, 1000, 10000, 0]  # 0 = sınırsız
+
+
+def _user_task_count(owner_id):
+    """Kullanıcının diskteki görev sayısı (limit kontrolü için)."""
+    try:
+        return len(_load_tasks_raw().get(str(owner_id), {}))
+    except Exception:
+        return 0
+
+
+def _om_pending_store(bot):
+    """Bekleyen akış durumunu bot nesnesinde tutar (instance'lar arası paylaşımlı)."""
+    if not hasattr(bot, "_om_pending"):
+        bot._om_pending = {}
+    return bot._om_pending
+
+
+OM_PENDING_TTL = 600  # bekleyen akış ömrü (sn): 10 dk sonra terk edilmiş sayılır
+
+
+def _om_prune_pending(bot):
+    """Terk edilmiş (tamamlanmamış) bekleyen akışları temizler — bellek sızıntısını önler."""
+    store = _om_pending_store(bot)
+    if not store:
+        return
+    now = int(time.time())
+    stale = [pid for pid, p in list(store.items()) if now - p.get("ts", now) > OM_PENDING_TTL]
+    for pid in stale:
+        sp = store.pop(pid, None)
+        if sp and sp.get("media_path"):
+            _om_remove_media(sp["media_path"])
+
+
+def _om_interval_text():
+    return "**⏱️ OtoMsg — Aralık**\n\nMesaj kaç **dakikada bir** gönderilsin?"
+
+
+def _om_interval_buttons(pid):
+    from telethon import Button
+    rows, row = [], []
+    for n in range(1, 31):
+        row.append(Button.inline(str(n), f"om_iv_{pid}_{n}".encode()))
+        if len(row) == 6:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([Button.inline("❌ İptal", f"om_cx_{pid}".encode())])
+    return rows
+
+
+def _om_count_text(minutes):
+    return (f"**🔁 OtoMsg — Adet**\n\nHer **{minutes} dakikada** bir gönderilecek.\n"
+            f"Kaç **kez** gönderilsin?")
+
+
+def _om_count_buttons(pid):
+    from telethon import Button
+    labels = [("5", "5"), ("30", "30"), ("60", "60"), ("120", "120"),
+              ("300", "300"), ("500", "500"), ("1000", "1000"), ("10000", "10000"),
+              ("♾️ Sınırsız", "0")]
+    rows, row = [], []
+    for label, val in labels:
+        row.append(Button.inline(label, f"om_ct_{pid}_{val}".encode()))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([Button.inline("⬅️ Geri", f"om_bk_{pid}".encode()),
+                 Button.inline("❌ İptal", f"om_cx_{pid}".encode())])
+    return rows
+
+
+def _om_help_text():
+    return (
+        "**⚙️ OtoMsg — Kullanım**\n\n"
+        "**En kolay yol:** Eklemek istediğin grupta sadece mesajı yaz:\n"
+        "`.otomsg <mesaj>`\n"
+        "→ Ardından **butonlardan** kaç dakikada bir ve kaç kez gönderileceğini seç.\n"
+        "Komut silinir, grupta iz kalmaz.\n\n"
+        "**📎 Medya:** Bir foto/video/dosyayı **yanıtlayıp** `.otomsg <caption>` yaz "
+        "(caption boş olabilir) → o medya tekrar tekrar gönderilir.\n\n"
+        "**Diğer komutlar:**\n"
+        "`.otomsgl` → Görevlerin (butonlu liste)\n"
+        "`.otomsgstop <id>` / `.otomsgstart <id>` → Durdur / başlat\n"
+        "`.otomsgstartall` / `.otomsgstopall` → Tümünü\n"
+        "`.otomsgdel <id>` → Sil\n"
+        "`.otomsgduzenle <id> mesaj|aralık|tekrar <değer>` → Görevi düzenle\n"
+        "`.otomsg ekle <chat> <dk> <tekrar> <mesaj>` → Elle ekleme (ileri düzey)\n"
+        "`.otomsghelp` → Detaylı yardım"
+    )
+
+
+def _om_help_buttons(owner):
+    from telethon import Button
+    return [[Button.inline("📋 Görevlerim", f"om_list_{owner}".encode()),
+             Button.inline("❌ Kapat", f"omsgcls_{owner}".encode())]]
+
+
+async def create_task_from_flow(client, chat_id, chat_title, message, minutes, count, notify_to, media_path=None):
+    """Buton akışından görev oluştur + başlat.
+    SAHİBİN modül instance'ında çağrılır → tasks_data/running_tasks doğru sahibe ait."""
+    await load_my_tasks(client)
+    task_id = _next_task_id()
+    tasks_data[task_id] = {
+        "chat_id": chat_id,
+        "chat_title": chat_title,
+        "chat_raw": str(chat_id),
+        "interval_seconds": minutes * 60,
+        "interval_label": f"{minutes} dakika",
+        "repeat_count": count,  # 0 = sınırsız
+        "message": message,
+        "media_path": media_path,
+        "sent_count": 0,
+        "status": "running",
+        "created_at": int(time.time()),
+        "last_sent": None,
+        "last_error": None,
+    }
+    await save_my_tasks(client)
+    await _start_task(client, task_id, notify_to)
+    return task_id
+
+
+async def _show_om_flow_panel(q, pid):
+    """Aralık panelini gösterir: sohbet inline destekliyorsa satıriçi, değilse bottan özelden."""
+    bot = _get_bot()
+    if bot is not None:
+        _register_otomsg_bot_handlers(bot)
+    bu = _get_bot_username()
+    if bot is not None and bu:
+        try:
+            results = await q.client.inline_query(bu, f"omadd_{pid}")
+            if results:
+                await results[0].click(q.chat_id)
+                return True
+        except Exception:
+            pass
+    if bot is not None:
+        try:
+            owner = _om_pending_store(bot).get(pid, {}).get("owner")
+            if owner:
+                await bot.send_message(owner, _om_interval_text(), buttons=_om_interval_buttons(pid))
+                return True
+        except Exception:
+            pass
+    return False
+
+
+async def _show_om_help_panel(q, owner):
+    """Kullanım kılavuzu panelini gösterir (inline ya da özelden)."""
+    bot = _get_bot()
+    if bot is not None:
+        _register_otomsg_bot_handlers(bot)
+    bu = _get_bot_username()
+    if bot is not None and bu:
+        try:
+            results = await q.client.inline_query(bu, f"omhelp_{owner}")
+            if results:
+                await results[0].click(q.chat_id)
+                return True
+        except Exception:
+            pass
+    if bot is not None:
+        try:
+            await bot.send_message(owner, _om_help_text(), buttons=_om_help_buttons(owner))
+            return True
+        except Exception:
+            pass
+    return False
+
+
 def _register_otomsg_bot_handlers(bot):
     if getattr(bot, "_otomsg_pag_registered", False):
         return
@@ -629,6 +808,147 @@ def _register_otomsg_bot_handlers(bot):
             return
         try:
             await event.edit("✅ Liste kapatıldı.")
+        except Exception:
+            pass
+
+    @bot.on(events.InlineQuery())
+    async def _om_flow_inline(event):
+        qtext = event.text or ""
+        ma = _re.match(r"omadd_([0-9a-f]+)$", qtext)
+        mh = _re.match(r"omhelp_(\d+)$", qtext)
+        if ma:
+            pid = ma.group(1)
+            try:
+                result = event.builder.article(
+                    title="⏱️ OtoMsg — Aralık seç",
+                    description="Kaç dakikada bir gönderilsin?",
+                    text=_om_interval_text(),
+                    buttons=_om_interval_buttons(pid),
+                )
+                await event.answer([result], cache_time=0)
+            except Exception:
+                pass
+        elif mh:
+            owner = int(mh.group(1))
+            try:
+                result = event.builder.article(
+                    title="⚙️ OtoMsg — Kullanım",
+                    description="Buton menüsü",
+                    text=_om_help_text(),
+                    buttons=_om_help_buttons(owner),
+                )
+                await event.answer([result], cache_time=0)
+            except Exception:
+                pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"om_iv_([0-9a-f]+)_(\d+)"))
+    async def _om_iv_cb(event):
+        pid = event.pattern_match.group(1).decode()
+        minutes = int(event.pattern_match.group(2).decode())
+        pend = _om_pending_store(bot).get(pid)
+        if not pend or event.sender_id != pend.get("owner"):
+            await event.answer("Bu menü sana ait değil veya süresi doldu.", alert=True)
+            return
+        pend["interval"] = minutes
+        try:
+            await event.edit(_om_count_text(minutes), buttons=_om_count_buttons(pid))
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"om_bk_([0-9a-f]+)"))
+    async def _om_bk_cb(event):
+        pid = event.pattern_match.group(1).decode()
+        pend = _om_pending_store(bot).get(pid)
+        if not pend or event.sender_id != pend.get("owner"):
+            await event.answer("Bu menü sana ait değil veya süresi doldu.", alert=True)
+            return
+        try:
+            await event.edit(_om_interval_text(), buttons=_om_interval_buttons(pid))
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"om_cx_([0-9a-f]+)"))
+    async def _om_cx_cb(event):
+        pid = event.pattern_match.group(1).decode()
+        store = _om_pending_store(bot)
+        pend = store.get(pid)
+        if pend and event.sender_id != pend.get("owner"):
+            await event.answer("Bu menü sana ait değil.", alert=True)
+            return
+        store.pop(pid, None)
+        try:
+            await event.edit("❌ OtoMsg ekleme iptal edildi.")
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"om_ct_([0-9a-f]+)_(\d+)"))
+    async def _om_ct_cb(event):
+        pid = event.pattern_match.group(1).decode()
+        count = int(event.pattern_match.group(2).decode())
+        store = _om_pending_store(bot)
+        pend = store.get(pid)
+        if not pend or event.sender_id != pend.get("owner"):
+            await event.answer("Bu menü sana ait değil veya süresi doldu.", alert=True)
+            return
+        owner = pend["owner"]
+        minutes = pend.get("interval") or 1
+        try:
+            from userbot.smart_manager import smart_session_manager
+            client = smart_session_manager.get_client(owner)
+        except Exception:
+            client = None
+        if client is None:
+            await event.answer("Hesap bağlantısı bulunamadı.", alert=True)
+            return
+        if _user_task_count(owner) >= OM_MAX_TASKS:
+            store.pop(pid, None)
+            try:
+                await event.edit(f"❌ En fazla {OM_MAX_TASKS} görev olabilir.")
+            except Exception:
+                pass
+            return
+        task_id = None
+        try:
+            owner_module = None
+            try:
+                from userbot.plugins import plugin_manager
+                owner_module = plugin_manager.user_active_plugins.get(owner, {}).get("otomsg")
+            except Exception:
+                owner_module = None
+            creator = getattr(owner_module, "create_task_from_flow", None) or create_task_from_flow
+            task_id = await creator(client, pend["chat_id"], pend["chat_title"],
+                                    pend["text"], minutes, count, pend["notify_to"], pend.get("media_path"))
+        except Exception as e:
+            store.pop(pid, None)
+            try:
+                await event.edit(f"❌ Görev oluşturulamadı: {e}")
+            except Exception:
+                pass
+            return
+        store.pop(pid, None)
+        cnt_label = "sınırsız" if count == 0 else f"{count} kez"
+        msg_short = (pend["text"][:60] + "…") if len(pend["text"]) > 60 else pend["text"]
+        try:
+            await event.edit(
+                f"✅ **OtoMsg eklendi!**\n\n"
+                f"🆔 `{task_id}`\n"
+                f"💬 {pend['chat_title']}\n"
+                f"⏱️ Her {minutes} dk · 🔁 {cnt_label}\n"
+                f"📝 `{msg_short}`\n\n"
+                f"📋 `.otomsgl`  ·  ⏸️ `.otomsgstop {task_id}`  ·  🗑️ `.otomsgdel {task_id}`"
+            )
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"om_list_(\d+)"))
+    async def _om_list_cb(event):
+        owner = int(event.pattern_match.group(1).decode())
+        if event.sender_id != owner:
+            await event.answer("Bu liste sana ait değil.", alert=True)
+            return
+        text, total_pages, total = _render_omsg_page(owner, 0)
+        try:
+            await event.edit(text, buttons=_omsg_page_buttons(owner, 0, total_pages) if total_pages else None)
         except Exception:
             pass
 
@@ -775,86 +1095,146 @@ async def otomsg_add(q):
     )
 
 
-@r(outgoing=True, pattern=r"(?s)^\.otomsg (?!ekle(?: |$))(.+?)\s+(\d+)\s*$")
-async def otomsg_quick_add(q):
-    """Hızlı ekleme: bulunduğun grupta `.otomsg <mesaj> <dakika>` yaz → o gruba ekler.
-    Komut silinir, grupta hiçbir bildirim çıkmaz, onay bota (yoksa Kayıtlı Mesajlar'a) gider."""
-    me = await q.client.get_me()
-    if q.sender_id != me.id:
-        return
+# ── MEDYA DESTEĞİ (bir medyayı yanıtlayıp .otomsg → medyalı görev) ──
+OM_MEDIA_DIR = os.path.join(os.path.dirname(__file__), "otomsg_media")
+try:
+    os.makedirs(OM_MEDIA_DIR, exist_ok=True)
+except Exception:
+    pass
 
-    message = q.pattern_match.group(1).strip()
-    minutes = int(q.pattern_match.group(2))
 
-    # Onay + görev bildirimleri buraya gider (GRUBA DEĞİL): bot varsa bot, yoksa Kayıtlı Mesajlar
-    bu = _get_bot_username()
-    notify_to = f"@{bu}" if bu else "me"
-
-    # Komutu hemen sil (grupta iz kalmasın)
+async def _om_reply_has_media(q):
+    """Komut bir MEDYA mesajını yanıtlıyor mu?"""
     try:
-        await q.delete()
+        if getattr(q, "reply_to_msg_id", None):
+            r = await q.get_reply_message()
+            return bool(r and getattr(r, "media", None))
+    except Exception:
+        pass
+    return False
+
+
+async def _om_download_reply_media(q, pid):
+    """Yanıtlanan medyayı OM_MEDIA_DIR/{pid}* olarak indirir, yolu döndürür (yoksa None)."""
+    try:
+        if not getattr(q, "reply_to_msg_id", None):
+            return None
+        r = await q.get_reply_message()
+        if not r or not getattr(r, "media", None):
+            return None
+        return await q.client.download_media(r, file=os.path.join(OM_MEDIA_DIR, pid))
+    except Exception:
+        return None
+
+
+def _om_remove_media(path):
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
     except Exception:
         pass
 
-    if not message:
+
+async def _om_send(client, target, media_path, message):
+    """Görev mesajını gönderir: medya varsa caption ile dosya, yoksa düz metin."""
+    if media_path and os.path.exists(media_path):
+        await client.send_file(target, media_path, caption=(message or None))
+    else:
+        await client.send_message(target, message)
+
+
+async def _om_begin_flow(q, me, message):
+    """50 limit + hedef + bot + (varsa) medya indir + bekleyen kayıt + buton paneli."""
+    bu = _get_bot_username()
+    notify_to = f"@{bu}" if bu else "me"
+    if _user_task_count(me.id) >= OM_MAX_TASKS:
         try:
-            await q.client.send_message(notify_to, "❌ OtoMsg: mesaj boş olamaz.")
+            await q.delete()
+        except Exception:
+            pass
+        try:
+            await q.client.send_message(notify_to, f"❌ OtoMsg: en fazla {OM_MAX_TASKS} görev olabilir. Sil: `.otomsgdel <id>`")
         except Exception:
             pass
         return
-    if minutes < 1:
-        try:
-            await q.client.send_message(notify_to, "❌ OtoMsg: dakika en az 1 olmalı.")
-        except Exception:
-            pass
-        return
-
-    await load_my_tasks(q.client)
-
-    # Bulunduğumuz grup = hedef
     chat_id = q.chat_id
     try:
         chat = await q.get_chat()
         chat_title = getattr(chat, "title", None) or getattr(chat, "first_name", None) or str(chat_id)
     except Exception:
         chat_title = str(chat_id)
-
-    interval_seconds = minutes * 60
-    interval_label = f"{minutes} dakika"
-
-    task_id = _next_task_id()
-    tasks_data[task_id] = {
+    bot = _get_bot()
+    if bot is None:
+        try:
+            await q.delete()
+        except Exception:
+            pass
+        try:
+            await q.client.send_message(notify_to, "❌ OtoMsg: bot bulunamadı, panel açılamadı.")
+        except Exception:
+            pass
+        return
+    _om_prune_pending(bot)
+    pid = _uuid.uuid4().hex[:8]
+    media_path = await _om_download_reply_media(q, pid)
+    if media_path is None and not message:
+        return
+    _om_pending_store(bot)[pid] = {
+        "owner": me.id,
+        "text": message,
         "chat_id": chat_id,
         "chat_title": chat_title,
-        "chat_raw": str(chat_id),
-        "interval_seconds": interval_seconds,
-        "interval_label": interval_label,
-        "repeat_count": 0,  # sınırsız
-        "message": message,
-        "sent_count": 0,
-        "status": "running",
-        "created_at": int(time.time()),
-        "last_sent": None,
-        "last_error": None,
+        "notify_to": notify_to,
+        "interval": None,
+        "media_path": media_path,
+        "ts": int(time.time()),
     }
-    await save_my_tasks(q.client)
-
-    # Döngüyü başlat — bildirimler GRUBA değil notify_to'ya gider
-    await _start_task(q.client, task_id, notify_to)
-
-    # Onayı bota gönder (grupta DEĞİL)
+    ok = await _show_om_flow_panel(q, pid)
     try:
-        await q.client.send_message(
-            notify_to,
-            f"✅ **OtoMsg eklendi** (hızlı)\n\n"
-            f"🆔 Görev: `{task_id}`\n"
-            f"💬 Grup: {chat_title} (`{chat_id}`)\n"
-            f"⏱️ Aralık: {interval_label} · 🔁 sınırsız\n"
-            f"📄 Mesaj: `{message[:80]}{'…' if len(message) > 80 else ''}`\n\n"
-            f"⏸️ Durdur: `.otomsgstop {task_id}`   🗑️ Sil: `.otomsgdel {task_id}`"
-        )
+        await q.delete()
     except Exception:
         pass
+    if not ok:
+        pp = _om_pending_store(bot).pop(pid, None)
+        if pp and pp.get("media_path"):
+            _om_remove_media(pp["media_path"])
+        try:
+            await q.client.send_message(notify_to, "❌ OtoMsg: buton paneli açılamadı. Elle: `.otomsg ekle ...`")
+        except Exception:
+            pass
+
+
+@r(outgoing=True, pattern=r"^\.otomsg$")
+async def otomsg_menu(q):
+    """`.otomsg` → bir medyayı yanıtladıysan medyalı görev akışı, yoksa butonlu kullanım kılavuzu."""
+    me = await q.client.get_me()
+    if q.sender_id != me.id:
+        return
+    if await _om_reply_has_media(q):
+        await _om_begin_flow(q, me, "")
+        return
+    ok = await _show_om_help_panel(q, me.id)
+    try:
+        await q.delete()
+    except Exception:
+        pass
+    if not ok:
+        try:
+            await q.client.send_message("me", _om_help_text())
+        except Exception:
+            pass
+
+
+@r(outgoing=True, pattern=r"(?s)^\.otomsg (?!ekle(?: |$))(.+)$")
+async def otomsg_flow(q):
+    """`.otomsg <mesaj>` → metin veya (yanıtlanan medya + caption) görevi; butonlarla aralık+adet."""
+    me = await q.client.get_me()
+    if q.sender_id != me.id:
+        return
+    message = (q.pattern_match.group(1) or "").strip()
+    if not message and not await _om_reply_has_media(q):
+        return
+    await _om_begin_flow(q, me, message)
 
 
 @r(outgoing=True, pattern=r"^\.otomsgs$")
@@ -957,6 +1337,7 @@ async def otomsg_delete(q):
         running_tasks.pop(task_id, None)
 
     chat_title = tasks_data[task_id].get("chat_title", "?")
+    _om_remove_media(tasks_data[task_id].get("media_path"))
     del tasks_data[task_id]
     await save_my_tasks(q.client)
 
@@ -1045,6 +1426,70 @@ async def otomsg_copy(q):
         f"Durdurmak için: `.otomsgstop {new_id}`\n"
         f"Silmek için: `.otomsgdel {new_id}`"
     )
+
+
+@r(outgoing=True, pattern=r"(?s)^\.otomsgduzenle (\S+)\s+(mesaj|aralık|aralik|tekrar|adet)\s+(.+)$")
+async def otomsg_edit(q):
+    """Var olan görevi düzenle: `.otomsgduzenle <id> mesaj|aralık|tekrar <değer>`.
+    Çalışan görev yeni ayarla yeniden başlatılır (gönderim sayacı korunur)."""
+    me = await q.client.get_me()
+    if q.sender_id != me.id:
+        return
+    await load_my_tasks(q.client)
+
+    task_id = q.pattern_match.group(1).strip()
+    field = q.pattern_match.group(2).strip().lower()
+    value = q.pattern_match.group(3).strip()
+
+    if task_id not in tasks_data:
+        await q.edit(f"❌ **#{task_id} ID'li görev bulunamadı!**")
+        return
+
+    if field == "mesaj":
+        if not value:
+            await q.edit("❌ Mesaj boş olamaz.")
+            return
+        tasks_data[task_id]["message"] = value
+        changed = f"📝 Mesaj güncellendi: `{value[:60]}{'…' if len(value) > 60 else ''}`"
+    elif field in ("aralık", "aralik"):
+        try:
+            minutes = int(value)
+        except ValueError:
+            await q.edit("❌ Aralık bir sayı (dakika) olmalı. Örn: `.otomsgduzenle 1 aralık 15`")
+            return
+        if minutes < 1:
+            await q.edit("❌ Aralık en az 1 dakika olmalı.")
+            return
+        tasks_data[task_id]["interval_seconds"] = minutes * 60
+        tasks_data[task_id]["interval_label"] = f"{minutes} dakika"
+        changed = f"⏱️ Aralık güncellendi: her {minutes} dakika"
+    else:  # tekrar / adet
+        try:
+            count = int(value)
+        except ValueError:
+            await q.edit("❌ Tekrar bir sayı olmalı (0 = sınırsız). Örn: `.otomsgduzenle 1 tekrar 100`")
+            return
+        if count < 0:
+            await q.edit("❌ Tekrar 0 veya daha büyük olmalı (0 = sınırsız).")
+            return
+        tasks_data[task_id]["repeat_count"] = count
+        # Tamamlanmış görevi yeni limit yeterliyse yeniden canlandır
+        if tasks_data[task_id].get("status") == "completed" and (count == 0 or count > tasks_data[task_id].get("sent_count", 0)):
+            tasks_data[task_id]["status"] = "running"
+        changed = f"🔁 Tekrar güncellendi: {'sınırsız' if count == 0 else str(count) + ' kez'}"
+
+    await save_my_tasks(q.client)
+
+    # Çalışan görevi yeni ayarlarla yeniden başlat (döngü interval/mesaj'ı başta okur)
+    t = running_tasks.pop(task_id, None)
+    if t is not None and not t.done():
+        t.cancel()
+    if tasks_data[task_id].get("status") == "running":
+        bu = _get_bot_username()
+        notify_to = f"@{bu}" if bu else "me"
+        await _start_task(q.client, task_id, notify_to)
+
+    await q.edit(f"✅ **Görev #{task_id} düzenlendi**\n\n{changed}")
 
 
 @r(outgoing=True, pattern=r"^\.otomsgstop(?: |$)(.*)")

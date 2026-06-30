@@ -29,6 +29,9 @@ from telethon.tl.types import InputPhoto, EmojiStatus, EmojiStatusEmpty
 from telethon.tl import functions
 from userbot.events import register
 from userbot import CMD_HELP
+from utils.logger import get_logger
+
+log = get_logger(__name__)
 
 try:
     from userbot import TEMP_DOWNLOAD_DIRECTORY
@@ -40,6 +43,13 @@ except ImportError:
 ORIGINAL_PROFILE_DIR = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "original_profile")
 if not os.path.exists(ORIGINAL_PROFILE_DIR):
     os.makedirs(ORIGINAL_PROFILE_DIR)
+
+
+def _user_original_dir(uid):
+    """Kullanıcı-başına orijinal profil foto dizini (çoklu hesapta foto çakışmasını önler)."""
+    d = os.path.join(ORIGINAL_PROFILE_DIR, str(uid))
+    os.makedirs(d, exist_ok=True)
+    return d
 
 # Şeffaf/Görünmez emoji ID (https://t.me/addemoji/blank25 paketinden)
 # Premium olmayan kullanıcı klonlanınca bu emoji kullanılır
@@ -56,7 +66,8 @@ ORIGINAL_PROFILE = {
     "photos": [],
     "photo_count": 0,
     "emoji_status": None,
-    "is_saved": False
+    "is_saved": False,
+    "is_cloned": False
 }
 
 
@@ -71,8 +82,8 @@ def _clon_load_all():
         if os.path.exists(_CLON_STATE_FILE):
             with open(_CLON_STATE_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except Exception:
-        pass
+    except Exception as _e:
+        log.debug(f"Klon durumu okunamadı: {_e}")
     return {}
 
 
@@ -80,13 +91,13 @@ def _clon_save_all(data):
     try:
         with open(_CLON_STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f)
-    except Exception:
-        pass
+    except Exception as _e:
+        log.warning(f"Klon durumu kaydedilemedi: {_e}")
 
 
 def _default_profile():
     return {"first_name": None, "last_name": None, "about": None,
-            "photos": [], "photo_count": 0, "emoji_status": None, "is_saved": False}
+            "photos": [], "photo_count": 0, "emoji_status": None, "is_saved": False, "is_cloned": False}
 
 
 def _load_state(uid):
@@ -121,6 +132,9 @@ def cleanup_user_data(user_id, reason="disable"):
         state = _load_state(user_id)
         if state.get("is_saved") and reason != "delete":
             return
+        udir = os.path.join(ORIGINAL_PROFILE_DIR, str(user_id))
+        if os.path.isdir(udir):
+            shutil.rmtree(udir, ignore_errors=True)
         data = _clon_load_all()
         if str(user_id) in data:
             data.pop(str(user_id), None)
@@ -149,7 +163,7 @@ async def download_all_profile_photos(client, user_id, save_dir, prefix="photo",
                                 if downloaded:
                                     photos_info.append((downloaded, True))
                                     break
-                            except:
+                            except Exception:
                                 file_path = os.path.join(save_dir, f"{prefix}_{idx}.jpg")
                                 downloaded = await client.download_media(photo, file=file_path)
                                 if downloaded:
@@ -160,10 +174,11 @@ async def download_all_profile_photos(client, user_id, save_dir, prefix="photo",
                     downloaded = await client.download_media(photo, file=file_path)
                     if downloaded:
                         photos_info.append((downloaded, False))
-            except:
+            except Exception as _e:
+                log.debug(f"profil fotoğrafı atlandı: {_e}")
                 continue
-    except:
-        pass
+    except Exception as _e:
+        log.warning(f"profil fotoğrafları indirilemedi: {_e}")
     return photos_info
 
 
@@ -178,8 +193,8 @@ async def delete_all_my_photos(client):
                 await client(DeletePhotosRequest(id=input_photos))
             else:
                 break
-    except:
-        pass
+    except Exception as _e:
+        log.warning(f"profil fotoğrafları silinemedi: {_e}")
 
 
 async def get_target_user(client, event, input_str=None):
@@ -274,13 +289,14 @@ async def do_clone(event, input_str):
             ORIGINAL_PROFILE["last_name"] = me.last_name or ""
             ORIGINAL_PROFILE["about"] = my_full.full_user.about or "" if hasattr(my_full, 'full_user') else ""
 
-            for f in os.listdir(ORIGINAL_PROFILE_DIR):
+            _udir = _user_original_dir(me.id)
+            for f in os.listdir(_udir):
                 try:
-                    os.remove(os.path.join(ORIGINAL_PROFILE_DIR, f))
+                    os.remove(os.path.join(_udir, f))
                 except Exception:
                     pass
 
-            ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, ORIGINAL_PROFILE_DIR, "original", max_count=MAX_PHOTOS)
+            ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, _udir, "original", max_count=MAX_PHOTOS)
             ORIGINAL_PROFILE["photo_count"] = len(ORIGINAL_PROFILE["photos"])
 
             if hasattr(me, 'emoji_status') and me.emoji_status and hasattr(me.emoji_status, 'document_id'):
@@ -370,6 +386,9 @@ async def do_clone(event, input_str):
         photo_status = f"{len(target_photos)} fotoğraf/video" if target_photos else "fotoğraf yok"
         bio_status = "bio var" if user_bio else "bio yok"
 
+        ORIGINAL_PROFILE["is_cloned"] = True
+        _save_state(me.id, ORIGINAL_PROFILE)
+
         await event.edit(f"`✅ Klonlandı! ({photo_status}, {bio_status}{emoji_status_msg})`")
 
     except Exception as e:
@@ -424,6 +443,9 @@ async def unclone(event):
                     except Exception:
                         pass
 
+        ORIGINAL_PROFILE["is_cloned"] = False
+        _save_state(me.id, ORIGINAL_PROFILE)
+
         if uploaded_count > 0:
             await event.edit(f"`✅ Orijinal profile döndün! ({uploaded_count} fotoğraf/video)`")
         else:
@@ -471,13 +493,14 @@ async def save_my_profile(event):
         ORIGINAL_PROFILE["last_name"] = me.last_name or ""
         ORIGINAL_PROFILE["about"] = my_full.full_user.about or "" if hasattr(my_full, 'full_user') else ""
 
-        for f in os.listdir(ORIGINAL_PROFILE_DIR):
+        _udir = _user_original_dir(me.id)
+        for f in os.listdir(_udir):
             try:
-                os.remove(os.path.join(ORIGINAL_PROFILE_DIR, f))
+                os.remove(os.path.join(_udir, f))
             except Exception:
                 pass
 
-        ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, ORIGINAL_PROFILE_DIR, "original", max_count=MAX_PHOTOS)
+        ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, _udir, "original", max_count=MAX_PHOTOS)
         ORIGINAL_PROFILE["photo_count"] = len(ORIGINAL_PROFILE["photos"])
 
         if hasattr(me, 'emoji_status') and me.emoji_status and hasattr(me.emoji_status, 'document_id'):
@@ -520,12 +543,14 @@ async def clone_info(event):
     photo_count = ORIGINAL_PROFILE["photo_count"] - video_count
     bio_display = ORIGINAL_PROFILE['about'] if ORIGINAL_PROFILE['about'] else "(boş)"
     emoji_display = "✓" if ORIGINAL_PROFILE["emoji_status"] else "yok"
+    clone_status = "🟢 şu an klonlu" if ORIGINAL_PROFILE.get("is_cloned") else "⚪ klon aktif değil"
 
     await event.edit(
         f"**📋 Kayıtlı Profil:**\n\n"
         f"`👤` {ORIGINAL_PROFILE['first_name']} {ORIGINAL_PROFILE['last_name']}\n"
         f"`📝` {bio_display}\n"
-        f"`📷` {photo_count} `🎥` {video_count} `😀` {emoji_display}"
+        f"`📷` {photo_count} `🎥` {video_count} `😀` {emoji_display}\n"
+        f"`🔁` {clone_status}"
     )
 
 

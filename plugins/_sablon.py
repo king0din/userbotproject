@@ -11,6 +11,7 @@
 # ============================================================
 
 from telethon import events
+from userbot.events import register
 
 
 # ╔══════════════════════════════════════════════════════════╗
@@ -18,47 +19,46 @@ from telethon import events
 # ║  fonksiyon. TÜM komutlarını bunun İÇİNE yaz.               ║
 # ║  'client' = o kullanıcının kendi userbot bağlantısı.       ║
 # ╚══════════════════════════════════════════════════════════╝
-def register(client):
 
-    # --------------------------------------------------------
-    # KOMUT 1:  .selam
-    # 'outgoing=True' = sadece SEN yazınca çalışır (başkası değil)
-    # 'pattern'       = komutu tanımlayan kalıp. r'^\.selam$' →
-    #                   tam olarak ".selam" yazınca tetiklenir.
-    # --------------------------------------------------------
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.selam$'))
-    async def selam_komutu(event):
-        # event.edit → senin yazdığın mesajı düzenler (yeni mesaj atmaz)
-        await event.edit("👋 Merhaba! Bu benim ilk plugin'im.")
+# --------------------------------------------------------
+# KOMUT 1:  .selam
+# 'outgoing=True' = sadece SEN yazınca çalışır (başkası değil)
+# 'pattern'       = komutu tanımlayan kalıp. r'^\.selam$' →
+#                   tam olarak ".selam" yazınca tetiklenir.
+# --------------------------------------------------------
+@register(outgoing=True, pattern=r'^\.selam$')
+async def selam_komutu(event):
+    # event.edit → senin yazdığın mesajı düzenler (yeni mesaj atmaz)
+    await event.edit("👋 Merhaba! Bu benim ilk plugin'im.")
 
-    # --------------------------------------------------------
-    # KOMUT 2:  .topla 4 5   →  argüman almayı gösterir
-    # pattern içindeki (.*) = komuttan sonra yazılan her şeyi yakalar
-    # --------------------------------------------------------
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.topla (.+)$'))
-    async def topla_komutu(event):
-        # Komuttan sonra yazılanı al:  ".topla 4 5"  →  "4 5"
-        arguman = event.pattern_match.group(1)
+# --------------------------------------------------------
+# KOMUT 2:  .topla 4 5   →  argüman almayı gösterir
+# pattern içindeki (.*) = komuttan sonra yazılan her şeyi yakalar
+# --------------------------------------------------------
+@register(outgoing=True, pattern=r'^\.topla (.+)$')
+async def topla_komutu(event):
+    # Komuttan sonra yazılanı al:  ".topla 4 5"  →  "4 5"
+    arguman = event.pattern_match.group(1)
 
-        try:
-            sayilar = [int(x) for x in arguman.split()]
-            sonuc = sum(sayilar)
-            await event.edit(f"🧮 Toplam: **{sonuc}**")
-        except ValueError:
-            # Kullanıcı sayı yerine harf girdiyse ÇÖKME, nazikçe uyar
-            await event.edit("❌ Lütfen sadece sayı gir. Örnek: `.topla 4 5`")
+    try:
+        sayilar = [int(x) for x in arguman.split()]
+        sonuc = sum(sayilar)
+        await event.edit(f"🧮 Toplam: **{sonuc}**")
+    except ValueError:
+        # Kullanıcı sayı yerine harf girdiyse ÇÖKME, nazikçe uyar
+        await event.edit("❌ Lütfen sadece sayı gir. Örnek: `.topla 4 5`")
 
-    # --------------------------------------------------------
-    # KOMUT 3:  .yanit  →  bir mesaja yanıt vererek çalışır
-    # --------------------------------------------------------
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.yanit$'))
-    async def yanit_komutu(event):
-        if not event.reply_to_msg_id:
-            await event.edit("↩️ Bu komutu bir mesaja **yanıt vererek** kullan.")
-            return
+# --------------------------------------------------------
+# KOMUT 3:  .yanit  →  bir mesaja yanıt vererek çalışır
+# --------------------------------------------------------
+@register(outgoing=True, pattern=r'^\.yanit$')
+async def yanit_komutu(event):
+    if not event.reply_to_msg_id:
+        await event.edit("↩️ Bu komutu bir mesaja **yanıt vererek** kullan.")
+        return
 
-        yanitlanan = await event.get_reply_message()
-        await event.edit(f"Sen şunu yanıtladın:\n\n> {yanitlanan.text}")
+    yanitlanan = await event.get_reply_message()
+    await event.edit(f"Sen şunu yanıtladın:\n\n> {yanitlanan.text}")
 
 
 # ╔══════════════════════════════════════════════════════════╗

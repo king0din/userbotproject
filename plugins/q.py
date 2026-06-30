@@ -44,6 +44,7 @@ Kullanabileceğiniz renkleri gösterir.
 """
 
 from telethon import events
+from userbot.events import register
 from telethon.tl.types import (
     User, Channel, Chat, InputStickerSetShortName,
     MessageEntityBold, MessageEntityItalic, MessageEntityCode,
@@ -705,283 +706,282 @@ def parse_args(args):
     return bg_color, count, save, include_reply
 
 
-def register(client):
-    
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.q(?:\s+(.*))?$'))
-    async def quote_cmd(event):
-        args = (event.pattern_match.group(1) or "").strip()
-        
-        if args.lower() in ['d', 'delete']:
-            return
-        
-        bg_color, count, save, include_reply = parse_args(args)
-        
-        reply = await event.get_reply_message()
-        if not reply:
-            return await event.edit(
-                "❌ **Mesaj yanıtla!**\n\n"
-                "`.q` - Çıkartma\n"
-                "`.q 3` - 3 mesaj\n"
-                "`.q noreply` - Reply olmadan\n"
-                "`.qs` - Kaydet\n"
-                "`.q #ff5733` - Özel renk\n"
-                "`.q mavi` - Mavi\n"
-                "`.q random` - Rastgele\n"
-                "`.qd` - Sticker sil"
-            )
-        
-        await event.edit("🎨")
-        
-        path = None
-        try:
-            messages_data = []
-            
-            main_msg_data = await build_message_data(client, reply, include_reply_info=include_reply)
-            messages_data.append(main_msg_data)
-            
-            if count > 1:
-                collected = 0
-                async for msg in client.iter_messages(event.chat_id, min_id=reply.id, limit=50, reverse=True):
-                    if msg.id == reply.id or not msg.text:
-                        continue
-                    
-                    msg_data = await build_message_data(client, msg, include_reply_info=include_reply)
-                    messages_data.append(msg_data)
-                    collected += 1
-                    
-                    if collected >= count - 1:
-                        break
-            
-            fmt = "png" if save else "webp"
-            image_data = await generate_quote(messages_data, bg_color, fmt)
-            
-            if not image_data:
-                return await event.edit("❌ **API hatası!**")
-            
-            if save:
-                image_data = resize_sticker(image_data, make_transparent=True)
-            
-            with tempfile.NamedTemporaryFile(suffix=f".{fmt}", delete=False) as f:
-                f.write(image_data)
-                path = f.name
-            
-            if save:
-                await event.edit("📦 **Kaydediliyor...**")
-                
-                me = await client.get_me()
-                pack = f"q_{me.id}_by_KingUser_bot"
-                title = f"Quotes | {PACK_OWNER}"
-                
-                ok, msg = await create_sticker_pack(client, pack, title, path, "💬")
-                
-                if ok:
-                    await send_sticker_from_pack(client, event.chat_id, pack, path, reply.id)
-                else:
-                    await client.send_file(
-                        event.chat_id, 
-                        path, 
-                        reply_to=reply.id,
-                        force_document=True,
-                        attributes=[DocumentAttributeFilename(file_name='sticker.png')]
-                    )
-                
-                os.unlink(path)
-                
-                link = f"https://t.me/addstickers/{pack}"
-                if ok:
-                    await event.edit(f"✅ **{msg}!**\n📦 [Paket]({link})")
-                else:
-                    await event.edit(f"❌ {msg}")
-            else:
-                await client.send_file(event.chat_id, path, reply_to=reply.id)
-                await event.delete()
-                os.unlink(path)
-                
-        except Exception as e:
-            await event.edit(f"❌ `{e}`")
-        finally:
-            if path and os.path.exists(path):
-                try:
-                    os.unlink(path)
-                except Exception:
-                    pass
-    
-    
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.qs(?:\s+(.*))?$'))
-    async def quote_save_cmd(event):
-        args = (event.pattern_match.group(1) or "").strip()
-        bg_color, count, _, include_reply = parse_args(args)
-        
-        reply = await event.get_reply_message()
-        if not reply:
-            return await event.edit("❌ Mesaj yanıtla!")
-        
-        await event.edit("🎨")
-        
-        path = None
-        try:
-            if reply.sticker:
-                await event.edit("📥 **Sticker indiriliyor...**")
-                
-                sticker_bytes = await reply.download_media(bytes)
-                
-                if not sticker_bytes:
-                    return await event.edit("❌ Sticker indirilemedi!")
-                
-                image_data = resize_sticker(sticker_bytes, make_transparent=False)
-                
-                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-                    f.write(image_data)
-                    path = f.name
-                
-                await event.edit("📦 **Pakete ekleniyor...**")
-                
-                me = await client.get_me()
-                pack = f"q_{me.id}_by_KingUser_bot"
-                title = f"Quotes | {PACK_OWNER}"
-                
-                ok, msg = await create_sticker_pack(client, pack, title, path, "💬")
-                
-                if ok:
-                    await send_sticker_from_pack(client, event.chat_id, pack, path, reply.id)
-                else:
-                    await client.send_file(
-                        event.chat_id, 
-                        path, 
-                        reply_to=reply.id,
-                        force_document=True,
-                        attributes=[DocumentAttributeFilename(file_name='sticker.png')]
-                    )
-                
-                os.unlink(path)
-                
-                link = f"https://t.me/addstickers/{pack}"
-                if ok:
-                    await event.edit(f"✅ **{msg}!**\n📦 [Paket]({link})")
-                else:
-                    await event.edit(f"❌ {msg}")
-                
-            else:
-                messages_data = []
-                
-                main_msg_data = await build_message_data(client, reply, include_reply_info=include_reply)
-                messages_data.append(main_msg_data)
-                
-                if count > 1:
-                    collected = 0
-                    async for msg in client.iter_messages(event.chat_id, min_id=reply.id, limit=50, reverse=True):
-                        if msg.id == reply.id or not msg.text:
-                            continue
-                        msg_data = await build_message_data(client, msg, include_reply_info=include_reply)
-                        messages_data.append(msg_data)
-                        collected += 1
-                        if collected >= count - 1:
-                            break
-                
-                image_data = await generate_quote(messages_data, bg_color, "png")
-                
-                if not image_data:
-                    return await event.edit("❌ **API hatası!**")
-                
-                image_data = resize_sticker(image_data, make_transparent=True)
-                
-                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-                    f.write(image_data)
-                    path = f.name
-                
-                await event.edit("📦 **Kaydediliyor...**")
-                
-                me = await client.get_me()
-                pack = f"q_{me.id}_by_KingUser_bot"
-                title = f"Quotes | {PACK_OWNER}"
-                
-                ok, msg = await create_sticker_pack(client, pack, title, path, "💬")
-                
-                if ok:
-                    await send_sticker_from_pack(client, event.chat_id, pack, path, reply.id)
-                else:
-                    await client.send_file(
-                        event.chat_id, 
-                        path, 
-                        reply_to=reply.id,
-                        force_document=True,
-                        attributes=[DocumentAttributeFilename(file_name='sticker.png')]
-                    )
-                
-                os.unlink(path)
-                
-                link = f"https://t.me/addstickers/{pack}"
-                if ok:
-                    await event.edit(f"✅ **{msg}!**\n📦 [Paket]({link})")
-                else:
-                    await event.edit(f"❌ {msg}")
-            
-        except Exception as e:
-            import traceback
-            error_detail = traceback.format_exc()
-            await event.edit(f"❌ Hata: `{type(e).__name__}: {str(e)[:50]}`")
-        finally:
-            if path and os.path.exists(path):
-                try:
-                    os.unlink(path)
-                except Exception:
-                    pass
-    
-    
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.qd$'))
-    async def delete_sticker_cmd(event):
-        reply = await event.get_reply_message()
-        if not reply:
-            return await event.edit("❌ Silinecek sticker'a yanıtla!")
-        
-        if not reply.sticker:
-            return await event.edit("❌ Bu bir sticker değil!")
-        
-        await event.edit("🗑️ **Siliniyor...**")
-        
-        try:
-            me = await client.get_me()
+
+@register(outgoing=True, pattern=r'^\.q(?:\s+(.*))?$')
+async def quote_cmd(event):
+    args = (event.pattern_match.group(1) or "").strip()
+
+    if args.lower() in ['d', 'delete']:
+        return
+
+    bg_color, count, save, include_reply = parse_args(args)
+
+    reply = await event.get_reply_message()
+    if not reply:
+        return await event.edit(
+            "❌ **Mesaj yanıtla!**\n\n"
+            "`.q` - Çıkartma\n"
+            "`.q 3` - 3 mesaj\n"
+            "`.q noreply` - Reply olmadan\n"
+            "`.qs` - Kaydet\n"
+            "`.q #ff5733` - Özel renk\n"
+            "`.q mavi` - Mavi\n"
+            "`.q random` - Rastgele\n"
+            "`.qd` - Sticker sil"
+        )
+
+    await event.edit("🎨")
+
+    path = None
+    try:
+        messages_data = []
+
+        main_msg_data = await build_message_data(event.client, reply, include_reply_info=include_reply)
+        messages_data.append(main_msg_data)
+
+        if count > 1:
+            collected = 0
+            async for msg in event.client.iter_messages(event.chat_id, min_id=reply.id, limit=50, reverse=True):
+                if msg.id == reply.id or not msg.text:
+                    continue
+
+                msg_data = await build_message_data(event.client, msg, include_reply_info=include_reply)
+                messages_data.append(msg_data)
+                collected += 1
+
+                if collected >= count - 1:
+                    break
+
+        fmt = "png" if save else "webp"
+        image_data = await generate_quote(messages_data, bg_color, fmt)
+
+        if not image_data:
+            return await event.edit("❌ **API hatası!**")
+
+        if save:
+            image_data = resize_sticker(image_data, make_transparent=True)
+
+        with tempfile.NamedTemporaryFile(suffix=f".{fmt}", delete=False) as f:
+            f.write(image_data)
+            path = f.name
+
+        if save:
+            await event.edit("📦 **Kaydediliyor...**")
+
+            me = await event.client.get_me()
             pack = f"q_{me.id}_by_KingUser_bot"
-            
-            if not await pack_exists(client, pack):
-                return await event.edit("❌ Sticker paketi bulunamadı!")
-            
-            ok, msg = await delete_sticker_from_pack(client, pack, reply.sticker)
-            
+            title = f"Quotes | {PACK_OWNER}"
+
+            ok, msg = await create_sticker_pack(event.client, pack, title, path, "💬")
+
             if ok:
-                await event.edit(f"✅ **{msg}!**")
+                await send_sticker_from_pack(event.client, event.chat_id, pack, path, reply.id)
+            else:
+                await event.client.send_file(
+                    event.chat_id, 
+                    path, 
+                    reply_to=reply.id,
+                    force_document=True,
+                    attributes=[DocumentAttributeFilename(file_name='sticker.png')]
+                )
+
+            os.unlink(path)
+
+            link = f"https://t.me/addstickers/{pack}"
+            if ok:
+                await event.edit(f"✅ **{msg}!**\n📦 [Paket]({link})")
             else:
                 await event.edit(f"❌ {msg}")
-                
-        except Exception as e:
-            import traceback
-            error_detail = traceback.format_exc()
-            await event.edit(f"❌ Hata: `{type(e).__name__}: {str(e)[:50]}`")
-    
-    
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.qpaket$'))
-    async def pack_info(event):
-        me = await client.get_me()
-        pack = f"q_{me.id}_by_KingUser_bot"
-        link = f"https://t.me/addstickers/{pack}"
-        
-        if await pack_exists(client, pack):
-            await event.edit(f"📦 [Paket]({link})")
         else:
-            await event.edit("📦 Yok. `.qs` ile oluştur")
-    
-    
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.qrenkler$'))
-    async def colors_cmd(event):
-        await event.edit(
-            "🎨 **Renkler:**\n\n"
-            "`siyah` `beyaz` `mavi` `kırmızı` `yeşil` `mor` `turuncu` `pembe` `gri`\n"
-            "`random` - Rastgele\n"
-            "`#HEX` - Özel (örn: `#ff5733`)\n"
-            "`noreply` - Reply olmadan\n\n"
-            "**Komutlar:**\n"
-            "`.q` - Quote oluştur\n"
-            "`.qs` - Quote kaydet\n"
-            "`.qd` - Sticker sil\n"
-            "`.qpaket` - Paket linki"
-        )
+            await event.client.send_file(event.chat_id, path, reply_to=reply.id)
+            await event.delete()
+            os.unlink(path)
+
+    except Exception as e:
+        await event.edit(f"❌ `{e}`")
+    finally:
+        if path and os.path.exists(path):
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+
+
+@register(outgoing=True, pattern=r'^\.qs(?:\s+(.*))?$')
+async def quote_save_cmd(event):
+    args = (event.pattern_match.group(1) or "").strip()
+    bg_color, count, _, include_reply = parse_args(args)
+
+    reply = await event.get_reply_message()
+    if not reply:
+        return await event.edit("❌ Mesaj yanıtla!")
+
+    await event.edit("🎨")
+
+    path = None
+    try:
+        if reply.sticker:
+            await event.edit("📥 **Sticker indiriliyor...**")
+
+            sticker_bytes = await reply.download_media(bytes)
+
+            if not sticker_bytes:
+                return await event.edit("❌ Sticker indirilemedi!")
+
+            image_data = resize_sticker(sticker_bytes, make_transparent=False)
+
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                f.write(image_data)
+                path = f.name
+
+            await event.edit("📦 **Pakete ekleniyor...**")
+
+            me = await event.client.get_me()
+            pack = f"q_{me.id}_by_KingUser_bot"
+            title = f"Quotes | {PACK_OWNER}"
+
+            ok, msg = await create_sticker_pack(event.client, pack, title, path, "💬")
+
+            if ok:
+                await send_sticker_from_pack(event.client, event.chat_id, pack, path, reply.id)
+            else:
+                await event.client.send_file(
+                    event.chat_id, 
+                    path, 
+                    reply_to=reply.id,
+                    force_document=True,
+                    attributes=[DocumentAttributeFilename(file_name='sticker.png')]
+                )
+
+            os.unlink(path)
+
+            link = f"https://t.me/addstickers/{pack}"
+            if ok:
+                await event.edit(f"✅ **{msg}!**\n📦 [Paket]({link})")
+            else:
+                await event.edit(f"❌ {msg}")
+
+        else:
+            messages_data = []
+
+            main_msg_data = await build_message_data(event.client, reply, include_reply_info=include_reply)
+            messages_data.append(main_msg_data)
+
+            if count > 1:
+                collected = 0
+                async for msg in event.client.iter_messages(event.chat_id, min_id=reply.id, limit=50, reverse=True):
+                    if msg.id == reply.id or not msg.text:
+                        continue
+                    msg_data = await build_message_data(event.client, msg, include_reply_info=include_reply)
+                    messages_data.append(msg_data)
+                    collected += 1
+                    if collected >= count - 1:
+                        break
+
+            image_data = await generate_quote(messages_data, bg_color, "png")
+
+            if not image_data:
+                return await event.edit("❌ **API hatası!**")
+
+            image_data = resize_sticker(image_data, make_transparent=True)
+
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                f.write(image_data)
+                path = f.name
+
+            await event.edit("📦 **Kaydediliyor...**")
+
+            me = await event.client.get_me()
+            pack = f"q_{me.id}_by_KingUser_bot"
+            title = f"Quotes | {PACK_OWNER}"
+
+            ok, msg = await create_sticker_pack(event.client, pack, title, path, "💬")
+
+            if ok:
+                await send_sticker_from_pack(event.client, event.chat_id, pack, path, reply.id)
+            else:
+                await event.client.send_file(
+                    event.chat_id, 
+                    path, 
+                    reply_to=reply.id,
+                    force_document=True,
+                    attributes=[DocumentAttributeFilename(file_name='sticker.png')]
+                )
+
+            os.unlink(path)
+
+            link = f"https://t.me/addstickers/{pack}"
+            if ok:
+                await event.edit(f"✅ **{msg}!**\n📦 [Paket]({link})")
+            else:
+                await event.edit(f"❌ {msg}")
+
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        await event.edit(f"❌ Hata: `{type(e).__name__}: {str(e)[:50]}`")
+    finally:
+        if path and os.path.exists(path):
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+
+
+@register(outgoing=True, pattern=r'^\.qd$')
+async def delete_sticker_cmd(event):
+    reply = await event.get_reply_message()
+    if not reply:
+        return await event.edit("❌ Silinecek sticker'a yanıtla!")
+
+    if not reply.sticker:
+        return await event.edit("❌ Bu bir sticker değil!")
+
+    await event.edit("🗑️ **Siliniyor...**")
+
+    try:
+        me = await event.client.get_me()
+        pack = f"q_{me.id}_by_KingUser_bot"
+
+        if not await pack_exists(event.client, pack):
+            return await event.edit("❌ Sticker paketi bulunamadı!")
+
+        ok, msg = await delete_sticker_from_pack(event.client, pack, reply.sticker)
+
+        if ok:
+            await event.edit(f"✅ **{msg}!**")
+        else:
+            await event.edit(f"❌ {msg}")
+
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        await event.edit(f"❌ Hata: `{type(e).__name__}: {str(e)[:50]}`")
+
+
+@register(outgoing=True, pattern=r'^\.qpaket$')
+async def pack_info(event):
+    me = await event.client.get_me()
+    pack = f"q_{me.id}_by_KingUser_bot"
+    link = f"https://t.me/addstickers/{pack}"
+
+    if await pack_exists(event.client, pack):
+        await event.edit(f"📦 [Paket]({link})")
+    else:
+        await event.edit("📦 Yok. `.qs` ile oluştur")
+
+
+@register(outgoing=True, pattern=r'^\.qrenkler$')
+async def colors_cmd(event):
+    await event.edit(
+        "🎨 **Renkler:**\n\n"
+        "`siyah` `beyaz` `mavi` `kırmızı` `yeşil` `mor` `turuncu` `pembe` `gri`\n"
+        "`random` - Rastgele\n"
+        "`#HEX` - Özel (örn: `#ff5733`)\n"
+        "`noreply` - Reply olmadan\n\n"
+        "**Komutlar:**\n"
+        "`.q` - Quote oluştur\n"
+        "`.qs` - Quote kaydet\n"
+        "`.qd` - Sticker sil\n"
+        "`.qpaket` - Paket linki"
+    )

@@ -633,6 +633,21 @@ class SmartSessionManager:
     async def start_background_tasks(self):
         """Arka plan görevlerini başlat"""
         
+        # Yetim veri süpürme: pasifken (pluginleri yüklü değilken) silinen
+        # kullanıcıların artık dosyalarını açılışta temizle
+        try:
+            from userbot.orphan_sweeper import sweep_orphans
+            _users = await db.get_all_users()
+            _valid = {u.get("user_id") for u in _users if isinstance(u, dict) and u.get("user_id") is not None}
+            try:
+                _deleted = await db.get_deleted_users()
+                _valid |= {u.get("user_id") for u in _deleted if isinstance(u, dict) and u.get("user_id") is not None}
+            except Exception:
+                pass
+            sweep_orphans(_valid)
+        except Exception:
+            log.warning("Yetim veri süpürme başarısız", exc_info=True)
+        
         async def cleanup_loop():
             """İnaktif client temizleme döngüsü"""
             while True:
