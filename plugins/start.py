@@ -20,6 +20,8 @@ from telethon import events, Button
 import config
 from database import database as db
 from utils.logger import get_logger
+from utils import premium
+from telethon.tl import functions, types
 
 log = get_logger(__name__)
 
@@ -122,8 +124,74 @@ async def _render_plugin_detail(event, target_user_id, gi, full=False):
     else:
         buttons.append([Button.inline("📄 Plugin Detayı", f"ipi_{target_user_id}_{gi}".encode())])
 
+    if event.sender_id == config.OWNER_ID:
+        buttons.append([Button.inline("💎 Premium Ayarları", f"ipset_{target_user_id}_{gi}".encode())])
     buttons.append([Button.inline("🔙 Listeye Dön", f"ip_plugins_{target_user_id}_{page}".encode())])
 
+    try:
+        await event.edit(text, buttons=buttons)
+    except Exception:
+        pass
+
+
+async def _render_premium_settings(event, target_user_id, gi):
+    """Sahip için: bir pluginin premium/özel/genel ayar paneli."""
+    if event.sender_id != config.OWNER_ID:
+        try:
+            await event.answer("❌ Sadece sahip.", alert=True)
+        except Exception:
+            pass
+        return
+    all_plugins = await db.get_all_plugins()
+    accessible = _filter_accessible(all_plugins, event.sender_id)
+    if gi < 0 or gi >= len(accessible):
+        try:
+            await event.edit("⚠️ Plugin bulunamadı.",
+                buttons=[[Button.inline("🔙 Geri", f"ip_plugins_{target_user_id}_0".encode())]])
+        except Exception:
+            pass
+        return
+    name = accessible[gi].get("name", "?")
+    cfg = premium.get_config(name)
+    configured = bool(cfg and cfg.get("type") in premium.TYPES)
+    ptype = (cfg or {}).get("type", "genel")
+    stars = int((cfg or {}).get("stars", 100))
+    days = int((cfg or {}).get("days", 30))
+
+    if not configured:
+        text = (f"💎 **{name} — Tip Seçimi**\n\n"
+                "Bu plugin yeni eklendi. Nasıl sunulacak?\n\n"
+                "🌐 **Genel** — herkes ücretsiz kullanır\n"
+                "🔒 **Özel** — sadece izin verdiğin kullanıcılar\n"
+                "💎 **Premium** — yıldız karşılığı abonelik")
+    else:
+        tl = premium.TYPE_LABELS.get(ptype, ptype)
+        text = f"💎 **{name} — Premium Ayarları**\n\nTip: {tl}"
+        if ptype == "premium":
+            text += f"\n⭐ Fiyat: **{stars}** yıldız\n📅 Süre: **{days}** gün"
+        elif ptype == "ozel":
+            text += f"\n👥 İzinli kullanıcı: {len(premium.ozel_users(name))}"
+
+    def _mk(t):
+        return ("✅ " if (configured and ptype == t) else "") + premium.TYPE_LABELS.get(t, t)
+    buttons = [[
+        Button.inline(_mk("genel"), f"ipty_{target_user_id}_{gi}_genel".encode()),
+        Button.inline(_mk("ozel"), f"ipty_{target_user_id}_{gi}_ozel".encode()),
+        Button.inline(_mk("premium"), f"ipty_{target_user_id}_{gi}_premium".encode()),
+    ]]
+    if configured and ptype == "premium":
+        sp = premium.STAR_PRESETS
+        row1 = [Button.inline(("✅" if s == stars else "") + f"{s}⭐",
+                f"ipst_{target_user_id}_{gi}_{s}".encode()) for s in sp[:3]]
+        row2 = [Button.inline(("✅" if s == stars else "") + f"{s}⭐",
+                f"ipst_{target_user_id}_{gi}_{s}".encode()) for s in sp[3:]]
+        buttons.append(row1)
+        buttons.append(row2)
+        drow = [Button.inline(("✅" if d == days else "") + lbl,
+                f"ipdy_{target_user_id}_{gi}_{d}".encode()) for lbl, d in premium.DAY_PRESETS]
+        buttons.append(drow)
+        buttons.append([Button.inline("👥 Aboneler", f"ipsub_{target_user_id}_{gi}".encode())])
+    buttons.append([Button.inline("🔙 Plugin Detayı", f"ipd_{target_user_id}_{gi}".encode())])
     try:
         await event.edit(text, buttons=buttons)
     except Exception:
@@ -447,8 +515,139 @@ def register_bot_handlers(bot):
             except Exception:
                 pass
 
-        # Paneli yenile (durum güncellensin)
-        await _render_plugin_detail(event, target_user_id, gi, full=False)
+        # Paneli yenile — sahip yeni yükledi ve tip ayarlanmadıysa TİP SOR
+        if (event.sender_id == config.OWNER_ID and name in active
+                and not premium.is_configured(name)):
+            await _render_premium_settings(event, target_user_id, gi)
+        else:
+            await _render_plugin_detail(event, target_user_id, gi, full=False)
+
+    # ==========================================
+    # PREMIUM — Telegram Yıldızı (Stars) ödeme handler'ları
+    # ==========================================
+    @bot.on(events.Raw)
+    async def _premium_stars_handler(update):
+        try:
+            # 1) Ön-onay (precheckout) → her zaman onayla
+            if isinstance(update, types.UpdateBotPrecheckoutQuery):
+                try:
+                    await bot(functions.messages.SetBotPrecheckoutResultsRequest(
+                        query_id=update.query_id, success=True))
+                except Exception:
+                    log.warning("precheckout onaylanamadı", exc_info=True)
+                return
+            # 2) Ödeme geldi → abonelik ver
+            msg = getattr(update, "message", None)
+            action = getattr(msg, "action", None) if msg is not None else None
+            if action is not None and type(action).__name__ == "MessageActionPaymentSentMe":
+                parsed = premium.grant_from_payment(getattr(action, "payload", None))
+                if parsed:
+                    plugin_name, uid, days = parsed
+                    try:
+                        await bot.send_message(
+                            uid,
+                            f"✅ **Ödeme alındı!**\n💎 `{plugin_name}` için **{days} gün** premium aktif. 🎉")
+                    except Exception:
+                        pass
+        except Exception:
+            log.warning("premium ödeme handler hatası", exc_info=True)
+
+    # ==========================================
+    # PREMIUM — Plugin ayar paneli callback'leri (sahip)
+    # ==========================================
+    async def _pset_name(event, gi):
+        """gi index → plugin adı (sahip erişimine göre)."""
+        all_plugins = await db.get_all_plugins()
+        accessible = _filter_accessible(all_plugins, event.sender_id)
+        if 0 <= gi < len(accessible):
+            return accessible[gi].get("name")
+        return None
+
+    @bot.on(events.CallbackQuery(pattern=rb"ipset_(\d+)_(\d+)"))
+    async def ip_pset_cb(event):
+        tu = int(event.pattern_match.group(1).decode())
+        gi = int(event.pattern_match.group(2).decode())
+        if tu != event.sender_id:
+            await event.answer("❌ Bu panel size ait değil!", alert=True); return
+        await _render_premium_settings(event, tu, gi)
+        try:
+            await event.answer()
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"ipty_(\d+)_(\d+)_(\w+)"))
+    async def ip_ptype_cb(event):
+        tu = int(event.pattern_match.group(1).decode())
+        gi = int(event.pattern_match.group(2).decode())
+        t = event.pattern_match.group(3).decode()
+        if tu != event.sender_id or event.sender_id != config.OWNER_ID:
+            await event.answer("❌ İzin yok.", alert=True); return
+        name = await _pset_name(event, gi)
+        if name and t in premium.TYPES:
+            premium.set_config(name, ptype=t)
+            try:
+                await event.answer(f"Tip: {premium.TYPE_LABELS.get(t, t)}")
+            except Exception:
+                pass
+        await _render_premium_settings(event, tu, gi)
+
+    @bot.on(events.CallbackQuery(pattern=rb"ipst_(\d+)_(\d+)_(\d+)"))
+    async def ip_pstars_cb(event):
+        tu = int(event.pattern_match.group(1).decode())
+        gi = int(event.pattern_match.group(2).decode())
+        stars = int(event.pattern_match.group(3).decode())
+        if tu != event.sender_id or event.sender_id != config.OWNER_ID:
+            await event.answer("❌ İzin yok.", alert=True); return
+        name = await _pset_name(event, gi)
+        if name:
+            premium.set_config(name, stars=stars)
+            try:
+                await event.answer(f"Fiyat: {stars} ⭐")
+            except Exception:
+                pass
+        await _render_premium_settings(event, tu, gi)
+
+    @bot.on(events.CallbackQuery(pattern=rb"ipdy_(\d+)_(\d+)_(\d+)"))
+    async def ip_pdays_cb(event):
+        tu = int(event.pattern_match.group(1).decode())
+        gi = int(event.pattern_match.group(2).decode())
+        days = int(event.pattern_match.group(3).decode())
+        if tu != event.sender_id or event.sender_id != config.OWNER_ID:
+            await event.answer("❌ İzin yok.", alert=True); return
+        name = await _pset_name(event, gi)
+        if name:
+            premium.set_config(name, days=days)
+            try:
+                await event.answer(f"Süre: {days} gün")
+            except Exception:
+                pass
+        await _render_premium_settings(event, tu, gi)
+
+    @bot.on(events.CallbackQuery(pattern=rb"ipsub_(\d+)_(\d+)"))
+    async def ip_psub_cb(event):
+        tu = int(event.pattern_match.group(1).decode())
+        gi = int(event.pattern_match.group(2).decode())
+        if tu != event.sender_id or event.sender_id != config.OWNER_ID:
+            await event.answer("❌ İzin yok.", alert=True); return
+        name = await _pset_name(event, gi)
+        subs = premium.list_active_subs(name) if name else {}
+        if not subs:
+            text = f"👥 **{name} — Aboneler**\n\nAktif abone yok."
+        else:
+            import time as _t
+            lines = []
+            for uid, exp in sorted(subs.items(), key=lambda x: x[1]):
+                left = max(0, int((int(exp) - _t.time()) // 86400))
+                lines.append(f"• `{uid}` — {left} gün")
+            text = f"👥 **{name} — Aboneler ({len(subs)})**\n\n" + "\n".join(lines[:30])
+        try:
+            await event.edit(text, buttons=[[Button.inline("🔙 Geri", f"ipset_{tu}_{gi}".encode())]])
+        except Exception:
+            pass
+        try:
+            await event.answer()
+        except Exception:
+            pass
 
     @bot.on(events.CallbackQuery(pattern=rb"ip_active_(\d+)_?(\d*)"))
     async def ip_active_cb(event):
@@ -763,6 +962,10 @@ def register_handlers(client, user_id):
         if ok:
             cmds = ", ".join([f"`.{c}`" for c in plugin.get("commands", [])[:3]])
             await event.respond(f"✅ **{name}** yüklendi!\n🔧 {cmds}")
+            if user_id == config.OWNER_ID and not premium.is_configured(name):
+                await event.respond(
+                    f"💎 `{name}` için tip ayarlanmadı.\n"
+                    "Tipini belirle: `.start` → Pluginler → seç → 💎 Premium Ayarları")
         else:
             await event.respond(f"❌ {msg}")
     
