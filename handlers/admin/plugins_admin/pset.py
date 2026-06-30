@@ -233,6 +233,13 @@ def register(bot):
         text += f"├ Varsayılan: {'⭐ Aktif' if default_active else '◽ Pasif'}\n"
         text += f"├ İzinli Kullanıcı: `{len(allowed_users)}`\n"
         text += f"└ Engelli Kullanıcı: `{len(restricted_users)}`\n"
+        try:
+            from utils import premium as _prem
+            if _prem.is_configured(plugin_name) and _prem.plugin_type(plugin_name) == "premium":
+                _pc = _prem.get_config(plugin_name) or {}
+                text += f"\n💎 Premium: `{_pc.get('stars',100)}⭐ / {_pc.get('days',30)} gün`\n"
+        except Exception:
+            pass
         
         # Komutlar
         commands = plugin.get("commands", [])
@@ -312,6 +319,12 @@ def register(bot):
                         icon_custom_emoji_id=5832570548655234693)
         ])
         
+        # Premium ayarları
+        rows.append([
+            btn.callback(" 💎 Premium Ayarları", f"psetprem_{plugin_name}",
+                        style=ButtonBuilder.STYLE_PRIMARY)
+        ])
+        
         # Geri
         rows.append([
             btn.callback(" Geri", "psettings_page_0",
@@ -327,6 +340,130 @@ def register(bot):
         )
         await event.answer()
     
+
+    # ============ PREMIUM AYARLARI ============
+    async def _is_admin(event):
+        return event.sender_id == config.OWNER_ID or await db.is_sudo(event.sender_id)
+
+    async def show_plugin_premium(event, plugin_name):
+        from utils import premium as _prem
+        plugin = await db.get_plugin(plugin_name)
+        if not plugin:
+            await event.answer("❌ Plugin bulunamadı.", alert=True)
+            return
+        cfg = _prem.get_config(plugin_name)
+        configured = bool(cfg and cfg.get("type") in _prem.TYPES)
+        ptype = (cfg or {}).get("type", "genel")
+        stars = int((cfg or {}).get("stars", 100))
+        days = int((cfg or {}).get("days", 30))
+
+        text = f"💎 **{plugin_name} — Premium Ayarları**\n\n"
+        if not configured:
+            text += ("Bu plugin için tip seçilmedi.\n\n"
+                     "🌐 **Genel** — herkes ücretsiz kullanır\n"
+                     "🔒 **Özel** — sadece izin verdiğin kullanıcılar\n"
+                     "💎 **Premium** — yıldız karşılığı süreli abonelik")
+        else:
+            text += f"Tip: {_prem.TYPE_LABELS.get(ptype, ptype)}\n"
+            if ptype == "premium":
+                text += f"⭐ Fiyat: `{stars}` yıldız\n📅 Süre: `{days}` gün\n"
+                text += f"👥 Aktif abone: `{len(_prem.list_active_subs(plugin_name))}`"
+            elif ptype == "ozel":
+                text += f"👥 İzinli kullanıcı: `{len(_prem.ozel_users(plugin_name))}`"
+
+        def _m(t):
+            return ("✅ " if (configured and ptype == t) else "") + _prem.TYPE_LABELS.get(t, t)
+        rows = [[
+            btn.callback(" " + _m("genel"), f"psetptype_{plugin_name}_genel", style=ButtonBuilder.STYLE_SUCCESS),
+            btn.callback(" " + _m("ozel"), f"psetptype_{plugin_name}_ozel", style=ButtonBuilder.STYLE_PRIMARY),
+            btn.callback(" " + _m("premium"), f"psetptype_{plugin_name}_premium", style=ButtonBuilder.STYLE_PRIMARY),
+        ]]
+        if configured and ptype == "premium":
+            sp = _prem.STAR_PRESETS
+            rows.append([btn.callback(("✅" if s == stars else "") + f"{s}⭐", f"psetpstars_{plugin_name}_{s}", style=ButtonBuilder.STYLE_SECONDARY) for s in sp[:3]])
+            rows.append([btn.callback(("✅" if s == stars else "") + f"{s}⭐", f"psetpstars_{plugin_name}_{s}", style=ButtonBuilder.STYLE_SECONDARY) for s in sp[3:]])
+            rows.append([btn.callback(("✅" if d == days else "") + lbl, f"psetpdays_{plugin_name}_{d}", style=ButtonBuilder.STYLE_SECONDARY) for lbl, d in _prem.DAY_PRESETS])
+            rows.append([btn.callback(" 👥 Aboneler", f"psetpsubs_{plugin_name}", style=ButtonBuilder.STYLE_PRIMARY)])
+        rows.append([btn.callback(" 🔙 Geri", f"psetsel_{plugin_name}", style=ButtonBuilder.STYLE_DANGER)])
+        await bot_api.edit_message_text(
+            chat_id=event.sender_id, message_id=event.message_id,
+            text=text, reply_markup=btn.inline_keyboard(rows))
+        try:
+            await event.answer()
+        except Exception:
+            pass
+
+    @bot.on(events.CallbackQuery(pattern=rb"psetprem_([a-zA-Z0-9_]+)$"))
+    async def pset_premium_handler(event):
+        if not await _is_admin(event):
+            await event.answer("❌ Yetkiniz yok.", alert=True); return
+        await show_plugin_premium(event, event.pattern_match.group(1).decode())
+
+    @bot.on(events.CallbackQuery(pattern=rb"psetptype_([a-zA-Z0-9_]+)_(genel|ozel|premium)$"))
+    async def pset_ptype_handler(event):
+        if not await _is_admin(event):
+            await event.answer("❌ Yetkiniz yok.", alert=True); return
+        from utils import premium as _prem
+        name = event.pattern_match.group(1).decode()
+        ptype = event.pattern_match.group(2).decode()
+        _prem.set_config(name, ptype=ptype)
+        try:
+            await event.answer(f"Tip: {_prem.TYPE_LABELS.get(ptype, ptype)}")
+        except Exception:
+            pass
+        await show_plugin_premium(event, name)
+
+    @bot.on(events.CallbackQuery(pattern=rb"psetpstars_([a-zA-Z0-9_]+)_(\d+)$"))
+    async def pset_pstars_handler(event):
+        if not await _is_admin(event):
+            await event.answer("❌ Yetkiniz yok.", alert=True); return
+        from utils import premium as _prem
+        name = event.pattern_match.group(1).decode()
+        stars = int(event.pattern_match.group(2).decode())
+        _prem.set_config(name, stars=stars)
+        try:
+            await event.answer(f"Fiyat: {stars} ⭐")
+        except Exception:
+            pass
+        await show_plugin_premium(event, name)
+
+    @bot.on(events.CallbackQuery(pattern=rb"psetpdays_([a-zA-Z0-9_]+)_(\d+)$"))
+    async def pset_pdays_handler(event):
+        if not await _is_admin(event):
+            await event.answer("❌ Yetkiniz yok.", alert=True); return
+        from utils import premium as _prem
+        name = event.pattern_match.group(1).decode()
+        days = int(event.pattern_match.group(2).decode())
+        _prem.set_config(name, days=days)
+        try:
+            await event.answer(f"Süre: {days} gün")
+        except Exception:
+            pass
+        await show_plugin_premium(event, name)
+
+    @bot.on(events.CallbackQuery(pattern=rb"psetpsubs_([a-zA-Z0-9_]+)$"))
+    async def pset_psubs_handler(event):
+        if not await _is_admin(event):
+            await event.answer("❌ Yetkiniz yok.", alert=True); return
+        from utils import premium as _prem
+        import time as _t
+        name = event.pattern_match.group(1).decode()
+        subs = _prem.list_active_subs(name)
+        if not subs:
+            text = f"👥 **{name} — Aboneler**\n\nAktif abone yok."
+        else:
+            lines = []
+            for uid, exp in sorted(subs.items(), key=lambda x: x[1]):
+                left = max(0, int((int(exp) - _t.time()) // 86400))
+                lines.append(f"• `{uid}` — {left} gün")
+            text = f"👥 **{name} — Aboneler ({len(subs)})**\n\n" + "\n".join(lines[:40])
+        await bot_api.edit_message_text(
+            chat_id=event.sender_id, message_id=event.message_id, text=text,
+            reply_markup=btn.inline_keyboard([[btn.callback(" 🔙 Geri", f"psetprem_{name}", style=ButtonBuilder.STYLE_DANGER)]]))
+        try:
+            await event.answer()
+        except Exception:
+            pass
 
     @bot.on(events.CallbackQuery(pattern=rb"pset_access_([a-zA-Z0-9_]+)_(public|private)"))
     async def pset_access_handler(event):

@@ -1,4 +1,6 @@
 # type: premium
+# stars: 100
+# days: 30
 # title: Şarkı İndirici
 # description: .indir <şarkı adı/link> → YouTube'dan şarkı indirir (kapak + isim ile)
 # version: 1.0.0

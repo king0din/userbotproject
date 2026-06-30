@@ -221,6 +221,14 @@ async def main():
     # Plugin bağımlılıklarını önceden kur
     log("🔄 Plugin bağımlılıkları kontrol ediliyor...")
     await plugin_manager.preinstall_all_dependencies()
+
+    # Klasördeki yeni pluginleri DB'ye senkronla (dosya atınca panele düşsün)
+    try:
+        _synced = await plugin_manager.sync_folder_plugins()
+        if _synced:
+            log(f"📥 {_synced} yeni plugin klasörden eklendi")
+    except Exception as _e:
+        log(f"⚠️ Plugin senkron hatası: {_e}")
     
     # Session'ları geri yükle
     log("🔄 Session'lar geri yükleniyor...")

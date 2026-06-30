@@ -224,6 +224,24 @@ async def _send_premium_reminder(bot, item):
         return False
 
 
+async def _deactivate_expired(uid, plugin):
+    """Aboneliği biten premium plugini kullanıcıdan kaldır (bitişi zorla)."""
+    try:
+        from userbot.plugins import plugin_manager as _pm
+        ud = await db.get_user(uid)
+        active = list(ud.get("active_plugins", []) if ud else [])
+        if plugin in active:
+            active.remove(plugin)
+            await db.update_user(uid, {"active_plugins": active})
+        try:
+            await _pm.deactivate_plugin(uid, plugin)
+        except Exception:
+            pass
+        log.info("Aboneliği biten plugin kaldırıldı: uid=%s plugin=%s", uid, plugin)
+    except Exception:
+        log.warning("expired plugin kaldırılamadı uid=%s plugin=%s", uid, plugin, exc_info=True)
+
+
 async def _premium_reminder_loop(bot):
     """Periyodik tarama: yaklaşan/biten abonelikleri hatırlat (6 saatte bir)."""
     import asyncio
@@ -234,6 +252,8 @@ async def _premium_reminder_loop(bot):
                 sent = await _send_premium_reminder(bot, item)
                 if sent:
                     premium.mark_reminded(item["uid"], item["plugin"], item.get("mark", []))
+                    if item["kind"] == "expired":
+                        await _deactivate_expired(item["uid"], item["plugin"])
             premium.prune_expired()
         except Exception:
             log.warning("premium hatırlatma döngüsü hatası", exc_info=True)

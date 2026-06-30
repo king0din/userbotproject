@@ -476,7 +476,19 @@ class PluginManager:
         if not plugin.get("is_active", True):
             return False, f"`{plugin_name}` şu anda devre dışı"
         
-        if not plugin.get("is_public", True):
+        # Premium kapısı: premium plugin ise abonelik/sahip/sudo şartı (TÜM yükleme yolları)
+        _is_premium_plugin = False
+        try:
+            from utils import premium as _prem
+            if _prem.plugin_type(plugin_name) == "premium":
+                _is_premium_plugin = True
+                if not _prem.has_access(user_id, plugin_name):
+                    _pc = _prem.get_config(plugin_name) or {}
+                    return False, ("💎 `%s` premium bir plugin (%s⭐ / %s gün). Kullanmak için abonelik gerekir." % (plugin_name, _pc.get("stars", 100), _pc.get("days", 30)))
+        except Exception:
+            pass
+
+        if not _is_premium_plugin and not plugin.get("is_public", True):
             if user_id not in plugin.get("allowed_users", []):
                 return False, f"`{plugin_name}` pluginine erişim yetkiniz yok"
         
@@ -896,6 +908,80 @@ class PluginManager:
         # Handler kayıtlarını temizle
         if user_id in self.user_handlers:
             del self.user_handlers[user_id]
+
+    async def sync_folder_plugins(self):
+        """plugins/ klasöründeki, DB'de OLMAYAN pluginleri otomatik kaydet.
+        Dosyayı klasöre atınca panele düşmesi için. Mevcut kayıtlar KORUNUR.
+        Başlıkta '# type:/# stars:/# days:' varsa premium ayarını da uygular."""
+        try:
+            from database import database as _db
+        except Exception:
+            return 0
+        try:
+            existing = {p.get("name") for p in await _db.get_all_plugins()}
+        except Exception:
+            existing = set()
+        try:
+            files = [f for f in os.listdir(config.PLUGINS_DIR) if f.endswith(".py")]
+        except Exception:
+            files = []
+        added = 0
+        for fn in files:
+            name = fn[:-3]
+            if name.startswith("_") or name.startswith("temp_") or name == "__init__":
+                continue
+            if name in existing:
+                continue
+            path = os.path.join(config.PLUGINS_DIR, fn)
+            try:
+                info = self.extract_plugin_info(path)
+                await _db.add_plugin(
+                    name=name, filename=fn,
+                    description=info.get("description", ""),
+                    commands=info.get("commands", []),
+                    is_public=True, allowed_users=[],
+                )
+                self._apply_header_premium(path, name)
+                added += 1
+                log.info("Klasörden plugin kaydedildi: %s", name)
+            except Exception:
+                log.warning("Plugin senkron hatası: %s", name, exc_info=True)
+        if added:
+            log.info("%d yeni plugin klasörden senkronlandı", added)
+        return added
+
+    def _apply_header_premium(self, path, name):
+        """Plugin başlığındaki '# type:/# stars:/# days:' satırlarını premium
+        config'e uygular (yalnızca daha önce ayarlanmamışsa; panel ayarları korunur)."""
+        try:
+            from utils import premium as _prem
+        except Exception:
+            return
+        try:
+            if _prem.is_configured(name):
+                return
+            ptype = None
+            stars = None
+            days = None
+            with open(path, "r", encoding="utf-8") as f:
+                head = f.read().split("\n")[:25]
+            for line in head:
+                s = line.strip().lower()
+                if s.startswith("# type:"):
+                    v = line.split(":", 1)[1].strip().lower()
+                    if v in ("genel", "ozel", "özel", "premium"):
+                        ptype = "ozel" if v == "özel" else v
+                elif s.startswith("# stars:") or s.startswith("# yıldız:"):
+                    d = "".join(c for c in line.split(":", 1)[1] if c.isdigit())
+                    stars = int(d) if d else None
+                elif s.startswith("# days:") or s.startswith("# gün:"):
+                    d = "".join(c for c in line.split(":", 1)[1] if c.isdigit())
+                    days = int(d) if d else None
+            if ptype:
+                _prem.set_config(name, ptype=ptype, stars=stars, days=days)
+                log.info("Plugin başlığından premium ayarı uygulandı: %s (%s)", name, ptype)
+        except Exception:
+            log.debug("header premium uygulanamadı: %s", name, exc_info=True)
 
 
 # Global instance
