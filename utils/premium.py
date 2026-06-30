@@ -49,6 +49,7 @@ except Exception:
 CONFIG_FILE = os.path.join(_DATA_DIR, "premium_config.json")
 SUBS_FILE = os.path.join(_DATA_DIR, "premium_subs.json")
 OZEL_FILE = os.path.join(_DATA_DIR, "premium_ozel.json")
+NOTIFY_FILE = os.path.join(_DATA_DIR, "premium_notify.json")
 
 TYPES = ("genel", "ozel", "premium")
 TYPE_LABELS = {"genel": "🌐 Genel", "ozel": "🔒 Özel", "premium": "💎 Premium"}
@@ -58,6 +59,10 @@ STAR_PRESETS = [25, 50, 100, 250, 500, 1000]
 DAY_PRESETS = [("Haftalık", 7), ("Aylık", 30), ("3 Aylık", 90), ("Yıllık", 365)]
 
 DAY_SECONDS = 86400
+
+# Hatırlatma ayarları
+REMIND_DAYS = [3, 1]      # bitişe şu kadar gün kala uyar (gün)
+EXPIRE_GRACE_DAYS = 2     # bitişten sonra "durduruldu" bildirimi için bekleme
 
 _LOCK = threading.RLock()
 
@@ -271,8 +276,10 @@ def list_active_subs(plugin):
 
 
 def prune_expired():
-    """Süresi dolmuş abonelikleri temizler (periyodik çağrılabilir)."""
+    """Süresi dolmuş abonelikleri temizler. 'Durduruldu' bildirimi gönderilene
+    VEYA grace süresi geçene kadar bekler (hatırlatma döngüsü haber verebilsin)."""
     now = time.time()
+    notify = _load(NOTIFY_FILE)
     with _LOCK:
         data = _load(SUBS_FILE)
         changed = False
@@ -280,18 +287,108 @@ def prune_expired():
             plugins = data[uid]
             for pl in list(plugins.keys()):
                 try:
-                    if int(plugins[pl]) <= now:
-                        plugins.pop(pl, None)
-                        changed = True
+                    exp = int(plugins[pl])
                 except Exception:
-                    plugins.pop(pl, None)
-                    changed = True
+                    plugins.pop(pl, None); changed = True; continue
+                if exp > now:
+                    continue  # aktif, dokunma
+                ns = notify.get(uid, {}).get(pl, {})
+                notified = (ns.get("exp") == exp and "expired" in ns.get("sent", []))
+                grace_passed = (now - exp) > EXPIRE_GRACE_DAYS * DAY_SECONDS
+                if notified or grace_passed:
+                    plugins.pop(pl, None); changed = True
             if not plugins:
-                data.pop(uid, None)
-                changed = True
+                data.pop(uid, None); changed = True
         if changed:
             _save(SUBS_FILE, data)
     return changed
+
+
+def expiry_str(ts):
+    """Bitiş zaman damgasını okunur tarihe çevirir (gg.aa.yyyy)."""
+    try:
+        return time.strftime("%d.%m.%Y", time.localtime(int(ts)))
+    except Exception:
+        return "?"
+
+
+def _notify_all():
+    return _load(NOTIFY_FILE)
+
+
+def due_reminders():
+    """Şu an gönderilmesi gereken hatırlatmaları döndürür.
+    Her öğe: dict(uid, plugin, kind, days_left, expiry, stars, days, title, mark)
+      kind: 'soon' (yaklaşıyor) | 'expired' (bitti)
+      mark: gönderildiğinde işaretlenecek etiket(ler) listesi
+    Bildirim durumu bitiş zamanına bağlıdır → abonelik yenilenince otomatik sıfırlanır.
+    """
+    import math
+    now = time.time()
+    out = []
+    subs = _subs()
+    notify = _load(NOTIFY_FILE)
+    cfgs = all_configs()
+    changed = False
+    for uid, plugins in list(subs.items()):
+        for plugin, exp in list(plugins.items()):
+            try:
+                exp = int(exp)
+            except Exception:
+                continue
+            cfg = cfgs.get(plugin) or {}
+            if cfg.get("type") != "premium":
+                continue  # sadece premium aboneliklere hatırlatma
+            stars = int(cfg.get("stars", 100))
+            days = int(cfg.get("days", 30))
+            title = cfg.get("title", plugin)
+            ns = notify.get(uid, {}).get(plugin, {})
+            if ns.get("exp") != exp:                # yeni dönem → bildirimleri sıfırla
+                ns = {"exp": exp, "sent": []}
+                notify.setdefault(uid, {})[plugin] = ns
+                changed = True
+            sent = ns.get("sent", [])
+            secs = exp - now
+            dleft = secs / float(DAY_SECONDS)
+            if secs > 0:
+                active = [T for T in REMIND_DAYS if dleft <= T]
+                unsent = [T for T in active if ("soon%d" % T) not in sent]
+                if unsent:
+                    out.append(dict(
+                        uid=int(uid), plugin=plugin, kind="soon",
+                        days_left=max(1, int(math.ceil(dleft))),
+                        expiry=exp, stars=stars, days=days, title=title,
+                        mark=["soon%d" % T for T in active],
+                    ))
+            else:
+                if "expired" not in sent:
+                    out.append(dict(
+                        uid=int(uid), plugin=plugin, kind="expired",
+                        days_left=0, expiry=exp, stars=stars, days=days,
+                        title=title, mark=["expired"],
+                    ))
+    if changed:
+        _save(NOTIFY_FILE, notify)
+    return out
+
+
+def mark_reminded(uid, plugin, tags):
+    """Gönderilen hatırlatma etiketlerini kaydet (tekrar gönderilmesin)."""
+    if isinstance(tags, str):
+        tags = [tags]
+    uid = str(uid)
+    plugin = str(plugin)
+    with _LOCK:
+        notify = _load(NOTIFY_FILE)
+        ns = notify.setdefault(uid, {}).setdefault(plugin, {})
+        sent = ns.setdefault("sent", [])
+        ch = False
+        for t in (tags or []):
+            if t not in sent:
+                sent.append(t)
+                ch = True
+        if ch:
+            _save(NOTIFY_FILE, notify)
 
 
 # ============================================================

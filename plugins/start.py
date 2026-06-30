@@ -198,6 +198,48 @@ async def _render_premium_settings(event, target_user_id, gi):
         pass
 
 
+async def _send_premium_reminder(bot, item):
+    """Abonelik bitiş hatırlatması (veya 'durduruldu') DM'i + yenileme butonu."""
+    plugin = item["plugin"]
+    title = item["title"]
+    stars = item["stars"]
+    exp_str = premium.expiry_str(item["expiry"])
+    if item["kind"] == "expired":
+        text = (f"🛑 **{title}** aboneliğin sona erdi, kullanımın **durduruldu**.\n\n"
+                f"Tekrar açmak için **{stars} ⭐** ödeyebilirsin.")
+    else:
+        dl = item["days_left"]
+        when = "yarın" if dl <= 1 else f"**{dl} gün** sonra"
+        text = (f"⏰ **{title}** aboneliğin {when} bitiyor (📅 {exp_str}).\n\n"
+                f"Kesintisiz devam için en geç **{exp_str}** tarihine kadar "
+                f"**{stars} ⭐** ödemelisin.\n"
+                f"Ödenmezse **{exp_str}** itibarıyla kullanım **otomatik durdurulacak**.")
+    try:
+        await bot.send_message(
+            item["uid"], text,
+            buttons=[[Button.inline(f"🔄 Yenile ({stars}⭐)", f"prenew_{plugin}".encode())]])
+        return True
+    except Exception:
+        log.info("premium hatırlatma gönderilemedi uid=%s", item["uid"])
+        return False
+
+
+async def _premium_reminder_loop(bot):
+    """Periyodik tarama: yaklaşan/biten abonelikleri hatırlat (6 saatte bir)."""
+    import asyncio
+    await asyncio.sleep(45)
+    while True:
+        try:
+            for item in premium.due_reminders():
+                sent = await _send_premium_reminder(bot, item)
+                if sent:
+                    premium.mark_reminded(item["uid"], item["plugin"], item.get("mark", []))
+            premium.prune_expired()
+        except Exception:
+            log.warning("premium hatırlatma döngüsü hatası", exc_info=True)
+        await asyncio.sleep(6 * 3600)
+
+
 # ── TÜM KOMUTLAR KATALOĞU (keşfedilebilirlik için) ─────────────────
 ALL_COMMANDS = [
     ("🏷️ Etiketleme", [
@@ -521,6 +563,29 @@ def register_bot_handlers(bot):
             await _render_premium_settings(event, target_user_id, gi)
         else:
             await _render_plugin_detail(event, target_user_id, gi, full=False)
+
+    # ==========================================
+    # PREMIUM — Abonelik bitiş hatırlatma (yenileme butonu + döngü başlat)
+    # ==========================================
+    @bot.on(events.CallbackQuery(pattern=rb"prenew_(\w+)"))
+    async def ip_prenew_cb(event):
+        plugin = event.pattern_match.group(1).decode()
+        try:
+            ok = await premium.send_star_invoice(bot, event.sender_id, plugin)
+            await event.answer("📩 Fatura gönderildi!" if ok else "❌ Fatura gönderilemedi.",
+                               alert=not ok)
+        except Exception:
+            await event.answer("❌ Hata oluştu.", alert=True)
+
+    if not getattr(bot, "_premium_reminder_started", False):
+        bot._premium_reminder_started = True
+        try:
+            import asyncio
+            _loop = getattr(bot, "loop", None) or asyncio.get_event_loop()
+            _loop.create_task(_premium_reminder_loop(bot))
+            log.info("Premium hatırlatma döngüsü başlatıldı")
+        except Exception:
+            log.warning("Premium hatırlatma döngüsü başlatılamadı", exc_info=True)
 
     # ==========================================
     # PREMIUM — Telegram Yıldızı (Stars) ödeme handler'ları
