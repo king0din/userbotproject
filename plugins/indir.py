@@ -131,7 +131,7 @@ def _download(query, req_dir):
     is_url = query.startswith("http://") or query.startswith("https://")
     target = query if is_url else "ytsearch1:%s" % query
 
-    ydl_opts = {
+    base_opts = {
         "format": "bestaudio/best",
         "outtmpl": os.path.join(req_dir, "%(id)s.%(ext)s"),
         "noplaylist": True,
@@ -141,14 +141,52 @@ def _download(query, req_dir):
         "ignoreerrors": False,
         "nocheckcertificate": True,
         "geo_bypass": True,
+        "source_address": "0.0.0.0",   # IPv4 zorla (bazı engelleri aşar)
+        "retries": 3,
+        "fragment_retries": 3,
+        "extractor_retries": 2,
         "postprocessors": [
             {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
             {"key": "FFmpegThumbnailsConvertor", "format": "jpg"},
         ],
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(target, download=True)
+    # COOKIE KULLANMADAN indir. YouTube'un "bot değilsin" doğrulamasını aşmak için
+    # farklı oynatıcı istemcilerini (android/ios/mweb/tv/web) sırayla dener;
+    # gerçekten ses dosyası indiren ilk istemcide durur.
+    _audio_exts = ("mp3", "m4a", "opus", "webm", "ogg")
+    client_attempts = [
+        ["android"],
+        ["ios"],
+        ["android", "ios", "mweb"],
+        ["tv_embedded"],
+        ["web"],
+    ]
+    info = None
+    last_err = None
+    for clients in client_attempts:
+        # önceki yarım denemenin dosyalarını temizle
+        for _f in list(os.listdir(req_dir)):
+            try:
+                os.remove(os.path.join(req_dir, _f))
+            except Exception:
+                pass
+        opts = dict(base_opts)
+        opts["extractor_args"] = {"youtube": {"player_client": clients}}
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(target, download=True)
+        except Exception as e:
+            last_err = e
+            info = None
+            continue
+        # gerçekten ses indi mi? (metadata gelip indirme engellenebilir)
+        got_audio = any(
+            f.lower().rsplit(".", 1)[-1] in _audio_exts for f in os.listdir(req_dir)
+        )
+        if info and got_audio:
+            break
+        info = None  # dosya yoksa sonraki istemciyi dene
 
     # ytsearch sonucu 'entries' içinde gelir
     if info and "entries" in info:
@@ -158,7 +196,8 @@ def _download(query, req_dir):
         info = entries[0]
 
     if not info:
-        raise RuntimeError("Sonuç bulunamadı.")
+        raise RuntimeError(
+            "İndirilemedi (YouTube engellemiş olabilir). Son hata: %s" % (last_err,))
 
     base_id = info.get("id", "")
     # Ses dosyasını bul (postprocessor mp3'e çevirir)

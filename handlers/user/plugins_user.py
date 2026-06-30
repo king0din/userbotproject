@@ -246,6 +246,39 @@ def register(bot):
             await msg.edit("❌ Userbot bağlantısı kurulamadı. Lütfen tekrar giriş yapın.")
             return
         
+        # Premium kontrolü: erişim yoksa SADECE uyarı değil, gerçek Yıldız faturası gönder
+        try:
+            from utils import premium
+            reason, pcfg = premium.access_reason(event.sender_id, plugin_name)
+        except Exception:
+            reason, pcfg = "ok", {}
+        if reason == "need_pay":
+            stars = (pcfg or {}).get("stars", 100)
+            days = (pcfg or {}).get("days", 30)
+            title = (pcfg or {}).get("title", plugin_name)
+            try:
+                sent = await premium.send_star_invoice(bot, event.sender_id, plugin_name)
+            except Exception:
+                sent = False
+            if sent:
+                await msg.edit(
+                    f"💎 **{title}** premium bir plugin.\n\n"
+                    f"⭐ **{stars}** Yıldız · **{days}** gün\n\n"
+                    f"Gönderdiğim faturadan ödeme yapınca otomatik açılacak."
+                )
+            else:
+                await msg.edit(
+                    f"💎 **{title}** premium ({stars}⭐ / {days} gün).\n"
+                    f"Fatura gönderilemedi, lütfen tekrar dene."
+                )
+            return
+        if reason == "need_grant":
+            await msg.edit(
+                f"🔒 **`{plugin_name}`** özel bir plugin.\n"
+                f"Erişim için yöneticiye başvurmalısın."
+            )
+            return
+
         await msg.edit("⏳ Plugin yükleniyor...")
         success, message = await plugin_manager.activate_plugin(event.sender_id, plugin_name, client)
         await msg.edit(message)

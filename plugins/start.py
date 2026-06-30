@@ -564,6 +564,32 @@ def register_bot_handlers(bot):
             if p.get("is_disabled"):
                 await event.answer("⛔ Bu plugin devre dışı.", alert=True)
                 return
+            # Premium kontrolü: erişim yoksa Yıldız faturası gönder (yükleme öncesi)
+            try:
+                _reason, _pcfg = premium.access_reason(event.sender_id, name)
+            except Exception:
+                _reason, _pcfg = "ok", {}
+            if _reason == "need_pay":
+                _stars = (_pcfg or {}).get("stars", 100)
+                _days = (_pcfg or {}).get("days", 30)
+                try:
+                    _sent = await premium.send_star_invoice(bot, event.sender_id, name)
+                except Exception:
+                    _sent = False
+                try:
+                    await event.answer(
+                        f"💎 {name} premium ({_stars}⭐/{_days}g) — fatura gönderildi, ödeyince açılır"
+                        if _sent else f"💎 {name} premium — fatura gönderilemedi", alert=True)
+                except Exception:
+                    pass
+                await _render_plugin_detail(event, target_user_id, gi, full=False)
+                return
+            if _reason == "need_grant":
+                try:
+                    await event.answer(f"🔒 {name} özel — yöneticiye başvur", alert=True)
+                except Exception:
+                    pass
+                return
             active.append(name)
             await db.update_user(event.sender_id, {"active_plugins": active})
             ok, msg = True, ""

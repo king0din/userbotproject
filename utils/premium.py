@@ -506,9 +506,17 @@ async def send_star_invoice(bot, peer, plugin, title=None, description=None):
     description = description or (
         "%s — %s gün erişim (%s ⭐)" % (cfg.get("title", plugin), days, stars)
     )
+    # ödeme yükü (payload) için kullanıcı id'si
+    uid = peer if isinstance(peer, int) else getattr(peer, "user_id", 0)
     try:
         import random
         from telethon.tl import functions, types
+
+        # peer'ı InputPeer'a çevir — raw API ham int KABUL ETMEZ (faturanın gitmeme sebebi buydu)
+        try:
+            input_peer = await bot.get_input_entity(peer)
+        except Exception:
+            input_peer = peer
 
         invoice = types.Invoice(
             currency="XTR",
@@ -518,13 +526,12 @@ async def send_star_invoice(bot, peer, plugin, title=None, description=None):
             title=title,
             description=description[:255],
             invoice=invoice,
-            payload=make_payload(plugin, getattr(peer, "user_id", peer), days)
-            if isinstance(peer, int) else make_payload(plugin, 0, days),
+            payload=make_payload(plugin, uid, days),
             provider="",  # Stars (XTR) için sağlayıcı boş
             provider_data=types.DataJSON(data="{}"),
         )
         await bot(functions.messages.SendMediaRequest(
-            peer=peer,
+            peer=input_peer,
             media=media,
             message="",
             random_id=random.randrange(-(2 ** 63), 2 ** 63),
