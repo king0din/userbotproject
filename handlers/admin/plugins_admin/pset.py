@@ -30,6 +30,41 @@ from utils import send_log, get_readable_time, back_button
 from utils.bot_api import bot_api, btn, ButtonBuilder
 
 
+async def _safe_edit(event, text, rows):
+    """Önce bot_api (stilli/emoji butonlar) ile düzenle; api.telegram.org takılırsa
+    Telethon'a düş ki panel HER ZAMAN açılsın (stil olmadan ama çalışır)."""
+    try:
+        res = await bot_api.edit_message_text(
+            chat_id=event.sender_id,
+            message_id=event.message_id,
+            text=text,
+            reply_markup=btn.inline_keyboard(rows),
+        )
+        if res is not None:
+            return True
+    except Exception:
+        pass
+    try:
+        tbtns = []
+        for row in (rows or []):
+            trow = [Button.inline(b.get("text", " "), (b.get("callback_data") or " ").encode())
+                    for b in row]
+            if trow:
+                tbtns.append(trow)
+        await event.edit(text, buttons=tbtns)
+        return True
+    except Exception:
+        return False
+
+
+async def _ans(event, text=None, alert=False):
+    """Callback'i güvenle yanıtla (QueryIdInvalid / süre dolması paneli çökertmesin)."""
+    try:
+        await event.answer(text, alert=alert)
+    except Exception:
+        pass
+
+
 def register(bot):
     @bot.on(events.NewMessage(pattern=r'^/psettings$'))
     async def psettings_command(event):
@@ -138,19 +173,19 @@ def register(bot):
             ])
             
             if edit:
-                await bot_api.edit_message_text(
-                    chat_id=event.sender_id,
-                    message_id=event.message_id,
-                    text=text,
-                    reply_markup=btn.inline_keyboard(rows)
-                )
-                await event.answer()
+                await _safe_edit(event, text, rows)
+                await _ans(event)
             else:
-                await bot_api.send_message(
+                sent = await bot_api.send_message(
                     chat_id=event.sender_id,
                     text=text,
                     reply_markup=btn.inline_keyboard(rows)
                 )
+                if sent is None:
+                    try:
+                        await event.respond(text)
+                    except Exception:
+                        pass
         
         except Exception as e:
             error_text = f"❌ Hata: {e}"
@@ -332,13 +367,8 @@ def register(bot):
                         icon_custom_emoji_id=5832646161554480591)
         ])
         
-        await bot_api.edit_message_text(
-            chat_id=event.sender_id,
-            message_id=event.message_id,
-            text=text,
-            reply_markup=btn.inline_keyboard(rows)
-        )
-        await event.answer()
+        await _safe_edit(event, text, rows)
+        await _ans(event)
     
 
     # ============ PREMIUM AYARLARI ============
@@ -385,11 +415,9 @@ def register(bot):
             rows.append([btn.callback(("✅" if d == days else "") + lbl, f"psetpdays_{plugin_name}_{d}", style=ButtonBuilder.STYLE_SECONDARY) for lbl, d in _prem.DAY_PRESETS])
             rows.append([btn.callback(" 👥 Aboneler", f"psetpsubs_{plugin_name}", style=ButtonBuilder.STYLE_PRIMARY)])
         rows.append([btn.callback(" 🔙 Geri", f"psetsel_{plugin_name}", style=ButtonBuilder.STYLE_DANGER)])
-        await bot_api.edit_message_text(
-            chat_id=event.sender_id, message_id=event.message_id,
-            text=text, reply_markup=btn.inline_keyboard(rows))
+        await _safe_edit(event, text, rows)
         try:
-            await event.answer()
+            await _ans(event)
         except Exception:
             pass
 
@@ -457,11 +485,9 @@ def register(bot):
                 left = max(0, int((int(exp) - _t.time()) // 86400))
                 lines.append(f"• `{uid}` — {left} gün")
             text = f"👥 **{name} — Aboneler ({len(subs)})**\n\n" + "\n".join(lines[:40])
-        await bot_api.edit_message_text(
-            chat_id=event.sender_id, message_id=event.message_id, text=text,
-            reply_markup=btn.inline_keyboard([[btn.callback(" 🔙 Geri", f"psetprem_{name}", style=ButtonBuilder.STYLE_DANGER)]]))
+        await _safe_edit(event, text, [[btn.callback(" 🔙 Geri", f"psetprem_{name}", style=ButtonBuilder.STYLE_DANGER)]])
         try:
-            await event.answer()
+            await _ans(event)
         except Exception:
             pass
 
@@ -864,4 +890,4 @@ def register(bot):
     @bot.on(events.CallbackQuery(data=b"noop"))
     async def noop_handler(event):
         """Boş callback - sayfa numarası için"""
-        await event.answer()
+        await _ans(event)

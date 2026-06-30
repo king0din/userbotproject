@@ -65,21 +65,40 @@ class BotAPI:
     def __init__(self, token: str = None):
         self.token = token or config.BOT_TOKEN
         self.base_url = f"https://api.telegram.org/bot{self.token}"
-    
-    async def _request(self, method: str, data: Dict = None) -> Optional[Dict]:
-        """API isteği gönder"""
+        self._session = None
+
+    async def _get_session(self):
+        """Tek bir oturumu yeniden kullan (her istekte yeni session açma + kısa timeout)."""
+        if self._session is None or self._session.closed:
+            timeout = aiohttp.ClientTimeout(
+                total=12, connect=6, sock_connect=6, sock_read=10
+            )
+            self._session = aiohttp.ClientSession(timeout=timeout)
+        return self._session
+
+    async def _request(self, method: str, data: Dict = None, _retry: bool = True) -> Optional[Dict]:
+        """API isteği gönder (kısa timeout + geçici hatada bir kez yeniden deneme)"""
         url = f"{self.base_url}/{method}"
-        
+
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=data) as response:
-                    result = await response.json()
-                    if result.get('ok'):
-                        return result.get('result')
-                    else:
-                        log.warning("%s error: %s", method, result.get('description'))
-                        return None
-        except Exception as e:
+            session = await self._get_session()
+            async with session.post(url, json=data) as response:
+                result = await response.json()
+                if result.get('ok'):
+                    return result.get('result')
+                else:
+                    log.warning("%s error: %s", method, result.get('description'))
+                    return None
+        except Exception:
+            # geçici bağlantı/timeout → session'ı tazeleyip bir kez daha dene
+            if _retry:
+                try:
+                    if self._session and not self._session.closed:
+                        await self._session.close()
+                except Exception:
+                    pass
+                self._session = None
+                return await self._request(method, data, _retry=False)
             log.error("%s exception", method, exc_info=True)
             return None
     
