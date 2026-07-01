@@ -43,14 +43,28 @@ def is_youtube_url(text):
 
 
 def _find_cookies():
-    """Varsa cookies dosyasını bul (zorunlu değil; yoksa cookie-siz denenir)."""
-    for c in (
-        os.path.join(TEMP_DOWNLOAD_DIRECTORY, "cookies.txt"),
-        "youtube_cookies.txt",
-        "cookies.txt",
-    ):
-        if os.path.exists(c):
-            return c
+    """Varsa cookies dosyasını bul (zorunlu değil). Birçok yere ve isme bakar."""
+    names = ("cookies.txt", "youtube_cookies.txt", "cookie.txt", "youtube.txt")
+    dirs = [
+        os.getcwd(),
+        TEMP_DOWNLOAD_DIRECTORY,
+        os.path.join(os.getcwd(), "downloads"),
+        os.path.join(os.getcwd(), "cookies"),
+        os.path.join(TEMP_DOWNLOAD_DIRECTORY, "cookies"),
+    ]
+    try:
+        import config as _c
+        dirs.append(getattr(_c, "DATA_DIR", "."))
+    except Exception:
+        pass
+    for d in dirs:
+        for n in names:
+            try:
+                pth = os.path.join(d, n)
+                if os.path.isfile(pth):
+                    return os.path.abspath(pth)
+            except Exception:
+                pass
     return None
 
 
@@ -179,7 +193,10 @@ async def music_download(event):
     try:
         path, meta, err = await _download_audio(target, dl_dir)
         if not path:
-            await event.edit("`❌ İndirilemedi:` %s" % _last_err_line(err))
+            _ck = _find_cookies()
+            _ci = ("🍪 cookie: %s" % _ck) if _ck else "🍪 cookie: BULUNAMADI"
+            await event.edit(
+                "`❌ İndirilemedi`\n%s\n\n`%s`" % (_ci, _last_err_line(err)))
             return
         size = os.path.getsize(path)
         if size > MAX_AUDIO_MB * 1024 * 1024:
@@ -229,7 +246,10 @@ async def video_download(event):
     try:
         path, meta, err = await _download_video(target, dl_dir)
         if not path:
-            await event.edit("`❌ İndirilemedi:` %s" % _last_err_line(err))
+            _ck = _find_cookies()
+            _ci = ("🍪 cookie: %s" % _ck) if _ck else "🍪 cookie: BULUNAMADI"
+            await event.edit(
+                "`❌ İndirilemedi`\n%s\n\n`%s`" % (_ci, _last_err_line(err)))
             return
         size = os.path.getsize(path)
         if size > MAX_VIDEO_MB * 1024 * 1024:
