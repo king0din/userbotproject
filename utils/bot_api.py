@@ -76,8 +76,21 @@ class BotAPI:
             self._session = aiohttp.ClientSession(timeout=timeout)
         return self._session
 
-    async def _request(self, method: str, data: Dict = None, _retry: bool = True) -> Optional[Dict]:
-        """API isteği gönder (kısa timeout + geçici hatada bir kez yeniden deneme)"""
+    @staticmethod
+    def _strip_button_styles(markup):
+        """Bot API stil/emoji alanlarını çıkar (Telegram reddederse sade buton kalsın)."""
+        try:
+            rows = markup.get('inline_keyboard') if isinstance(markup, dict) else None
+            for row in (rows or []):
+                for b in row:
+                    if isinstance(b, dict):
+                        b.pop('style', None)
+                        b.pop('icon_custom_emoji_id', None)
+        except Exception:
+            pass
+
+    async def _request(self, method: str, data: Dict = None, _retry: bool = True, _stripped: bool = False) -> Optional[Dict]:
+        """API isteği gönder (kısa timeout + geçici hata/stil reddi durumunda yeniden dener)"""
         url = f"{self.base_url}/{method}"
 
         try:
@@ -86,9 +99,15 @@ class BotAPI:
                 result = await response.json()
                 if result.get('ok'):
                     return result.get('result')
-                else:
-                    log.warning("%s error: %s", method, result.get('description'))
-                    return None
+                desc = result.get('description') or ''
+                # Telegram stilli/emoji butonu reddederse → stilleri atıp sade butonla bir kez daha dene
+                if (not _stripped) and data and data.get('reply_markup') and \
+                        'button' in desc.lower() and \
+                        ('style' in desc.lower() or 'parse' in desc.lower()):
+                    self._strip_button_styles(data['reply_markup'])
+                    return await self._request(method, data, _retry=False, _stripped=True)
+                log.warning("%s error: %s", method, desc)
+                return None
         except Exception:
             # geçici bağlantı/timeout → session'ı tazeleyip bir kez daha dene
             if _retry:

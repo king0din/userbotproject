@@ -1,439 +1,299 @@
+# YouTube İndirici (premium) — .müzik / .video / .ytara
 # type: premium
 # stars: 100
 # days: 30
-# title: Şarkı İndirici
-# description: .indir <şarkı adı/link> → YouTube'dan şarkı indirir (kapak + isim ile)
-# version: 1.0.0
+# title: YouTube İndirici
 # requires: yt-dlp
 """
-.indir <şarkı adı veya YouTube linki>
+YouTube'dan müzik/video indirir (KingTG premium plugin).
 
-Premium plugin: kullanıcının aktif aboneliği yoksa bota Yıldız faturası
-gönderilir. Sahip ve sudo her zaman kullanabilir.
-
-Sağlamlık:
-  • Her indirme KENDİ uuid'li klasörüne yapılır → kullanıcılar/eşzamanlı
-    istekler birbirine karışmaz; iş bitince (finally) klasör tamamen silinir.
-  • Şarkı gönderimi kapalı/kısıtlı sohbetlerde ÇÖKMEZ; "bu sohbette gönderim
-    kapalı" mesajı verir, olmazsa özelden bilgilendirir.
-  • yt-dlp / ffmpeg yoksa, süre/boyut limiti aşılırsa nazikçe uyarır.
+Önemli:
+- Cookie GEREKTİRMEZ: tv/ios/android/mweb istemcileri sırayla denenir
+  (YouTube'un "bot değilsin" doğrulamasını cookie olmadan aşmaya çalışır).
+- İsteğe bağlı: bir cookies.txt varsa OTOMATİK kullanılır (zorunlu değil).
+- Hız: tek yt-dlp çağrısında arama + indirme birlikte yapılır (eski sürüm
+  önce bilgi sonra indirme diye İKİ çağrı yapıyordu — o yüzden yavaştı).
 """
-
 import os
-import shutil
-import uuid
+import re
+import json
 import asyncio
-import time
 
 from userbot.events import register
 from userbot import CMD_HELP
 
 try:
-    from utils.logger import get_logger
-    log = get_logger(__name__)
-except Exception:
-    import logging
-    log = logging.getLogger("indir")
-
-# Premium çerçeve (yoksa plugin yine çalışır, ücretsiz gibi davranır)
-try:
-    from utils.premium import (
-        has_access, access_reason, get_config, send_star_invoice, prune_expired,
-    )
-    _PREMIUM = True
-except Exception:
-    _PREMIUM = False
-    log.warning("premium çerçevesi yüklenemedi; .indir ücretsiz çalışacak", exc_info=True)
-
-PLUGIN_NAME = "indir"
-
-# --- İndirme dizini (istek başına izole) -----------------------------------
-try:
     from userbot import TEMP_DOWNLOAD_DIRECTORY
 except ImportError:
     TEMP_DOWNLOAD_DIRECTORY = "./downloads/"
 
-INDIR_DIR = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "indir")
-try:
-    os.makedirs(INDIR_DIR, exist_ok=True)
-except Exception:
-    pass
-
-MAX_DURATION = 60 * 60                 # 1 saatten uzun içerik reddedilir
-MAX_FILESIZE = 2 * 1024 * 1024 * 1024  # 2 GB (userbot gönderim limiti)
-DL_TIMEOUT = 300                       # indirme için üst zaman sınırı (sn)
-
-# Aynı kullanıcının üst üste indirme başlatmasını engelle (kaynak koruması)
-_busy = set()
-
-
-# --- Manager bot (Yıldız faturası göndermek için) --------------------------
-def _get_bot():
+if not os.path.exists(TEMP_DOWNLOAD_DIRECTORY):
     try:
-        from userbot import bot as _b
-        return _b
+        os.makedirs(TEMP_DOWNLOAD_DIRECTORY)
     except Exception:
-        return None
+        pass
+
+YT_REGEX = r"(https?://)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)/.+"
+# cookie-siz denenecek YouTube oynatıcı istemcileri
+YT_CLIENTS = "tv,ios,android,mweb,web_safari"
+MAX_AUDIO_MB = 50
+MAX_VIDEO_MB = 2000
 
 
-# ============================================================
-#  Yardımcılar
-# ============================================================
-def _req_dir(uid):
-    """Kullanıcı + uuid ile benzersiz indirme klasörü (çakışma olmaz)."""
-    d = os.path.join(INDIR_DIR, "%s_%s" % (uid, uuid.uuid4().hex[:8]))
-    os.makedirs(d, exist_ok=True)
-    return d
+def is_youtube_url(text):
+    return bool(re.match(YT_REGEX, text or ""))
 
 
-def _cleanup_dir(path):
-    try:
-        if path and os.path.isdir(path):
-            shutil.rmtree(path, ignore_errors=True)
-    except Exception:
-        log.debug("indir geçici klasör silinemedi: %s", path, exc_info=True)
-
-
-def _humantime(seconds):
-    try:
-        seconds = int(seconds or 0)
-    except Exception:
-        return "?"
-    m, s = divmod(seconds, 60)
-    h, m = divmod(m, 60)
-    if h:
-        return "%d:%02d:%02d" % (h, m, s)
-    return "%d:%02d" % (m, s)
-
-
-def _find_thumb(req_dir, base_id):
-    """İndirilen kapak görselini bul (jpg/png/webp)."""
-    for f in os.listdir(req_dir):
-        low = f.lower()
-        if low.startswith(str(base_id)) and low.rsplit(".", 1)[-1] in ("jpg", "jpeg", "png", "webp"):
-            return os.path.join(req_dir, f)
-    # base eşleşmese de bir görsel varsa onu kullan
-    for f in os.listdir(req_dir):
-        if f.lower().rsplit(".", 1)[-1] in ("jpg", "jpeg", "png", "webp"):
-            return os.path.join(req_dir, f)
+def _find_cookies():
+    """Varsa cookies dosyasını bul (zorunlu değil; yoksa cookie-siz denenir)."""
+    for c in (
+        os.path.join(TEMP_DOWNLOAD_DIRECTORY, "cookies.txt"),
+        "youtube_cookies.txt",
+        "cookies.txt",
+    ):
+        if os.path.exists(c):
+            return c
     return None
 
 
-def _download(query, req_dir):
-    """yt-dlp ile şarkı indir. SENKRON (asyncio.to_thread içinde çağrılır).
-    Dönüş: dict(file, thumb, title, performer, duration) | hata fırlatır.
-    """
-    try:
-        import yt_dlp
-    except Exception:
-        raise RuntimeError("yt-dlp kurulu değil (`pip install yt-dlp`).")
+def _sanitize(q):
+    """Sorguyu shell için güvenli hale getir."""
+    return (q or "").replace('"', "").replace("`", "").replace("$", "").strip()
 
-    is_url = query.startswith("http://") or query.startswith("https://")
-    target = query if is_url else "ytsearch1:%s" % query
 
-    base_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(req_dir, "%(id)s.%(ext)s"),
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "writethumbnail": True,
-        "ignoreerrors": False,
-        "nocheckcertificate": True,
-        "geo_bypass": True,
-        "source_address": "0.0.0.0",   # IPv4 zorla (bazı engelleri aşar)
-        "retries": 3,
-        "fragment_retries": 3,
-        "extractor_retries": 2,
-        "postprocessors": [
-            {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
-            {"key": "FFmpegThumbnailsConvertor", "format": "jpg"},
-        ],
-    }
+async def run_command(cmd):
+    proc = await asyncio.create_subprocess_shell(
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out, err = await proc.communicate()
+    return out.decode("utf-8", "replace"), err.decode("utf-8", "replace"), proc.returncode
 
-    # COOKIE KULLANMADAN indir. YouTube'un "bot değilsin" doğrulamasını aşmak için
-    # farklı oynatıcı istemcilerini (android/ios/mweb/tv/web) sırayla dener;
-    # gerçekten ses dosyası indiren ilk istemcide durur.
-    _audio_exts = ("mp3", "m4a", "opus", "webm", "ogg")
-    client_attempts = [
-        ["android"],
-        ["ios"],
-        ["android", "ios", "mweb"],
-        ["tv_embedded"],
-        ["web"],
-    ]
-    info = None
-    last_err = None
-    for clients in client_attempts:
-        # önceki yarım denemenin dosyalarını temizle
-        for _f in list(os.listdir(req_dir)):
+
+def _clean_dir(d):
+    for f in os.listdir(d):
+        try:
+            os.remove(os.path.join(d, f))
+        except Exception:
+            pass
+
+
+def _read_meta(d):
+    """İndirilen .info.json'dan (başlık, sanatçı, süre) oku."""
+    title, performer, duration = None, "YouTube", 0
+    for f in os.listdir(d):
+        if f.endswith(".info.json"):
             try:
-                os.remove(os.path.join(req_dir, _f))
+                with open(os.path.join(d, f), "r", encoding="utf-8") as jf:
+                    info = json.load(jf)
+                title = info.get("title") or title
+                performer = info.get("uploader") or info.get("channel") or performer
+                duration = int(info.get("duration") or 0)
             except Exception:
                 pass
-        opts = dict(base_opts)
-        opts["extractor_args"] = {"youtube": {"player_client": clients}}
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(target, download=True)
-        except Exception as e:
-            last_err = e
-            info = None
-            continue
-        # gerçekten ses indi mi? (metadata gelip indirme engellenebilir)
-        got_audio = any(
-            f.lower().rsplit(".", 1)[-1] in _audio_exts for f in os.listdir(req_dir)
-        )
-        if info and got_audio:
             break
-        info = None  # dosya yoksa sonraki istemciyi dene
-
-    # ytsearch sonucu 'entries' içinde gelir
-    if info and "entries" in info:
-        entries = [e for e in info["entries"] if e]
-        if not entries:
-            raise RuntimeError("Sonuç bulunamadı.")
-        info = entries[0]
-
-    if not info:
-        raise RuntimeError(
-            "İndirilemedi (YouTube engellemiş olabilir). Son hata: %s" % (last_err,))
-
-    base_id = info.get("id", "")
-    # Ses dosyasını bul (postprocessor mp3'e çevirir)
-    audio = None
-    for f in os.listdir(req_dir):
-        low = f.lower()
-        if low.startswith(str(base_id)) and low.rsplit(".", 1)[-1] in ("mp3", "m4a", "opus", "webm", "ogg"):
-            audio = os.path.join(req_dir, f)
-            if low.endswith(".mp3"):  # mp3'ü tercih et
-                break
-    if not audio:
-        # base eşleşmediyse klasördeki ilk sesi al
-        for f in os.listdir(req_dir):
-            if f.lower().rsplit(".", 1)[-1] in ("mp3", "m4a", "opus", "webm", "ogg"):
-                audio = os.path.join(req_dir, f)
-                break
-    if not audio or not os.path.exists(audio):
-        raise RuntimeError("Ses dosyası indirilemedi.")
-
-    return {
-        "file": audio,
-        "thumb": _find_thumb(req_dir, base_id),
-        "title": info.get("title") or "Bilinmeyen",
-        "performer": info.get("uploader") or info.get("channel") or info.get("artist") or "",
-        "duration": info.get("duration") or 0,
-        "webpage_url": info.get("webpage_url") or "",
-    }
+    return title, performer, duration
 
 
-def _is_restricted_send_error(e):
-    """Gönderim hatası 'bu sohbette gönderim kapalı/kısıtlı' türü mü?"""
-    name = type(e).__name__.lower()
-    msg = str(e).lower()
-    name_keys = ("chatwriteforbidden", "chatsendmediaforbidden", "chatsendmedia",
-                 "chatadminrequired", "userbannedinchannel", "channelprivate",
-                 "chatrestricted", "mediaforbidden", "chatwrite")
-    msg_keys = ("forbidden", "banned", "not have", "admin", "restrict",
-                "cannot send", "can't send", "can't write", "cannot write",
-                "send media", "not allowed", "private")
-    return any(k in name for k in name_keys) or any(k in msg for k in msg_keys)
+def _fmt_size(n):
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return "%.1f %s" % (n, unit)
+        n /= 1024.0
+    return "%.1f TB" % n
 
 
-async def _safe_send_song(event, status, info, me):
-    """Şarkıyı kapak + isim ile gönder; kısıtlı sohbette çökmeden bilgilendir.
-    Dönüş: True başarılı, False kısıtlı/başarısız.
-    """
-    from telethon.tl.types import DocumentAttributeAudio
-
-    title = info["title"]
-    performer = info["performer"]
-    dur = info["duration"]
-    caption = "🎵 **%s**" % title
-    if performer:
-        caption += "\n👤 %s" % performer
-    caption += "\n⏱️ %s" % _humantime(dur)
-
-    attrs = [DocumentAttributeAudio(
-        duration=int(dur or 0),
-        title=title[:64],
-        performer=(performer or "")[:64],
-    )]
-
-    send_kwargs = dict(
-        caption=caption,
-        attributes=attrs,
-        supports_streaming=True,
-    )
-    if info.get("thumb") and os.path.exists(info["thumb"]):
-        send_kwargs["thumb"] = info["thumb"]
-
-    try:
-        await event.client.send_file(event.chat_id, info["file"], **send_kwargs)
-        try:
-            await status.delete()
-        except Exception:
-            pass
-        return True
-    except Exception as e:
-        if _is_restricted_send_error(e):
-            log.info(".indir kısıtlı sohbet: %s", type(e).__name__)
-            warn = "🚫 **Bu sohbette şarkı/medya gönderimi kapalı.**\n`%s`" % title
-            # Önce durum mesajını uyarıya çevir
-            try:
-                await status.edit(warn)
-            except Exception:
-                # O da olmuyorsa kullanıcıya özelden bildir
-                try:
-                    await event.client.send_message(
-                        "me", warn + "\n\n_(İndirilen şarkı bu sohbete gönderilemedi.)_"
-                    )
-                except Exception:
-                    log.warning(".indir kısıtlı sohbet uyarısı da gönderilemedi", exc_info=True)
-            return False
-        # Beklenmeyen gönderim hatası
-        log.warning(".indir gönderim hatası", exc_info=True)
-        try:
-            await status.edit("❌ Gönderim hatası: `%s`" % str(e)[:120])
-        except Exception:
-            pass
-        return False
+def _last_err_line(err):
+    lines = [l for l in (err or "").strip().split("\n") if l.strip()]
+    return (lines[-1][:160] if lines else "bilinmeyen hata")
 
 
-async def _require_access(event, me):
-    """Premium kapısı. Erişim varsa True; yoksa kullanıcıyı bilgilendirip fatura
-    gönderir ve False döndürür."""
-    if not _PREMIUM:
-        return True
-    try:
-        prune_expired()
-    except Exception:
-        pass
-    status, cfg = access_reason(me.id, PLUGIN_NAME)
-    if status == "ok":
-        return True
-
-    if status == "need_pay":
-        stars = int(cfg.get("stars", 100))
-        days = int(cfg.get("days", 30))
-        title = cfg.get("title", "Şarkı İndirici")
-        bot = _get_bot()
-        sent = False
-        if bot is not None:
-            try:
-                sent = await send_star_invoice(bot, me.id, PLUGIN_NAME)
-            except Exception:
-                log.warning(".indir fatura gönderilemedi", exc_info=True)
-        if sent:
-            await event.edit(
-                "💎 **%s — Premium**\n\n"
-                "Bu özelliği kullanmak için **%s ⭐ / %s gün** abonelik gerekir.\n"
-                "📩 Bota **fatura gönderildi**, oradan ödeyip tekrar dene." % (title, stars, days)
-            )
-        else:
-            await event.edit(
-                "💎 **%s — Premium**\n\n"
-                "Bu özellik **%s ⭐ / %s gün**. Ödeme için bota `/start` deyip "
-                "premium menüsünden satın al." % (title, stars, days)
-            )
-        return False
-
-    # need_grant (özel plugin, izin yok)
-    await event.edit(
-        "🔒 **Bu özel bir özellik.**\nErişim için yöneticiden izin iste."
-    )
-    return False
+async def _download_audio(target, dl_dir):
+    """TEK çağrı: ara + indir birlikte. (path, meta, err) döndürür."""
+    cookies = _find_cookies()
+    ck = ' --cookies "%s"' % cookies if cookies else ""
+    cmd = (
+        'yt-dlp -x --audio-format mp3 --audio-quality 0 '
+        "--no-warnings --no-playlist --write-info-json "
+        '--extractor-args "youtube:player_client=%s"%s '
+        '-o "%s" "%s"'
+    ) % (YT_CLIENTS, ck, os.path.join(dl_dir, "%(id)s.%(ext)s"), target)
+    out, err, code = await run_command(cmd)
+    mp3 = None
+    for f in os.listdir(dl_dir):
+        if f.endswith(".mp3"):
+            mp3 = os.path.join(dl_dir, f)
+            break
+    if mp3 and os.path.exists(mp3):
+        return mp3, _read_meta(dl_dir), None
+    return None, None, err
 
 
-# ============================================================
-#  Komut
-# ============================================================
-@register(outgoing=True, pattern=r"(?s)^\.indir(?: |$)(.*)")
-async def indir_cmd(event):
-    me = await event.client.get_me()
-    if event.sender_id != me.id:
+async def _download_video(target, dl_dir):
+    """TEK çağrı: ara + indir birlikte (720p)."""
+    cookies = _find_cookies()
+    ck = ' --cookies "%s"' % cookies if cookies else ""
+    cmd = (
+        'yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]/best" '
+        "--merge-output-format mp4 --no-warnings --no-playlist --write-info-json "
+        '--extractor-args "youtube:player_client=%s"%s '
+        '-o "%s" "%s"'
+    ) % (YT_CLIENTS, ck, os.path.join(dl_dir, "%(id)s.%(ext)s"), target)
+    out, err, code = await run_command(cmd)
+    vid = None
+    for f in os.listdir(dl_dir):
+        if f.lower().endswith((".mp4", ".mkv", ".webm")):
+            vid = os.path.join(dl_dir, f)
+            break
+    if vid and os.path.exists(vid):
+        return vid, _read_meta(dl_dir), None
+    return None, None, err
+
+
+@register(outgoing=True, pattern=r"^\.m[uü]zik(?:\s+(.+))?$")
+async def music_download(event):
+    if event.fwd_from:
         return
-
-    query = (event.pattern_match.group(1) or "").strip()
+    query = event.pattern_match.group(1)
     if not query:
-        await event.edit("🎵 **Kullanım:** `.indir <şarkı adı veya link>`")
+        await event.edit(
+            "**🎵 YouTube Müzik İndirme**\n\n"
+            "`.müzik <şarkı adı>` — arayıp indirir\n"
+            "`.müzik <youtube linki>` — direkt indirir"
+        )
         return
 
-    # Premium kapısı
-    if not await _require_access(event, me):
-        return
+    is_url = is_youtube_url(query)
+    target = query.strip() if is_url else "ytsearch1:%s" % _sanitize(query)
 
-    # Eşzamanlı indirme koruması
-    if me.id in _busy:
-        await event.edit("⏳ Zaten bir indirme sürüyor, bitince tekrar dene.")
-        return
-    _busy.add(me.id)
-
-    req_dir = _req_dir(me.id)
+    await event.edit("`🎵 İndiriliyor...`")
+    dl_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "yt_music")
+    os.makedirs(dl_dir, exist_ok=True)
+    _clean_dir(dl_dir)
     try:
-        try:
-            status = await event.edit("🔎 **Aranıyor / indiriliyor...**")
-        except Exception:
-            status = event
-
-        # yt-dlp bloklayıcı → ayrı thread + zaman sınırı
-        try:
-            info = await asyncio.wait_for(
-                asyncio.to_thread(_download, query, req_dir), timeout=DL_TIMEOUT
-            )
-        except asyncio.TimeoutError:
-            await status.edit("⏱️ İndirme zaman aşımına uğradı, tekrar dene.")
+        path, meta, err = await _download_audio(target, dl_dir)
+        if not path:
+            await event.edit("`❌ İndirilemedi:` %s" % _last_err_line(err))
             return
-        except Exception as e:
-            await status.edit("❌ İndirilemedi: `%s`" % str(e)[:160])
+        size = os.path.getsize(path)
+        if size > MAX_AUDIO_MB * 1024 * 1024:
+            await event.edit("`❌ Dosya çok büyük (>%dMB)!`" % MAX_AUDIO_MB)
             return
-
-        # Limit kontrolleri
-        if info["duration"] and info["duration"] > MAX_DURATION:
-            await status.edit(
-                "⚠️ İçerik çok uzun (%s). En fazla %s indirilebilir." %
-                (_humantime(info["duration"]), _humantime(MAX_DURATION))
-            )
-            return
+        title, performer, duration = meta
+        await event.edit("`📤 Gönderiliyor: %s`" % _fmt_size(size))
         try:
-            if os.path.getsize(info["file"]) > MAX_FILESIZE:
-                await status.edit("⚠️ Dosya çok büyük (2 GB üstü), gönderilemez.")
-                return
+            from telethon.tl.types import DocumentAttributeAudio
+            attrs = [DocumentAttributeAudio(duration=duration, title=title, performer=performer)]
         except Exception:
-            pass
-
-        try:
-            await status.edit("⬆️ **Gönderiliyor...**")
-        except Exception:
-            pass
-        await _safe_send_song(event, status, info, me)
-
+            attrs = []
+        await event.client.send_file(
+            event.chat_id,
+            path,
+            caption="🎵 **%s**" % (title or "Müzik"),
+            attributes=attrs,
+            force_document=False,
+        )
+        await event.delete()
+    except Exception as e:
+        await event.edit("`❌ Gönderme hatası: %s`" % e)
     finally:
-        _cleanup_dir(req_dir)
-        _busy.discard(me.id)
+        _clean_dir(dl_dir)
 
 
-# ============================================================
-#  Kullanıcı verisi temizliği (hesap silindiğinde / orphan)
-# ============================================================
-def cleanup_user_data(user_id, reason=None):
-    """Bu kullanıcıya ait artık indirme klasörlerini sil."""
+@register(outgoing=True, pattern=r"^\.video(?:\s+(.+))?$")
+async def video_download(event):
+    if event.fwd_from:
+        return
+    query = event.pattern_match.group(1)
+    if not query:
+        await event.edit(
+            "**🎬 YouTube Video İndirme**\n\n"
+            "`.video <video adı>` — arayıp indirir\n"
+            "`.video <youtube linki>` — direkt indirir"
+        )
+        return
+
+    is_url = is_youtube_url(query)
+    target = query.strip() if is_url else "ytsearch1:%s" % _sanitize(query)
+
+    await event.edit("`🎬 İndiriliyor...`")
+    dl_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "yt_video")
+    os.makedirs(dl_dir, exist_ok=True)
+    _clean_dir(dl_dir)
     try:
-        if not os.path.isdir(INDIR_DIR):
+        path, meta, err = await _download_video(target, dl_dir)
+        if not path:
+            await event.edit("`❌ İndirilemedi:` %s" % _last_err_line(err))
             return
-        prefix = "%s_" % user_id
-        for name in os.listdir(INDIR_DIR):
-            if name.startswith(prefix):
-                _cleanup_dir(os.path.join(INDIR_DIR, name))
-    except Exception:
-        log.debug("indir cleanup_user_data hata", exc_info=True)
+        size = os.path.getsize(path)
+        if size > MAX_VIDEO_MB * 1024 * 1024:
+            await event.edit("`❌ Dosya çok büyük (>%dMB)!`" % MAX_VIDEO_MB)
+            return
+        title, performer, duration = meta
+        await event.edit("`📤 Gönderiliyor: %s`" % _fmt_size(size))
+        await event.client.send_file(
+            event.chat_id,
+            path,
+            caption="🎬 **%s**" % (title or "Video"),
+            supports_streaming=True,
+        )
+        await event.delete()
+    except Exception as e:
+        await event.edit("`❌ Gönderme hatası: %s`" % e)
+    finally:
+        _clean_dir(dl_dir)
+
+
+@register(outgoing=True, pattern=r"^\.ytara(?:\s+(.+))?$")
+async def yt_search(event):
+    if event.fwd_from:
+        return
+    query = event.pattern_match.group(1)
+    if not query:
+        await event.edit("`❌ Aranacak şeyi yaz: .ytara <sorgu>`")
+        return
+
+    await event.edit("`🔍 Aranıyor: %s`" % query)
+    cookies = _find_cookies()
+    ck = ' --cookies "%s"' % cookies if cookies else ""
+    cmd = (
+        'yt-dlp "ytsearch5:%s" --get-id --get-title --get-duration '
+        '--no-warnings --extractor-args "youtube:player_client=%s"%s'
+    ) % (_sanitize(query), YT_CLIENTS, ck)
+    out, err, code = await run_command(cmd)
+    if code != 0 or not out.strip():
+        await event.edit("`❌ Sonuç bulunamadı.`")
+        return
+
+    lines = out.strip().split("\n")
+    results = []
+    i, count = 0, 1
+    while i + 1 < len(lines) and count <= 5:
+        title = lines[i]
+        video_id = lines[i + 1]
+        duration = lines[i + 2] if i + 2 < len(lines) else "?"
+        try:
+            d = int(duration)
+            duration = "%d:%02d" % (d // 60, d % 60)
+        except Exception:
+            duration = "?"
+        url = "https://youtu.be/%s" % video_id
+        ts = title[:40] + "..." if len(title) > 40 else title
+        results.append("`%d.` [%s](%s) `(%s)`" % (count, ts, url, duration))
+        count += 1
+        i += 3
+    if results:
+        text = "**🔍 YouTube Arama: %s**\n\n" % query + "\n".join(results)
+        text += "\n\n_İndir: `.müzik <link>` veya `.video <link>`_"
+        await event.edit(text, link_preview=False)
+    else:
+        await event.edit("`❌ Sonuç bulunamadı.`")
 
 
 CMD_HELP.update({
-    "indir":
-    "💎 **Şarkı İndirici (Premium)**\n\n"
-    "`.indir <şarkı adı>` → YouTube'dan şarkıyı indirip kapak + isim ile gönderir.\n"
-    "`.indir <link>` → Belirli bir YouTube linkini indirir.\n\n"
-    "Premium abonelik gerektirir (sahip/sudo muaf). Abonelik bitince tekrar "
-    "fatura gönderilir. Kısıtlı/gönderimi kapalı sohbetlerde uyarı verir."
+    "youtube":
+    "`.müzik <şarkı/link>` - YouTube'dan MP3 indir\n"
+    "`.video <video/link>` - YouTube'dan video indir (720p)\n"
+    "`.ytara <sorgu>` - YouTube'da arama yap"
 })
