@@ -34,8 +34,6 @@ if not os.path.exists(TEMP_DOWNLOAD_DIRECTORY):
         pass
 
 YT_REGEX = r"(https?://)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)/.+"
-# cookie-siz denenecek YouTube oynatıcı istemcileri
-YT_CLIENTS = "tv,ios,android,mweb,web_safari"
 MAX_AUDIO_MB = 50
 MAX_VIDEO_MB = 2000
 
@@ -54,6 +52,15 @@ def _find_cookies():
         if os.path.exists(c):
             return c
     return None
+
+
+def _extra_args():
+    """PO Token sağlayıcı özel bir portta çalışıyorsa ekle.
+    Varsayılan 127.0.0.1:4416 zaten otomatik bulunur; farklı port için YT_POT_URL kullan."""
+    url = os.environ.get("YT_POT_URL")
+    if url:
+        return ' --extractor-args "youtubepot-bgutilhttp:base_url=%s"' % url
+    return ""
 
 
 def _sanitize(q):
@@ -116,9 +123,8 @@ async def _download_audio(target, dl_dir):
     cmd = (
         'yt-dlp -x --audio-format mp3 --audio-quality 0 '
         "--no-warnings --no-playlist --write-info-json "
-        '--extractor-args "youtube:player_client=%s"%s '
-        '-o "%s" "%s"'
-    ) % (YT_CLIENTS, ck, os.path.join(dl_dir, "%(id)s.%(ext)s"), target)
+        '-o "%s" "%s"%s%s'
+    ) % (os.path.join(dl_dir, "%(id)s.%(ext)s"), target, ck, _extra_args())
     out, err, code = await run_command(cmd)
     mp3 = None
     for f in os.listdir(dl_dir):
@@ -137,9 +143,8 @@ async def _download_video(target, dl_dir):
     cmd = (
         'yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]/best" '
         "--merge-output-format mp4 --no-warnings --no-playlist --write-info-json "
-        '--extractor-args "youtube:player_client=%s"%s '
-        '-o "%s" "%s"'
-    ) % (YT_CLIENTS, ck, os.path.join(dl_dir, "%(id)s.%(ext)s"), target)
+        '-o "%s" "%s"%s%s'
+    ) % (os.path.join(dl_dir, "%(id)s.%(ext)s"), target, ck, _extra_args())
     out, err, code = await run_command(cmd)
     vid = None
     for f in os.listdir(dl_dir):
@@ -259,8 +264,8 @@ async def yt_search(event):
     ck = ' --cookies "%s"' % cookies if cookies else ""
     cmd = (
         'yt-dlp "ytsearch5:%s" --get-id --get-title --get-duration '
-        '--no-warnings --extractor-args "youtube:player_client=%s"%s'
-    ) % (_sanitize(query), YT_CLIENTS, ck)
+        '--no-warnings'
+    ) % _sanitize(query) + ck + _extra_args()
     out, err, code = await run_command(cmd)
     if code != 0 or not out.strip():
         await event.edit("`❌ Sonuç bulunamadı.`")
