@@ -174,8 +174,10 @@ def _load_tasks_raw() -> dict:
 def _save_tasks_raw(data: dict):
     """Tüm kullanıcıların görevlerini JSON'a kaydet."""
     try:
-        with open(TASKS_FILE, "w", encoding="utf-8") as f:
+        _tmp = TASKS_FILE + ".tmp"
+        with open(_tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(_tmp, TASKS_FILE)
     except Exception:
         pass
 

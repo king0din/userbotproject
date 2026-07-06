@@ -52,7 +52,7 @@ async def get_system_stats():
         start = time.time()
         socket.create_connection(("8.8.8.8", 53), timeout=3)
         stats['ping'] = round((time.time() - start) * 1000, 1)
-    except:
+    except Exception:
         stats['ping'] = -1
     net = psutil.net_io_counters()
     stats['net_sent'] = get_size(net.bytes_sent)
@@ -83,7 +83,7 @@ def register(bot):
                     async with session.head("https://www.google.com"):
                         pass
                 results['ping'] = (time_module.time() - start) * 1000
-            except:
+            except Exception:
                 pass
             
             # Download
@@ -97,7 +97,7 @@ def register(bot):
                 elapsed = time_module.time() - start
                 if elapsed > 0:
                     results['download'] = (total_bytes * 8) / (elapsed * 1_000_000)
-            except:
+            except Exception:
                 pass
             
             # Upload
@@ -110,7 +110,7 @@ def register(bot):
                 elapsed = time_module.time() - start
                 if elapsed > 0:
                     results['upload'] = (len(data) * 8) / (elapsed * 1_000_000)
-            except:
+            except Exception:
                 pass
             
             return results
@@ -257,14 +257,32 @@ def register(bot):
             await event.respond("⚠️ Mesaja yanıt verin.")
             return
         users = await db.get_all_users()
-        msg = await event.respond(f"📢 Gönderiliyor... (0/{len(users)})")
+        total = len(users)
+        msg = await event.respond(f"📢 Gönderiliyor... (0/{total})")
         sent, failed = 0, 0
-        for user in users:
+        from telethon import errors as _terr
+        for i, user in enumerate(users, 1):
             try:
-                await bot.send_message(user["user_id"], reply.text)
+                # Mesaj objesini gönder: medya + format korunur (reply.text değil!)
+                await bot.send_message(user["user_id"], reply)
                 sent += 1
-            except:
+            except _terr.FloodWaitError as e:
+                # Telegram bekleme istedi: bekle ve aynı kullanıcıyı tekrar dene
+                await asyncio.sleep(e.seconds + 1)
+                try:
+                    await bot.send_message(user["user_id"], reply)
+                    sent += 1
+                except Exception:
+                    failed += 1
+            except Exception:
                 failed += 1
+            # Flood koruması: gönderimler arasında kısa bekleme
+            await asyncio.sleep(0.06)
+            if i % 20 == 0 or i == total:
+                try:
+                    await msg.edit(f"📢 Gönderiliyor... ({i}/{total})")
+                except Exception:
+                    pass
         await msg.edit(f"✅ **Tamamlandı!**\n📤 Gönderildi: `{sent}`\n❌ Başarısız: `{failed}`")
     
 

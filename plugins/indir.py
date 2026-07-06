@@ -16,6 +16,7 @@ YouTube'dan müzik/video indirir (KingTG premium plugin).
 """
 import os
 import re
+import sys
 import json
 import asyncio
 
@@ -82,11 +83,36 @@ def _sanitize(q):
     return (q or "").replace('"', "").replace("`", "").replace("$", "").strip()
 
 
+def _ytdlp():
+    """Botun KENDİ Python'undaki yt_dlp'yi çağır (PATH'teki rastgele yt-dlp.exe değil).
+    Böylece pip ile kurulan PO-token eklentisi garanti kullanılır."""
+    return '"%s" -m yt_dlp' % sys.executable
+
+
+def _sub_env():
+    """Subprocess ortamı: Deno/Node yollarını PATH'e ekle (bot eski terminalden
+    başlatılmış olsa bile JS runtime bulunsun)."""
+    env = dict(os.environ)
+    home = os.path.expanduser("~")
+    extra = [
+        os.path.join(home, ".deno", "bin"),
+        os.path.join(home, ".cargo", "bin"),
+        os.path.join(home, "AppData", "Local", "Programs", "nodejs"),
+        r"C:\Program Files\nodejs",
+    ]
+    cur = env.get("PATH", "")
+    add = os.pathsep.join(x for x in extra if os.path.isdir(x) and x not in cur)
+    if add:
+        env["PATH"] = cur + os.pathsep + add
+    return env
+
+
 async def run_command(cmd):
     proc = await asyncio.create_subprocess_shell(
         cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=_sub_env(),
     )
     out, err = await proc.communicate()
     return out.decode("utf-8", "replace"), err.decode("utf-8", "replace"), proc.returncode
@@ -135,7 +161,7 @@ async def _download_audio(target, dl_dir):
     cookies = _find_cookies()
     ck = ' --cookies "%s"' % cookies if cookies else ""
     cmd = (
-        'yt-dlp -x --audio-format mp3 --audio-quality 0 '
+        _ytdlp() + ' -x --audio-format mp3 --audio-quality 0 '
         "--no-warnings --no-playlist --write-info-json "
         '-o "%s" "%s"%s%s'
     ) % (os.path.join(dl_dir, "%(id)s.%(ext)s"), target, ck, _extra_args())
@@ -155,7 +181,7 @@ async def _download_video(target, dl_dir):
     cookies = _find_cookies()
     ck = ' --cookies "%s"' % cookies if cookies else ""
     cmd = (
-        'yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]/best" '
+        _ytdlp() + ' -f "bestvideo[height<=720]+bestaudio/best[height<=720]/best" '
         "--merge-output-format mp4 --no-warnings --no-playlist --write-info-json "
         '-o "%s" "%s"%s%s'
     ) % (os.path.join(dl_dir, "%(id)s.%(ext)s"), target, ck, _extra_args())
@@ -168,6 +194,136 @@ async def _download_video(target, dl_dir):
     if vid and os.path.exists(vid):
         return vid, _read_meta(dl_dir), None
     return None, None, err
+
+
+def _yt_id(text):
+    m = re.search(r"(?:v=|youtu\.be/|/shorts/|/embed/)([A-Za-z0-9_-]{11})", text or "")
+    return m.group(1) if m else None
+
+
+def _invidious_instances():
+    """Instance listesi: (1) invidious.txt dosyasi, (2) YT_INVIDIOUS ortam degiskeni,
+    (3) varsayilan guncel liste. Dosya en kolay yol; bot klasorune koy."""
+    insts = []
+    # 1) invidious.txt (bot klasoru / downloads / DATA_DIR) - her satirda bir adres
+    dirs = [os.getcwd(), TEMP_DOWNLOAD_DIRECTORY,
+            os.path.join(os.getcwd(), "downloads")]
+    try:
+        import config as _c
+        dirs.append(getattr(_c, "DATA_DIR", "."))
+    except Exception:
+        pass
+    for d in dirs:
+        try:
+            fp = os.path.join(d, "invidious.txt")
+            if os.path.isfile(fp):
+                with open(fp, "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        if not line.startswith("http"):
+                            line = "https://" + line
+                        insts.append(line.rstrip("/"))
+                break
+        except Exception:
+            pass
+    # 2) ortam degiskeni (virgulle ayrilmis)
+    env = os.environ.get("YT_INVIDIOUS")
+    if env:
+        insts += [x.strip().rstrip("/") for x in env.split(",") if x.strip()]
+    # 3) varsayilan guncel liste (resmi listeden)
+    insts += [
+        "https://inv.nadeko.net",
+        "https://invidious.nerdvpn.de",
+        "https://yewtu.be",
+        "https://yt.artemislena.eu",
+        "https://invidious.flokinet.to",
+        "https://invidious.private.coffee",
+        "https://inv.tux.pizza",
+        "https://invidious.privacydev.net",
+    ]
+    seen, out = set(), []
+    for i in insts:
+        if i and i not in seen:
+            seen.add(i); out.append(i)
+    return out
+
+
+async def _inv_fetch(query, is_url, dl_dir, want_video=False):
+    """yt-dlp başarısızsa Invidious üzerinden indir (indirme instance'ın IP'sinden olur).
+    En iyi çaba — public instance'lar değişir/engellenebilir. (path, title) döndürür."""
+    try:
+        import aiohttp
+    except Exception:
+        return None, None
+    vid = _yt_id(query) if is_url else None
+    timeout = aiohttp.ClientTimeout(total=90, connect=12, sock_read=60)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for inst in _invidious_instances():
+                try:
+                    title = None
+                    if not vid:
+                        async with session.get(inst + "/api/v1/search",
+                                               params={"q": query, "type": "video"}) as r:
+                            if r.status != 200:
+                                continue
+                            data = await r.json()
+                        vids = [d for d in (data or []) if d.get("videoId")]
+                        if not vids:
+                            continue
+                        vid = vids[0].get("videoId")
+                        title = vids[0].get("title")
+                    if not vid:
+                        continue
+                    # format bilgisi
+                    itag = 22 if want_video else 140
+                    ext = "mp4" if want_video else "m4a"
+                    try:
+                        async with session.get(inst + "/api/v1/videos/" + vid) as r:
+                            if r.status == 200:
+                                info = await r.json()
+                                title = title or info.get("title")
+                                if want_video:
+                                    best_h = 0
+                                    for f in info.get("formatStreams", []):
+                                        try:
+                                            h = int((f.get("resolution") or "0p").rstrip("p"))
+                                        except Exception:
+                                            h = 0
+                                        if 0 < h <= 720 and h >= best_h:
+                                            best_h = h
+                                            itag = int(f.get("itag") or 22)
+                                else:
+                                    best = 0
+                                    for f in info.get("adaptiveFormats", []):
+                                        if "audio" in (f.get("type") or ""):
+                                            br = int(f.get("bitrate") or 0)
+                                            if br >= best:
+                                                best = br
+                                                itag = int(f.get("itag") or 140)
+                    except Exception:
+                        pass
+                    url = "%s/latest_version?id=%s&itag=%s&local=true" % (inst, vid, itag)
+                    out = os.path.join(dl_dir, "%s.%s" % (vid, ext))
+                    async with session.get(url) as r:
+                        if r.status != 200:
+                            continue
+                        with open(out, "wb") as fp:
+                            async for chunk in r.content.iter_chunked(65536):
+                                fp.write(chunk)
+                    if os.path.isfile(out) and os.path.getsize(out) > 20480:
+                        return out, (title or ("Video" if want_video else "Müzik"))
+                    try:
+                        os.remove(out)
+                    except Exception:
+                        pass
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return None, None
 
 
 @register(outgoing=True, pattern=r"^\.m[uü]zik(?:\s+(.+))?$")
@@ -192,6 +348,11 @@ async def music_download(event):
     _clean_dir(dl_dir)
     try:
         path, meta, err = await _download_audio(target, dl_dir)
+        if not path:
+            await event.edit("`🔁 Invidious deneniyor...`")
+            ipath, ititle = await _inv_fetch(query, is_url, dl_dir, want_video=False)
+            if ipath:
+                path, meta = ipath, (ititle, "YouTube", 0)
         if not path:
             _ck = _find_cookies()
             _ci = ("🍪 cookie: %s" % _ck) if _ck else "🍪 cookie: BULUNAMADI"
@@ -246,6 +407,11 @@ async def video_download(event):
     try:
         path, meta, err = await _download_video(target, dl_dir)
         if not path:
+            await event.edit("`🔁 Invidious deneniyor...`")
+            ipath, ititle = await _inv_fetch(query, is_url, dl_dir, want_video=True)
+            if ipath:
+                path, meta = ipath, (ititle, "YouTube", 0)
+        if not path:
             _ck = _find_cookies()
             _ci = ("🍪 cookie: %s" % _ck) if _ck else "🍪 cookie: BULUNAMADI"
             await event.edit(
@@ -283,7 +449,7 @@ async def yt_search(event):
     cookies = _find_cookies()
     ck = ' --cookies "%s"' % cookies if cookies else ""
     cmd = (
-        'yt-dlp "ytsearch5:%s" --get-id --get-title --get-duration '
+        _ytdlp() + ' "ytsearch5:%s" --get-id --get-title --get-duration '
         '--no-warnings'
     ) % _sanitize(query) + ck + _extra_args()
     out, err, code = await run_command(cmd)

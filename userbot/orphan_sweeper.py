@@ -64,8 +64,10 @@ def _sweep_json_store(label, path, valid):
     for k in orphans:
         data.pop(k, None)
     try:
-        with open(path, "w", encoding="utf-8") as f:
+        _tmp = path + ".tmp"
+        with open(_tmp, "w", encoding="utf-8") as f:
             json.dump(data, f)
+        os.replace(_tmp, path)
     except Exception as e:
         log.warning(f"{label} yazılamadı, süpürme iptal: {e}")
         return 0

@@ -89,8 +89,10 @@ def _clon_load_all():
 
 def _clon_save_all(data):
     try:
-        with open(_CLON_STATE_FILE, "w", encoding="utf-8") as f:
+        _tmp = _CLON_STATE_FILE + ".tmp"
+        with open(_tmp, "w", encoding="utf-8") as f:
             json.dump(data, f)
+        os.replace(_tmp, _CLON_STATE_FILE)
     except Exception as _e:
         log.warning(f"Klon durumu kaydedilemedi: {_e}")
 

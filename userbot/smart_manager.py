@@ -7,7 +7,7 @@
 
 import asyncio
 import time
-from typing import Optional, Dict, Callable, Set, List
+from typing import Optional, Dict, Callable
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import (
@@ -145,7 +145,7 @@ class SmartSessionManager:
                     if client.is_connected():
                         self.last_activity[user_id] = time.time()
                         return client
-                except:
+                except Exception:
                     pass
                 
                 # Geçersiz, temizle
@@ -238,7 +238,7 @@ class SmartSessionManager:
         if user_id in self.active_clients:
             try:
                 await self.active_clients[user_id].disconnect()
-            except:
+            except Exception:
                 pass
             del self.active_clients[user_id]
         
@@ -266,7 +266,7 @@ class SmartSessionManager:
         if self.on_session_terminated_callback:
             try:
                 await self.on_session_terminated_callback(user_id)
-            except:
+            except Exception:
                 pass
     
     # ============================================
@@ -469,7 +469,7 @@ class SmartSessionManager:
             )
             try:
                 await self.on_send_message_callback(user_id, text, None)
-            except:
+            except Exception:
                 pass
         
         log.info("Always-on durduruldu (onay yok): user=%s", user_id)
@@ -562,7 +562,7 @@ class SmartSessionManager:
                     results["synced"] += 1
                 else:
                     results["deleted"] += 1
-            except:
+            except Exception:
                 results["errors"] += 1
             
             # Rate limiting
@@ -614,7 +614,7 @@ class SmartSessionManager:
                 
                 try:
                     await client.get_me()
-                except:
+                except Exception:
                     await self._handle_invalid_session(user_id)
                     break
         
@@ -848,7 +848,7 @@ class SmartSessionManager:
                         "phone": me.phone
                     }
                 }
-            except:
+            except Exception:
                 pass
         
         # Cache'den sil
@@ -872,7 +872,7 @@ class SmartSessionManager:
                 if terminate_session:
                     try:
                         await client.log_out()
-                    except:
+                    except Exception:
                         pass
                 
                 await self._disconnect_client(user_id)
@@ -889,7 +889,7 @@ class SmartSessionManager:
             if user_id in self.pending_logins:
                 try:
                     await self.pending_logins[user_id]["client"].disconnect()
-                except:
+                except Exception:
                     pass
                 del self.pending_logins[user_id]
             
@@ -1008,7 +1008,7 @@ class SmartSessionManager:
         for user_id in list(self.pending_logins.keys()):
             try:
                 await self.pending_logins[user_id]["client"].disconnect()
-            except:
+            except Exception:
                 pass
         
         log.info("Tüm client'lar kapatıldı")

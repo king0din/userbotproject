@@ -104,13 +104,15 @@ async def save_blocked_users(client):
             try:
                 with open(BLOCKED_FILE, 'r') as f:
                     data = json.load(f)
-            except:
+            except Exception:
                 data = {}
         
         data[my_id] = list(blocked_users)
         
-        with open(BLOCKED_FILE, 'w') as f:
+        _tmp = BLOCKED_FILE + ".tmp"
+        with open(_tmp, 'w', encoding="utf-8") as f:
             json.dump(data, f, indent=2)
+        os.replace(_tmp, BLOCKED_FILE)
     except Exception:
         pass
 
@@ -183,7 +185,7 @@ def extract_entities_for_text(full_text, text_start, original_entities):
                 new_entity = copy.deepcopy(entity)
                 new_entity.offset = new_offset
                 adjusted.append(new_entity)
-            except:
+            except Exception:
                 continue
     
     return adjusted if adjusted else None
@@ -663,8 +665,10 @@ def _tag_load_custom_all():
 
 def _tag_save_custom_all(data):
     try:
-        with open(_TAG_CUSTOM_FILE, "w", encoding="utf-8") as f:
+        _tmp = _TAG_CUSTOM_FILE + ".tmp"
+        with open(_tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
+        os.replace(_tmp, _TAG_CUSTOM_FILE)
     except Exception:
         pass
 
@@ -1284,7 +1288,7 @@ async def tag_all(q):
     if tag_active:
         try:
             await q.edit("❌ **Zaten bir etiketleme işlemi devam ediyor!**\nKapatmak için: `.tagstop`")
-        except:
+        except Exception:
             pass
         return
     
@@ -1352,7 +1356,7 @@ async def tag_admins(q):
     if tag_active:
         try:
             await q.edit("❌ **Zaten bir etiketleme işlemi devam ediyor!**\nKapatmak için: `.tagstop`")
-        except:
+        except Exception:
             pass
         return
     
@@ -1429,14 +1433,14 @@ async def tag_process(q, chat, mode, status_msg, group_size=1):
             try:
                 await status_msg.edit("❌ **Katılımcı listesini almak için admin olmalısınız!**\n\n"
                                     "⚠️ *Grup gizli olabilir veya üye listesini görme izniniz yok.*")
-            except:
+            except Exception:
                 pass
             tag_active = False
             return
         except ChannelPrivateError:
             try:
                 await status_msg.edit("❌ **Bu gruba erişimim yok!**")
-            except:
+            except Exception:
                 pass
             tag_active = False
             return
@@ -1444,14 +1448,14 @@ async def tag_process(q, chat, mode, status_msg, group_size=1):
             try:
                 await status_msg.edit(f"⏳ **FloodWait: {e.seconds} saniye bekleyin!**\n"
                                     "İşlem durduruldu.")
-            except:
+            except Exception:
                 pass
             tag_active = False
             return
         except Exception as e:
             try:
                 await status_msg.edit(f"❌ **Katılımcı alınamadı:** `{str(e)}`")
-            except:
+            except Exception:
                 pass
             tag_active = False
             return
@@ -1461,7 +1465,7 @@ async def tag_process(q, chat, mode, status_msg, group_size=1):
         if not participants:
             try:
                 await status_msg.edit("❌ **Etiketlenecek kimse bulunamadı!**")
-            except:
+            except Exception:
                 pass
             tag_active = False
             return
@@ -1471,7 +1475,7 @@ async def tag_process(q, chat, mode, status_msg, group_size=1):
                 await status_msg.edit(f"⚠️ **Çok fazla katılımcı:** {len(participants)}\n"
                                     "İşlem uzun sürebilir.")
                 await asyncio.sleep(2)
-            except:
+            except Exception:
                 pass
         
         try:
@@ -1479,7 +1483,7 @@ async def tag_process(q, chat, mode, status_msg, group_size=1):
                                  f"👥 Toplam: {len(participants)} kişi\n"
                                  f"📦 **Grup Boyutu:** {group_size}\n"
                                  f"⏱️ **Bekleme:** 2.5s")
-        except:
+        except Exception:
             pass
         
         for i in range(0, len(participants), group_size):
@@ -1554,7 +1558,7 @@ async def tag_process(q, chat, mode, status_msg, group_size=1):
                                              f"✅ **Etiketlenen:** {tag_data['tagged_count']}/{len(participants)}\n"
                                              f"📦 **Grup:** {group_size} kişi\n"
                                              f"⏱️ **Bekleme:** 2.5s")
-                    except:
+                    except Exception:
                         pass
                 
                 await asyncio.sleep(2.5)
@@ -1563,7 +1567,7 @@ async def tag_process(q, chat, mode, status_msg, group_size=1):
                 try:
                     await status_msg.edit(f"⏳ **FloodWait: {e.seconds} saniye bekleniyor...**\n"
                                          "İşlem duraklatıldı.")
-                except:
+                except Exception:
                     pass
                 await asyncio.sleep(e.seconds)
                 continue
@@ -1580,13 +1584,13 @@ async def tag_process(q, chat, mode, status_msg, group_size=1):
                                      f"👥 Toplam: {len(participants)}\n"
                                      f"📦 Grup Boyutu: {group_size}\n"
                                      f"⏱️ Bekleme: 2.5s")
-            except:
+            except Exception:
                 pass
     
     except Exception as e:
         try:
             await status_msg.edit(f"❌ **Hata oluştu:** `{str(e)}`")
-        except:
+        except Exception:
             pass
     
     finally:
@@ -1612,7 +1616,7 @@ async def tag_stop(q):
     if not active:
         try:
             await q.edit("❌ **Şu anda aktif bir etiketleme yok!**")
-        except:
+        except Exception:
             pass
         return
 
@@ -1625,13 +1629,13 @@ async def tag_stop(q):
     if tag_data.get("current_task"):
         try:
             tag_data["current_task"].cancel()
-        except:
+        except Exception:
             pass
 
     try:
         await q.edit("⏹️ **Etiketleme durduruluyor...**\n"
                      "Son gönderilen mesajdan sonra duracak.")
-    except:
+    except Exception:
         pass
 
 
@@ -1675,7 +1679,7 @@ async def tag_status(q):
 
     try:
         await q.edit(status_text)
-    except:
+    except Exception:
         pass
 
 
@@ -1701,7 +1705,7 @@ async def block_user(q):
         try:
             user_entity = await q.client.get_entity(user_id)
             user_name = user_entity.first_name or "Kullanıcı"
-        except:
+        except Exception:
             user_name = "Kullanıcı"
     
     elif args:
@@ -1718,7 +1722,7 @@ async def block_user(q):
             try:
                 user_entity = await q.client.get_entity(user_id)
                 user_name = user_entity.first_name or "Kullanıcı"
-            except:
+            except Exception:
                 user_name = f"ID: {user_id}"
         else:
             await q.edit("❌ **Geçersiz format!**\n\n"
@@ -1777,7 +1781,7 @@ async def unblock_user(q):
         try:
             user_entity = await q.client.get_entity(user_id)
             user_name = user_entity.first_name or "Kullanıcı"
-        except:
+        except Exception:
             user_name = "Kullanıcı"
     
     elif args:
@@ -1794,7 +1798,7 @@ async def unblock_user(q):
             try:
                 user_entity = await q.client.get_entity(user_id)
                 user_name = user_entity.first_name or "Kullanıcı"
-            except:
+            except Exception:
                 user_name = f"ID: {user_id}"
         else:
             await q.edit("❌ **Geçersiz format!**\n\n"
@@ -1870,7 +1874,7 @@ async def list_blocks(q):
         try:
             user_entity = await q.client.get_entity(user_id)
             user_name = user_entity.first_name or "Kullanıcı"
-        except:
+        except Exception:
             user_name = "Bilinmeyen"
         
         msg += f"{i}. **{user_name}** - `{user_id}`\n"
@@ -1936,7 +1940,7 @@ Bir mesajı yanıtlayıp `.tag` yaz → o mesaj kullanılır (premium emoji koru
     
     try:
         await q.edit(help_text)
-    except:
+    except Exception:
         pass
 
 

@@ -175,7 +175,7 @@ def register(bot):
             del user_states[user_id]
             if user_id in userbot_manager.pending_logins:
                 try: await userbot_manager.pending_logins[user_id]["client"].disconnect()
-                except: pass
+                except Exception: pass
                 del userbot_manager.pending_logins[user_id]
             rows = [[btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832654562510511307)]]
             await bot_api.send_message(chat_id=user_id, text="❌ İptal edildi.", reply_markup=btn.inline_keyboard(rows))

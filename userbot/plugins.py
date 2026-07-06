@@ -9,9 +9,8 @@ import importlib
 import importlib.util
 import subprocess
 import sys
-import tempfile
 import asyncio
-from typing import Optional, Dict, List, Tuple, Set
+from typing import Dict, List, Tuple, Set
 from telethon import TelegramClient
 import config
 from database import database as db
@@ -66,7 +65,7 @@ class PluginManager:
                         if node.module:
                             module_name = node.module.split('.')[0]
                             all_imports.add(module_name)
-            except:
+            except Exception:
                 continue
         
         # Standart kütüphaneler ve zaten kurulu olanları atla
@@ -371,7 +370,7 @@ class PluginManager:
                 if (tree.body and isinstance(tree.body[0], ast.Expr) and 
                     isinstance(tree.body[0].value, ast.Constant)):
                     info["description"] = tree.body[0].value.value.strip()
-            except:
+            except Exception:
                 pass
             
             patterns = re.findall(r"pattern\s*=\s*[rf]?['\"][\^]?\.?(\w+)", content)
@@ -648,7 +647,7 @@ class PluginManager:
             try:
                 from userbot.smart_manager import smart_session_manager
                 client = smart_session_manager.get_client(user_id)
-            except:
+            except Exception:
                 pass
         
         try:
@@ -714,9 +713,9 @@ class PluginManager:
                                         client.remove_event_handler(callback, event)
                                         handlers_removed += 1
                                         log.info("Handler kaldırıldı (ref): %s - %s", plugin_name, attr_name)
-                                except:
+                                except Exception:
                                     pass
-                        except:
+                        except Exception:
                             pass
             
             # Kayıtlı handler'ları temizle
@@ -727,7 +726,7 @@ class PluginManager:
             if module and hasattr(module, 'unregister') and callable(module.unregister):
                 try:
                     module.unregister()
-                except:
+                except Exception:
                     pass
 
             # Kullanıcı verilerini temizle (depoda çöp birikmesini önler)
@@ -817,7 +816,7 @@ class PluginManager:
                 success, msg = await self.activate_plugin(user_id, plugin_name, client)
                 if success:
                     return plugin_name
-            except:
+            except Exception:
                 pass
             return None
         
@@ -845,7 +844,7 @@ class PluginManager:
                 success, _ = await self.activate_plugin(user_id, plugin_name, client)
                 if success:
                     activated += 1
-            except:
+            except Exception:
                 pass
         
         return activated
@@ -895,7 +894,7 @@ class PluginManager:
                         for callback, event in handlers:
                             try:
                                 client.remove_event_handler(callback, event)
-                            except:
+                            except Exception:
                                 pass
                 
                 # sys.modules'dan kaldır

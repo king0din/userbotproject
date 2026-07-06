@@ -544,7 +544,7 @@ def register(bot):
                         success, _ = await plugin_manager.deactivate_plugin(user_id, plugin_name)
                         if success:
                             count += 1
-                    except:
+                    except Exception:
                         pass
             
             if count > 0:
@@ -570,7 +570,7 @@ def register(bot):
                                 success, _ = await plugin_manager.activate_plugin(user_id, plugin_name, client)
                                 if success:
                                     count += 1
-                            except:
+                            except Exception:
                                 pass
             
             if count > 0:
@@ -611,7 +611,7 @@ def register(bot):
                         success, _ = await plugin_manager.deactivate_plugin(user_id, plugin_name)
                         if success:
                             deactivated_count += 1
-                    except:
+                    except Exception:
                         pass
             
             await event.answer(f"✅ Devre dışı! {deactivated_count} kullanıcıda kaldırıldı.", alert=True)
@@ -655,7 +655,7 @@ def register(bot):
                         try:
                             await plugin_manager.activate_plugin(user_id, plugin_name, client)
                             activated_count += 1
-                        except:
+                        except Exception:
                             pass
             
             await event.answer(f"✅ Varsayılan aktif! {activated_count} kullanıcıda yüklendi.", alert=True)

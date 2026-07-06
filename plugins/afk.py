@@ -79,8 +79,10 @@ def _afk_load_all():
 
 def _afk_save_all(data):
     try:
-        with open(_AFK_STATE_FILE, "w", encoding="utf-8") as f:
+        _tmp = _AFK_STATE_FILE + ".tmp"
+        with open(_tmp, "w", encoding="utf-8") as f:
             json.dump(data, f)
+        os.replace(_tmp, _AFK_STATE_FILE)
     except Exception as _e:
         log.warning(f"AFK durumu kaydedilemedi: {_e}")
 

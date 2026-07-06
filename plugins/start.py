@@ -45,7 +45,7 @@ def get_bot_username():
         if os.path.exists('.bot_username'):
             with open('.bot_username', 'r') as f:
                 return f.read().strip()
-    except:
+    except Exception:
         pass
     return ''
 
@@ -59,7 +59,7 @@ def get_bot():
         # Alternatif yol
         import __main__
         return getattr(__main__, 'bot', None)
-    except:
+    except Exception:
         pass
     return None
 
@@ -627,7 +627,12 @@ def register_bot_handlers(bot):
         bot._premium_reminder_started = True
         try:
             import asyncio
-            _loop = getattr(bot, "loop", None) or asyncio.get_event_loop()
+            _loop = getattr(bot, "loop", None)
+            if _loop is None:
+                try:
+                    _loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    _loop = asyncio.new_event_loop()
             _loop.create_task(_premium_reminder_loop(bot))
             log.info("Premium hatırlatma döngüsü başlatıldı")
         except Exception:
@@ -825,7 +830,7 @@ def register_bot_handlers(bot):
         
         try:
             await event.edit(text, buttons=buttons)
-        except:
+        except Exception:
             pass
         await event.answer()
     
@@ -889,7 +894,7 @@ def register_bot_handlers(bot):
         
         try:
             await event.edit(text, buttons=buttons)
-        except:
+        except Exception:
             pass
         await event.answer()
     
@@ -935,7 +940,7 @@ def register_bot_handlers(bot):
         
         try:
             await event.edit(text, buttons=buttons)
-        except:
+        except Exception:
             pass
         await event.answer()
     
@@ -956,7 +961,7 @@ def register_handlers(client, user_id):
         for handler, event in _handlers[user_id]:
             try:
                 client.remove_event_handler(handler, event)
-            except:
+            except Exception:
                 pass
         del _handlers[user_id]
     
@@ -974,7 +979,7 @@ def register_handlers(client, user_id):
         bot_username = get_bot_username()
         try:
             await event.delete()
-        except:
+        except Exception:
             pass
         
         user_data = await db.get_user(user_id)
@@ -1009,7 +1014,7 @@ def register_handlers(client, user_id):
             return
         try:
             await event.delete()
-        except:
+        except Exception:
             pass
         
         user_data = await db.get_user(user_id)
@@ -1048,7 +1053,7 @@ def register_handlers(client, user_id):
         name = match.group(1)
         try:
             await event.delete()
-        except:
+        except Exception:
             pass
         
         plugin = await db.get_plugin(name)
@@ -1090,7 +1095,7 @@ def register_handlers(client, user_id):
         name = match.group(1)
         try:
             await event.delete()
-        except:
+        except Exception:
             pass
         
         plugin = await db.get_plugin(name)
@@ -1120,7 +1125,7 @@ def register_handlers(client, user_id):
             return
         try:
             await event.delete()
-        except:
+        except Exception:
             pass
         
         user_data = await db.get_user(user_id)
@@ -1146,7 +1151,7 @@ def register_handlers(client, user_id):
             return
         try:
             await event.delete()
-        except:
+        except Exception:
             pass
         
         text = "📚 **Komutlar**\n\n"
@@ -1186,7 +1191,7 @@ def unregister_handlers(client, user_id):
         for h, e in _handlers[user_id]:
             try:
                 client.remove_event_handler(h, e)
-            except:
+            except Exception:
                 pass
         del _handlers[user_id]
     log.info("Kaldırıldı: user=%s", user_id)

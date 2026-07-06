@@ -76,8 +76,10 @@ def _save_voice(uid, code):
         log.debug(f"ses tercihi okunamadı: {_e}")
     data[str(uid)] = code
     try:
-        with open(_VOICE_FILE, "w", encoding="utf-8") as f:
+        _tmp = _VOICE_FILE + ".tmp"
+        with open(_tmp, "w", encoding="utf-8") as f:
             json.dump(data, f)
+        os.replace(_tmp, _VOICE_FILE)
     except Exception as _e:
         log.warning(f"ses tercihi kaydedilemedi: {_e}")
 
@@ -92,8 +94,10 @@ def cleanup_user_data(user_id, reason="disable"):
                 data = json.load(f)
             if str(user_id) in data:
                 data.pop(str(user_id), None)
-                with open(_VOICE_FILE, "w", encoding="utf-8") as f:
+                _tmp = _VOICE_FILE + ".tmp"
+                with open(_tmp, "w", encoding="utf-8") as f:
                     json.dump(data, f)
+                os.replace(_tmp, _VOICE_FILE)
     except Exception:
         pass
 

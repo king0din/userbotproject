@@ -7,7 +7,7 @@
 
 import aiohttp
 import re
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Union
 import config
 from utils.logger import get_logger
 

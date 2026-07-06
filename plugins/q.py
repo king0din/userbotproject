@@ -173,7 +173,7 @@ async def get_avatar_url(client, user):
                 if photo_bytes:
                     b64 = base64.b64encode(photo_bytes).decode()
                     return f"data:image/jpeg;base64,{b64}"
-            except:
+            except Exception:
                 pass
             
             # YÃ¶ntem 2: GetUserPhotosRequest
@@ -199,7 +199,7 @@ async def get_avatar_url(client, user):
                                 if isinstance(thumb_data, bytes):
                                     b64 = base64.b64encode(thumb_data).decode()
                                     return f"data:image/jpeg;base64,{b64}"
-                            except:
+                            except Exception:
                                 pass
                         
                         # Video frame indir
@@ -208,7 +208,7 @@ async def get_avatar_url(client, user):
                             if photo_bytes:
                                 b64 = base64.b64encode(photo_bytes).decode()
                                 return f"data:image/jpeg;base64,{b64}"
-                        except:
+                        except Exception:
                             pass
                         
                         # Video'yu direkt indir
@@ -217,7 +217,7 @@ async def get_avatar_url(client, user):
                             if photo_bytes:
                                 b64 = base64.b64encode(photo_bytes).decode()
                                 return f"data:image/jpeg;base64,{b64}"
-                        except:
+                        except Exception:
                             pass
                     
                     # Normal fotoÄŸraf
@@ -226,9 +226,9 @@ async def get_avatar_url(client, user):
                         if photo_bytes:
                             b64 = base64.b64encode(photo_bytes).decode()
                             return f"data:image/jpeg;base64,{b64}"
-                    except:
+                    except Exception:
                         pass
-            except:
+            except Exception:
                 pass
             
             # YÃ¶ntem 3: get_profile_photos
@@ -239,7 +239,7 @@ async def get_avatar_url(client, user):
                     if photo_bytes:
                         b64 = base64.b64encode(photo_bytes).decode()
                         return f"data:image/jpeg;base64,{b64}"
-            except:
+            except Exception:
                 pass
             
         elif isinstance(user, (Channel, Chat)):
@@ -248,7 +248,7 @@ async def get_avatar_url(client, user):
                 b64 = base64.b64encode(photo_bytes).decode()
                 return f"data:image/jpeg;base64,{b64}"
                 
-    except:
+    except Exception:
         pass
     
     return None
@@ -310,7 +310,7 @@ async def get_user_info(client, user):
             emoji_status = full_user.full_user.emoji_status
             if hasattr(emoji_status, 'document_id'):
                 emoji_status_id = str(emoji_status.document_id)
-    except:
+    except Exception:
         pass
     
     user_data["name"] = name.strip() or "User"
@@ -417,7 +417,7 @@ async def build_message_data(client, msg, include_reply_info=True):
                 
                 if reply_from_data:
                     message_data["replyMessage"]["from"] = reply_from_data
-        except:
+        except Exception:
             pass
     
     return message_data
@@ -513,7 +513,7 @@ async def pack_exists(client, name):
     try:
         await client(GetStickerSetRequest(stickerset=InputStickerSetShortName(short_name=name), hash=0))
         return True
-    except:
+    except Exception:
         return False
 
 
@@ -554,7 +554,7 @@ async def delete_sticker_from_pack(client, pack_name, sticker):
             await conv.send_message("/cancel")
             try:
                 await conv.get_response(timeout=2)
-            except:
+            except Exception:
                 pass
             
             await asyncio.sleep(1)
@@ -589,7 +589,7 @@ async def create_sticker_pack(client, pack_name, title, sticker_path, emoji="ðŸ’
             await conv.send_message("/cancel")
             try:
                 await conv.get_response(timeout=2)
-            except:
+            except Exception:
                 pass
             
             await asyncio.sleep(1)
@@ -621,7 +621,7 @@ async def create_sticker_pack(client, pack_name, title, sticker_path, emoji="ðŸ’
                     await conv.send_message("/done")
                     try:
                         await conv.get_response(timeout=2)
-                    except:
+                    except Exception:
                         pass
                     
                     return True, "Pakete eklendi"
@@ -632,7 +632,7 @@ async def create_sticker_pack(client, pack_name, title, sticker_path, emoji="ðŸ’
                 if "well done" in done_resp.text.lower() or "there we go" in done_resp.text.lower():
                     try:
                         await conv.get_response(timeout=0.5)
-                    except:
+                    except Exception:
                         pass
                     
                     return True, "Pakete eklendi"

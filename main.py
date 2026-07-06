@@ -204,7 +204,7 @@ async def main():
     try:
         with open('.bot_username', 'w') as f:
             f.write(bot_me.username)
-    except:
+    except Exception:
         pass
     
     # Handler'ları kaydet
@@ -254,7 +254,6 @@ async def main():
     # Log kanalına başlangıç mesajı
     if config.LOG_CHANNEL:
         try:
-            uptime = get_readable_time(time.time() - start_time)
             db_stats = await db.get_stats()
             
             text = f"🤖 **Bot Başlatıldı!**\n\n"

@@ -41,10 +41,14 @@ class LocalStorage:
             return None
     
     def _save_json(self, file_path: str, data: Any) -> bool:
-        """JSON dosyasına kaydet"""
+        """JSON dosyasına ATOMİK kaydet (tmp + os.replace; yarıda kalırsa DB bozulmaz)"""
         try:
-            with open(file_path, 'w', encoding='utf-8') as f:
+            tmp = file_path + ".tmp"
+            with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, file_path)
             return True
         except Exception as e:
             log.error("Dosya kaydetme hatası", exc_info=True)
