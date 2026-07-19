@@ -624,8 +624,18 @@ def _om_prune_pending(bot):
             _om_remove_media(sp["media_path"])
 
 
-def _om_interval_text():
-    return "**⏱️ OtoMsg — Aralık**\n\nMesaj kaç **dakikada bir** gönderilsin?"
+def _om_group_line(pend):
+    """Panelin hangi grup için olduğunu gösteren satır (özelde belli olsun)."""
+    if not pend:
+        return ""
+    title = pend.get("chat_title", "?")
+    cid = pend.get("chat_raw") or pend.get("chat_id", "?")
+    return f"📌 Grup: **{title}** (`{cid}`)\n\n"
+
+
+def _om_interval_text(pend=None):
+    return ("**⏱️ OtoMsg — Aralık**\n\n" + _om_group_line(pend) +
+            "Mesaj kaç **dakikada bir** gönderilsin?")
 
 
 def _om_interval_buttons(pid):
@@ -642,9 +652,9 @@ def _om_interval_buttons(pid):
     return rows
 
 
-def _om_count_text(minutes):
-    return (f"**🔁 OtoMsg — Adet**\n\nHer **{minutes} dakikada** bir gönderilecek.\n"
-            f"Kaç **kez** gönderilsin?")
+def _om_count_text(minutes, pend=None):
+    return ("**🔁 OtoMsg — Adet**\n\n" + _om_group_line(pend) +
+            f"Her **{minutes} dakikada** bir gönderilecek.\nKaç **kez** gönderilsin?")
 
 
 def _om_count_buttons(pid):
@@ -717,28 +727,21 @@ async def create_task_from_flow(client, chat_id, chat_title, message, minutes, c
 
 
 async def _show_om_flow_panel(q, pid):
-    """Aralık panelini gösterir: sohbet inline destekliyorsa satıriçi, değilse bottan özelden."""
+    """Ayar panelini DOĞRUDAN bot ÖZEL sohbetinden gönderir (gruba değil).
+    Panelde hangi grup için ayarlandığı açıkça belirtilir."""
     bot = _get_bot()
-    if bot is not None:
-        _register_otomsg_bot_handlers(bot)
-    bu = _get_bot_username()
-    if bot is not None and bu:
-        try:
-            results = await q.client.inline_query(bu, f"omadd_{pid}")
-            if results:
-                await results[0].click(q.chat_id)
-                return True
-        except Exception:
-            pass
-    if bot is not None:
-        try:
-            owner = _om_pending_store(bot).get(pid, {}).get("owner")
-            if owner:
-                await bot.send_message(owner, _om_interval_text(), buttons=_om_interval_buttons(pid))
-                return True
-        except Exception:
-            pass
-    return False
+    if bot is None:
+        return False
+    _register_otomsg_bot_handlers(bot)
+    try:
+        pend = _om_pending_store(bot).get(pid)
+        if not pend or not pend.get("owner"):
+            return False
+        await bot.send_message(pend["owner"], _om_interval_text(pend),
+                               buttons=_om_interval_buttons(pid))
+        return True
+    except Exception:
+        return False
 
 
 async def _show_om_help_panel(q, owner):
@@ -853,7 +856,7 @@ def _register_otomsg_bot_handlers(bot):
             return
         pend["interval"] = minutes
         try:
-            await event.edit(_om_count_text(minutes), buttons=_om_count_buttons(pid))
+            await event.edit(_om_count_text(minutes, pend), buttons=_om_count_buttons(pid))
         except Exception:
             pass
 
@@ -865,7 +868,7 @@ def _register_otomsg_bot_handlers(bot):
             await event.answer("Bu menü sana ait değil veya süresi doldu.", alert=True)
             return
         try:
-            await event.edit(_om_interval_text(), buttons=_om_interval_buttons(pid))
+            await event.edit(_om_interval_text(pend), buttons=_om_interval_buttons(pid))
         except Exception:
             pass
 
@@ -1728,6 +1731,19 @@ async def _on_start(client):
         await asyncio.sleep(5)
         me = await client.get_me()
         await _restore_tasks(client, me.id)
+    except Exception:
+        pass
+
+
+def register_handlers(client, user_id):
+    """Plugin manager, aktivasyonda (ve bot yeniden başlatıldığında) bunu DOĞRU
+    userbot client'ı + user_id ile çağırır. Kayıtlı 'running' görevleri kaldığı
+    yerden otomatik başlatır — güvenilir restore yolu (global _client'a bağımlı değil)."""
+    try:
+        loop = getattr(client, "loop", None)
+        if loop is None:
+            loop = asyncio.get_event_loop()
+        loop.create_task(_on_start(client))
     except Exception:
         pass
 
