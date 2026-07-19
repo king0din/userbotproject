@@ -1,229 +1,289 @@
 # ============================================
 # KingTG UserBot Service - User / plugins_user
-# Kullanıcının plugin listesi ve aktif/pasif etme
-# (user.py'dan otomatik bölündü - davranış birebir korundu)
+# Kullanıcının plugin listesi + TEK DOKUNUŞ inline aç/kapat
+# + ℹ️ Detay Modu (butonlu /pinfo)
+# Sayfa oluşturucular _common.py'da (menu.py ile ortak)
 # ============================================
 
-# ============================================
-# KingTG UserBot Service - User Handlers
-# ============================================
-
-from telethon import events, Button
+from telethon import events
 import config
 from database import database as db
 from userbot.smart_manager import smart_session_manager
 from userbot.plugins import plugin_manager
 from utils import (
-    check_ban, check_private_mode, check_maintenance, 
-    register_user, send_log, is_valid_phone, back_button
+    check_ban, send_log
 )
 from utils.bot_api import bot_api, btn, ButtonBuilder
+from utils.logger import get_logger
+
+log = get_logger(__name__)
 
 # Eski uyumluluk için alias
 userbot_manager = smart_session_manager
 
 from ._common import (
-    user_states, build_main_menu,
-    STATE_WAITING_PHONE, STATE_WAITING_CODE, STATE_WAITING_2FA,
-    STATE_WAITING_SESSION_TELETHON, STATE_WAITING_SESSION_PYROGRAM,
-    PLUGINS_PER_PAGE,
+    accessible_plugins,
+    build_plugins_page,
+    build_my_plugins_page,
+    build_info_mode_page,
+    build_plugin_info,
 )
 
 
 def register(bot):
 
+    async def _render(event, text, rows):
+        await bot_api.edit_message_text(
+            chat_id=event.sender_id, message_id=event.message_id,
+            text=text, reply_markup=btn.inline_keyboard(rows)
+        )
+
+    async def _ensure_logged(event):
+        u = await db.get_user(event.sender_id)
+        if not u or not u.get("is_logged_in"):
+            await event.answer("Önce giriş yapmalısınız", alert=True)
+            return None
+        return u
+
+    # ==========================================
+    # PLUGİN LİSTESİ (sayfalı)
+    # ==========================================
     @bot.on(events.CallbackQuery(pattern=rb"plugins_page_(\d+)"))
     async def plugins_menu_handler(event):
-        user_id = event.sender_id
-        user_data = await db.get_user(user_id)
-        
-        if not user_data or not user_data.get("is_logged_in"):
-            await event.answer("Önce giriş yapmalısınız", alert=True)
+        if not await _ensure_logged(event):
             return
-        
         page = int(event.data.decode().split("_")[-1])
-        all_plugins = await db.get_all_plugins()
-        active_plugins = user_data.get("active_plugins", [])
-        
-        # Kullanıcının erişebileceği pluginleri filtrele
-        # Devre dışı pluginleri gösterme
-        accessible_plugins = []
-        for p in all_plugins:
-            # Devre dışı pluginleri atla
-            if p.get("is_disabled", False):
-                continue
-            # Genel veya izinli ise ekle
-            if p.get("is_public", True) or user_id in p.get("allowed_users", []):
-                # Kısıtlı kullanıcıysa atla
-                if user_id not in p.get("restricted_users", []):
-                    accessible_plugins.append(p)
-        
-        if not accessible_plugins:
-            text = "📭 **Henüz plugin eklenmemiş.**\n\nPlugin duyuruları için kanalı takip edin."
-            buttons = [
-                [Button.url(config.BUTTONS["plugin_channel"], f"https://t.me/{config.PLUGIN_CHANNEL}")],
-                back_button("main_menu")
-            ]
-            await event.edit(text, buttons=buttons)
-            return
-        
-        total_pages = (len(accessible_plugins) + PLUGINS_PER_PAGE - 1) // PLUGINS_PER_PAGE
-        start_idx = page * PLUGINS_PER_PAGE
-        end_idx = start_idx + PLUGINS_PER_PAGE
-        page_plugins = accessible_plugins[start_idx:end_idx]
-        
-        text = f"🔌 **Plugin Listesi** (Sayfa {page + 1}/{total_pages})\n\n"
-        
-        for p in page_plugins:
-            name = p['name']
-            is_active = name in active_plugins
-            is_default = p.get("default_active", False)
-            status = "🟢" if is_active else "⚪"
-            default_icon = "⭐" if is_default else ""
-            
-            # Komutları göster
-            cmds = p.get("commands", [])[:2]
-            cmd_text = ", ".join([f"`.{c}`" for c in cmds])
-            if len(p.get("commands", [])) > 2:
-                cmd_text += "..."
-            
-            text += f"{status}{default_icon} **{name}**\n"
-            text += f"   └ {cmd_text}\n"
-            text += f"   └ Yükle: `/pactive {name}`\n\n"
-        
-        text += f"━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"🟢 Yüklü | ⚪ Yüklü değil | ⭐ Zorunlu\n"
-        text += f"📊 Toplam: **{len(accessible_plugins)}** plugin\n"
-        text += f"✅ Aktif: **{len(active_plugins)}** plugin\n\n"
-        text += f"💡 **Detay için:** `/pinfo <isim>`"
-        
-        # Sayfalama butonları
-        nav_buttons = []
-        if page > 0:
-            nav_buttons.append(btn.callback(" Önceki", f"plugins_page_{page - 1}", icon_custom_emoji_id=5834632747137638263))
-        if page < total_pages - 1:
-            nav_buttons.append(btn.callback(" Sonraki", f"plugins_page_{page + 1}", icon_custom_emoji_id=5834933416323193844))
-        
-        rows = []
-        if nav_buttons:
-            rows.append(nav_buttons)
-        rows.append([btn.callback(" Pluginlerim", "my_plugins_0", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832711694165483426)])
-        rows.append([btn.url(f" {config.PLUGIN_CHANNEL}", f"https://t.me/{config.PLUGIN_CHANNEL}", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832328832190784454)])
-        rows.append([btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)])
-        
-        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
+        text, rows = await build_plugins_page(event.sender_id, page)
+        await _render(event, text, rows)
         await event.answer()
-    
-    # ==========================================
-    # PLUGİNLERİM - SAYFALI
-    # ==========================================
-    
 
     @bot.on(events.CallbackQuery(pattern=rb"my_plugins_(\d+)"))
     async def my_plugins_handler(event):
-        user_data = await db.get_user(event.sender_id)
-        
+        if not await _ensure_logged(event):
+            return
+        page = int(event.data.decode().split("_")[-1])
+        text, rows = await build_my_plugins_page(event.sender_id, page)
+        await _render(event, text, rows)
+        await event.answer()
+
+    # ==========================================
+    # ℹ️ DETAY MODU (butonlu /pinfo)
+    # ==========================================
+    @bot.on(events.CallbackQuery(pattern=rb"pim_(\d+)$"))
+    async def info_mode_handler(event):
+        if not await _ensure_logged(event):
+            return
+        page = int(event.data.decode().split("_")[-1])
+        text, rows = await build_info_mode_page(event.sender_id, page)
+        await _render(event, text, rows)
+        await event.answer()
+
+    @bot.on(events.CallbackQuery(pattern=rb"pi_(\d+)_(.+)"))
+    async def plugin_info_handler(event):
+        if not await _ensure_logged(event):
+            return
+        _, page_str, name = event.data.decode().split("_", 2)
+        text, rows = await build_plugin_info(event.sender_id, int(page_str), name)
+        if not text:
+            await event.answer("Plugin bulunamadı", alert=True)
+            return
+        await _render(event, text, rows)
+        await event.answer()
+
+    # Bilgi kartından yükle/kaldır: pi<page>_on_<name> / pi<page>_off_<name>
+    @bot.on(events.CallbackQuery(pattern=rb"pi(\d+)_(on|off)_(.+)"))
+    @check_ban
+    async def plugin_info_toggle_handler(event):
+        user_id = event.sender_id
+        if not await _ensure_logged(event):
+            return
+        import re
+        m = re.match(r"pi(\d+)_(on|off)_(.+)", event.data.decode())
+        page, action, name = int(m.group(1)), m.group(2), m.group(3)
+
+        toast = await _toggle_plugin(event, user_id, name, want_on=(action == "on"))
+        if toast:
+            await event.answer(toast)
+        text, rows = await build_plugin_info(user_id, page, name)
+        if text:
+            try:
+                await _render(event, text, rows)
+            except Exception:
+                log.debug("Bilgi kartı yenilenemedi", exc_info=True)
+
+    # ==========================================
+    # ORTAK AÇ/KAPAT ÇEKİRDEĞİ
+    # Premium ise komut yazdırmaz — faturayı DİREKT gönderir.
+    # Dönen değer: toast metni (None = toast'ı kendisi gösterdi)
+    # ==========================================
+    async def _toggle_plugin(event, user_id, name, want_on):
+        plugin = await db.get_plugin(name)
+        if not plugin:
+            await event.answer("Plugin bulunamadı", alert=True)
+            return None
+        if plugin.get("is_disabled", False):
+            await event.answer("⛔ Bu plugin yönetici tarafından devre dışı", alert=True)
+            return None
+
+        if not want_on:
+            if plugin.get("default_active", False):
+                await event.answer("⭐ Zorunlu plugin, kapatılamaz", alert=True)
+                return None
+            success, _ = await plugin_manager.deactivate_plugin(user_id, name)
+            if success:
+                await send_log(bot, "plugin", f"Deaktif: {name}", user_id)
+            return f"⚪ {name} kapatıldı" if success else "❌ İşlem başarısız"
+
+        # AÇ — önce erişim (premium/özel) kontrolü
+        try:
+            from utils import premium
+            reason, pcfg = premium.access_reason(user_id, name)
+        except Exception:
+            log.warning("Premium kontrolü başarısız: %s", name, exc_info=True)
+            reason, pcfg = "ok", {}
+        if reason == "need_pay":
+            stars = (pcfg or {}).get("stars", 100)
+            days = (pcfg or {}).get("days", 30)
+            # Faturayı direkt gönder — kullanıcıya komut yazdırma
+            try:
+                sent = await premium.send_star_invoice(bot, user_id, name)
+            except Exception:
+                log.warning("Fatura gönderilemedi: %s", name, exc_info=True)
+                sent = False
+            if sent:
+                await event.answer(
+                    f"💎 Premium plugin ({stars}⭐/{days}g). Fatura gönderildi — ödeme sonrası otomatik açılır.",
+                    alert=True)
+            else:
+                await event.answer(
+                    f"💎 Premium plugin ({stars}⭐/{days}g). Fatura gönderilemedi, tekrar dene.",
+                    alert=True)
+            return None
+        if reason == "need_grant":
+            await event.answer("🔒 Özel plugin. Erişim için yöneticiye başvur.", alert=True)
+            return None
+
+        client = await smart_session_manager.get_or_create_client(user_id)
+        if not client:
+            await event.answer("❌ Userbot bağlantısı kurulamadı, tekrar giriş yap", alert=True)
+            return None
+        success, _ = await plugin_manager.activate_plugin(user_id, name, client)
+        if success:
+            await send_log(bot, "plugin", f"Aktif: {name}", user_id)
+        return f"🟢 {name} açıldı" if success else "❌ Yüklenemedi"
+
+    # ==========================================
+    # TOPLU İŞLEMLER (tek dokunuş)
+    # ==========================================
+    @bot.on(events.CallbackQuery(pattern=rb"pall_on_(\d+)"))
+    @check_ban
+    async def pall_on_handler(event):
+        user_id = event.sender_id
+        page = int(event.data.decode().rsplit("_", 1)[-1])
+        u = await _ensure_logged(event)
+        if not u:
+            return
+        await event.answer("⚡ Tümü açılıyor...")
+        client = await smart_session_manager.get_or_create_client(user_id)
+        if not client:
+            await event.answer("❌ Bağlantı kurulamadı, tekrar giriş yap", alert=True)
+            return
+        active = u.get("active_plugins", [])
+        done = 0
+        for p in await accessible_plugins(user_id):
+            name = p["name"]
+            if name in active:
+                continue
+            try:
+                from utils import premium
+                reason, _ = premium.access_reason(user_id, name)
+            except Exception:
+                reason = "ok"
+            if reason != "ok":
+                continue  # premium/özel olanları atla
+            try:
+                ok, _ = await plugin_manager.activate_plugin(user_id, name, client)
+                if ok:
+                    done += 1
+            except Exception:
+                log.warning("Toplu aç: %s yüklenemedi (user=%s)", name, user_id, exc_info=True)
+        await send_log(bot, "plugin", f"Toplu aç: {done}", user_id)
+        text, rows = await build_plugins_page(user_id, page)
+        await _render(event, f"✅ {done} plugin açıldı.\n\n" + text, rows)
+
+    @bot.on(events.CallbackQuery(pattern=rb"pall_off_(\d+)"))
+    @check_ban
+    async def pall_off_handler(event):
+        user_id = event.sender_id
+        page = int(event.data.decode().rsplit("_", 1)[-1])
+        u = await _ensure_logged(event)
+        if not u:
+            return
+        await event.answer("⏹ Tümü kapatılıyor...")
+        done = 0
+        for name in list(u.get("active_plugins", [])):
+            plugin = await db.get_plugin(name)
+            if plugin and plugin.get("default_active", False):
+                continue  # zorunlu olanlar kalsın
+            try:
+                ok, _ = await plugin_manager.deactivate_plugin(user_id, name)
+                if ok:
+                    done += 1
+            except Exception:
+                log.warning("Toplu kapat: %s kapatılamadı (user=%s)", name, user_id, exc_info=True)
+        await send_log(bot, "plugin", f"Toplu kapat: {done}", user_id)
+        text, rows = await build_plugins_page(user_id, page)
+        await _render(event, f"⏹ {done} plugin kapatıldı.\n\n" + text, rows)
+
+    # ==========================================
+    # TEK DOKUNUŞ AÇ/KAPAT  (pt_<page>_<name> / pm_<page>_<name>)
+    # ==========================================
+    @bot.on(events.CallbackQuery(pattern=rb"p[tm]_(\d+)_(.+)"))
+    @check_ban
+    async def plugin_toggle_handler(event):
+        user_id = event.sender_id
+        data = event.data.decode()
+        # p{t|m}_<page>_<name> -> name içinde '_' olabilir
+        prefix, page_str, name = data.split("_", 2)
+        page = int(page_str)
+
+        user_data = await db.get_user(user_id)
         if not user_data or not user_data.get("is_logged_in"):
             await event.answer("Önce giriş yapmalısınız", alert=True)
             return
-        
-        page = int(event.data.decode().split("_")[-1])
-        active_plugins = user_data.get("active_plugins", [])
-        
-        if not active_plugins:
-            text = config.MESSAGES["no_active_plugins"]
-            text += "\n\n💡 Plugin yüklemek için:\n"
-            text += "1️⃣ Plugin listesinden birini seçin\n"
-            text += "2️⃣ `/pactive <isim>` yazın"
-            rows = [
-                [btn.callback(" Plugin Listesi", "plugins_page_0", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5830184853236097449)],
-                [btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)]
-            ]
-            await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
-            await event.answer()
-            return
-        
-        total_pages = (len(active_plugins) + PLUGINS_PER_PAGE - 1) // PLUGINS_PER_PAGE
-        start_idx = page * PLUGINS_PER_PAGE
-        end_idx = start_idx + PLUGINS_PER_PAGE
-        page_plugins = active_plugins[start_idx:end_idx]
-        
-        text = f"📦 **Aktif Plugin'leriniz** (Sayfa {page + 1}/{total_pages})\n\n"
-        
-        for name in page_plugins:
-            plugin = await db.get_plugin(name)
-            if plugin:
-                cmds = ", ".join([f"`.{c}`" for c in plugin.get("commands", [])])
-                text += f"✅ **{name}**\n"
-                text += f"   └ {cmds}\n"
-                text += f"   └ Kaldır: `/pinactive {name}`\n\n"
-        
-        text += f"━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"**Toplam:** {len(active_plugins)} aktif plugin"
-        
-        # Sayfalama butonları
-        nav_buttons = []
-        if page > 0:
-            nav_buttons.append(btn.callback(" Önceki", f"my_plugins_{page - 1}", icon_custom_emoji_id=5834632747137638263))
-        if page < total_pages - 1:
-            nav_buttons.append(btn.callback(" Sonraki", f"my_plugins_{page + 1}", icon_custom_emoji_id=5834933416323193844))
-        
-        rows = []
-        if nav_buttons:
-            rows.append(nav_buttons)
-        rows.append([btn.callback(" Tüm Plugin'ler", "plugins_page_0", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5830184853236097449)])
-        rows.append([btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)])
-        
-        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
-        await event.answer()
-    
-    # ==========================================
-    # PLUGİN KOMUTLARI
-    # ==========================================
-    
 
+        is_active = name in user_data.get("active_plugins", [])
+        toast = await _toggle_plugin(event, user_id, name, want_on=not is_active)
+        if toast:
+            await event.answer(toast)
+
+        # Geldiği görünümü tazele (pt_ = liste, pm_ = pluginlerim)
+        try:
+            if prefix == "pm":
+                text, rows = await build_my_plugins_page(user_id, page)
+            else:
+                text, rows = await build_plugins_page(user_id, page)
+            await _render(event, text, rows)
+        except Exception:
+            log.debug("Plugin sayfası yenilenemedi (user=%s)", user_id, exc_info=True)
+
+    # ==========================================
+    # KOMUTLAR (geriye uyumlu — aynen korundu)
+    # ==========================================
     @bot.on(events.NewMessage(pattern=r'^/pinfo\s+(\S+)$'))
     async def pinfo_command(event):
         plugin_name = event.pattern_match.group(1)
-        plugin = await db.get_plugin(plugin_name)
-        
-        if not plugin:
+        text, rows = await build_plugin_info(event.sender_id, 0, plugin_name)
+        if not text:
             await event.respond(f"❌ `{plugin_name}` bulunamadı.")
             return
-        
-        user_data = await db.get_user(event.sender_id)
-        active_plugins = user_data.get("active_plugins", []) if user_data else []
-        is_active = plugin_name in active_plugins
-        
-        text = f"🔌 **Plugin: `{plugin_name}`**\n\n"
-        text += f"📝 **Açıklama:** {plugin.get('description') or 'Açıklama yok'}\n"
-        text += f"🔓 **Erişim:** {'Genel' if plugin.get('is_public', True) else 'Özel'}\n"
-        text += f"📊 **Durum:** {'🟢 Yüklü' if is_active else '⚪ Yüklü değil'}\n\n"
-        
-        commands = plugin.get("commands", [])
-        if commands:
-            text += f"🔧 **Komutlar ({len(commands)}):**\n"
-            for cmd in commands:
-                text += f"  • `.{cmd}`\n"
-        else:
-            text += "🔧 **Komutlar:** Yok\n"
-        
-        text += f"\n━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"💡 **Hızlı Kullanım:**\n"
-        if is_active:
-            text += f"  • Kaldır: `/pinactive {plugin_name}`"
-        else:
-            text += f"  • Yükle: `/pactive {plugin_name}`"
-        
-        await event.respond(text)
-    
+        await bot_api.send_message(chat_id=event.sender_id, text=text,
+                                   reply_markup=btn.inline_keyboard(rows))
 
     @bot.on(events.NewMessage(pattern=r'^/pactive\s+(\S+)$'))
     @check_ban
     async def pactive_command(event):
         plugin_name = event.pattern_match.group(1)
-        
-        # Devre dışı plugin kontrolü
         plugin = await db.get_plugin(plugin_name)
         if plugin and plugin.get("is_disabled", False):
             await event.respond(
@@ -232,25 +292,20 @@ def register(bot):
                 f"Şu anda kullanılamaz."
             )
             return
-        
         user_data = await db.get_user(event.sender_id)
         if not user_data or not user_data.get("is_logged_in"):
             await event.respond("❌ Önce giriş yapmalısınız.")
             return
-        
         msg = await event.respond("⏳ Bağlantı kuruluyor...")
-        
-        # Smart manager ile client al veya oluştur
         client = await smart_session_manager.get_or_create_client(event.sender_id)
         if not client:
             await msg.edit("❌ Userbot bağlantısı kurulamadı. Lütfen tekrar giriş yapın.")
             return
-        
-        # Premium kontrolü: erişim yoksa SADECE uyarı değil, gerçek Yıldız faturası gönder
         try:
             from utils import premium
             reason, pcfg = premium.access_reason(event.sender_id, plugin_name)
         except Exception:
+            log.warning("Premium kontrolü başarısız: %s", plugin_name, exc_info=True)
             reason, pcfg = "ok", {}
         if reason == "need_pay":
             stars = (pcfg or {}).get("stars", 100)
@@ -259,6 +314,7 @@ def register(bot):
             try:
                 sent = await premium.send_star_invoice(bot, event.sender_id, plugin_name)
             except Exception:
+                log.warning("Fatura gönderilemedi: %s", plugin_name, exc_info=True)
                 sent = False
             if sent:
                 await msg.edit(
@@ -278,21 +334,16 @@ def register(bot):
                 f"Erişim için yöneticiye başvurmalısın."
             )
             return
-
         await msg.edit("⏳ Plugin yükleniyor...")
         success, message = await plugin_manager.activate_plugin(event.sender_id, plugin_name, client)
         await msg.edit(message)
-        
         if success:
             await send_log(bot, "plugin", f"Aktif: {plugin_name}", event.sender_id)
-    
 
     @bot.on(events.NewMessage(pattern=r'^/pinactive\s+(\S+)$'))
     @check_ban
     async def pinactive_command(event):
         plugin_name = event.pattern_match.group(1)
-        
-        # Varsayılan aktif plugin kontrolü
         plugin = await db.get_plugin(plugin_name)
         if plugin and plugin.get("default_active", False):
             await event.respond(
@@ -301,33 +352,19 @@ def register(bot):
                 f"Tüm kullanıcılarda zorunlu olarak çalışır."
             )
             return
-        
         success, message = await plugin_manager.deactivate_plugin(event.sender_id, plugin_name)
         await event.respond(message)
-        
         if success:
             await send_log(bot, "plugin", f"Deaktif: {plugin_name}", event.sender_id)
-    
 
     @bot.on(events.NewMessage(pattern=r'^/plugins$'))
     @check_ban
     async def plugins_command(event):
+        """Komut da artık butonlu sayfayı açar — metin listesi yok"""
         user_data = await db.get_user(event.sender_id)
-        all_plugins = await db.get_all_plugins()
-        active_plugins = user_data.get("active_plugins", []) if user_data else []
-        
-        if not all_plugins:
-            await event.respond("📭 Henüz plugin eklenmemiş.")
+        if not user_data or not user_data.get("is_logged_in"):
+            await event.respond("❌ Önce giriş yapmalısınız. /start → 🔐 Giriş Yap")
             return
-        
-        text = "🔌 **Plugin Listesi:**\n\n"
-        for p in all_plugins[:10]:
-            status = "🟢" if p['name'] in active_plugins else "⚪"
-            text += f"{status} `{p['name']}` → `/pactive {p['name']}`\n"
-        
-        if len(all_plugins) > 10:
-            text += f"\n... ve {len(all_plugins) - 10} plugin daha"
-        
-        text += f"\n\n🟢 Yüklü | ⚪ Yüklü değil"
-        text += f"\n📊 Detay: `/pinfo <isim>`"
-        await event.respond(text)
+        text, rows = await build_plugins_page(event.sender_id, 0)
+        await bot_api.send_message(chat_id=event.sender_id, text=text,
+                                   reply_markup=btn.inline_keyboard(rows))

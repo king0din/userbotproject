@@ -30,6 +30,12 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = int(os.getenv("OWNER_ID", 0))
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "KingOdi")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "KingUser_bot") 
+
+# Premium emoji ikonları için: bot premium mi? (boş = başlangıçta otomatik tespit)
+_bip = os.getenv("BOT_IS_PREMIUM", "").strip().lower()
+BOT_IS_PREMIUM = (True if _bip in ("1", "true", "yes", "evet", "on")
+                  else (False if _bip in ("0", "false", "no", "hayir", "hayır", "off")
+                        else None))  # None = main.py bot.get_me() ile dolduracak
 # ============================================
 # KANALLAR
 # ============================================
@@ -97,7 +103,6 @@ MESSAGES = {
     "not_registered": "❌ Henüz kayıtlı değilsiniz.\n\n/start komutu ile başlayın.",
     
     # Giriş
-    "login_method": "🔐 **Giriş Yöntemi Seçin:**",
     "login_phone": "📱 **Telefon Numarası ile Giriş**\n\n"
                    "Telefon numaranızı girin:\n"
                    "Örnek: `+905551234567`",
@@ -107,8 +112,6 @@ MESSAGES = {
                   "Örnek: `1 2 3 4 5` veya `12 345`\n\n"
                   "🔒 Bu sayede Telegram kod paylaşımını engellemez.",
     "login_2fa": "🔑 **İki Faktörlü Doğrulama**\n\n2FA şifrenizi girin:",
-    "login_session_telethon": "📄 **Telethon Session String**\n\nSession string gönderin:",
-    "login_session_pyrogram": "📄 **Pyrogram Session String**\n\nSession string gönderin:",
     "login_success": "✅ **Giriş Başarılı!**\n\n"
                      "👤 Hesap: `{name}`\n"
                      "🆔 ID: `{user_id}`",

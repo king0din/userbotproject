@@ -14,10 +14,6 @@
 import os
 import sys
 import asyncio
-import subprocess
-import time
-import psutil
-from datetime import datetime
 from telethon import events, Button
 import config
 from database import database as db
@@ -26,8 +22,7 @@ from userbot.plugins import plugin_manager
 
 # Eski uyumluluk için alias
 userbot_manager = smart_session_manager
-from utils import send_log, get_readable_time, back_button
-from utils.bot_api import bot_api, btn, ButtonBuilder
+from utils import send_log, back_button
 
 
 def register(bot):

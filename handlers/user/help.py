@@ -8,26 +8,18 @@
 # KingTG UserBot Service - User Handlers
 # ============================================
 
-from telethon import events, Button
+from telethon import events
 import config
 from database import database as db
 from userbot.smart_manager import smart_session_manager
-from userbot.plugins import plugin_manager
 from utils import (
-    check_ban, check_private_mode, check_maintenance, 
-    register_user, send_log, is_valid_phone, back_button
+    check_ban
 )
 from utils.bot_api import bot_api, btn, ButtonBuilder
 
 # Eski uyumluluk için alias
 userbot_manager = smart_session_manager
 
-from ._common import (
-    user_states, build_main_menu,
-    STATE_WAITING_PHONE, STATE_WAITING_CODE, STATE_WAITING_2FA,
-    STATE_WAITING_SESSION_TELETHON, STATE_WAITING_SESSION_PYROGRAM,
-    PLUGINS_PER_PAGE,
-)
 
 
 def register(bot):
@@ -53,6 +45,7 @@ def register(bot):
             [btn.callback("🔌 Plugin Nedir?", "help_plugins", style=ButtonBuilder.STYLE_PRIMARY)],
             [btn.callback("⚙️ Komutlar Nasıl Kullanılır?", "help_commands", style=ButtonBuilder.STYLE_PRIMARY)],
             [btn.callback("❓ Sıkça Sorulan Sorular", "help_faq", style=ButtonBuilder.STYLE_PRIMARY)],
+            [btn.callback("📝 Komutlar Listesi", "commands", style=ButtonBuilder.STYLE_SUCCESS)],
             [btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832654562510511307)]
         ]
         
@@ -93,20 +86,18 @@ def register(bot):
     @bot.on(events.CallbackQuery(data=b"help_login"))
     async def help_login_handler(event):
         text = "🔐 **Nasıl Giriş Yapılır?**\n\n"
-        text += "Userbot kullanmak için hesabınızla giriş yapmalısınız.\n"
-        text += "3 farklı yöntem vardır:\n\n"
+        text += "Giriş çok basit — sadece telefon numaranızla:\n\n"
         
-        text += "📱 **1. Telefon Numarası (Önerilen)**\n"
-        text += "• `🔐 Giriş Yap` butonuna tıklayın\n"
-        text += "• `📱 Telefon Numarası` seçin\n"
-        text += "• Numaranızı girin: `+905551234567`\n"
-        text += "• Telegram'dan gelen kodu girin\n"
-        text += "• 2FA varsa şifrenizi girin\n\n"
+        text += "📱 **Adımlar:**\n"
+        text += "1️⃣ `🔐 Giriş Yap` butonuna tıklayın\n"
+        text += "2️⃣ Numaranızı girin: `+905551234567`\n"
+        text += "3️⃣ Telegram'dan gelen kodu girin\n"
+        text += "4️⃣ 2FA (iki adımlı doğrulama) varsa şifrenizi girin\n\n"
         
-        text += "📄 **2. Session String**\n"
-        text += "• Daha önce oluşturduğunuz session'ı\n"
-        text += "  yapıştırarak giriş yapabilirsiniz\n"
-        text += "• Telethon veya Pyrogram desteklenir\n\n"
+        text += "🔒 **Güvenli mi?**\n"
+        text += "Evet. Telegram'ın size gönderdiği doğrulama\n"
+        text += "kodunu girersiniz; hesap şifreniz botla paylaşılmaz.\n"
+        text += "Girdiğiniz numara/kod mesajı otomatik silinir.\n\n"
         
         text += "💾 **Oturum Kaydetme:**\n"
         text += "Giriş sonrası oturumu kaydederseniz,\n"
@@ -123,19 +114,18 @@ def register(bot):
         text += "Plugin'ler userbot'a özellik ekleyen eklentilerdir.\n"
         text += "Her plugin farklı komutlar sunar.\n\n"
         
-        text += "📥 **Plugin Yükleme:**\n"
-        text += "1️⃣ `🔌 Plugin'ler` menüsüne gidin\n"
-        text += "2️⃣ İstediğiniz plugini bulun\n"
-        text += "3️⃣ `/pactive <isim>` yazın\n"
-        text += "   Örnek: `/pactive ses`\n\n"
+        text += "📥 **Plugin Yükleme (en kolay yol):**\n"
+        text += "1️⃣ `🔌 Plugin'ler` menüsüne girin\n"
+        text += "2️⃣ İstediğiniz plugin'e **dokunun** — anında açılır 🟢\n"
+        text += "   Tekrar dokununca kapanır ⚪\n\n"
         
-        text += "📤 **Plugin Kaldırma:**\n"
-        text += "• `/pinactive <isim>` yazın\n"
-        text += "   Örnek: `/pinactive ses`\n\n"
-        
-        text += "ℹ️ **Plugin Bilgisi:**\n"
-        text += "• `/pinfo <isim>` ile detayları görün\n"
-        text += "   Örnek: `/pinfo ses`\n\n"
+        text += "ℹ️ **Plugin Bilgisi (butonla):**\n"
+        text += "Plugin listesinde `ℹ️ Detay Modu`na dokunun,\n"
+        text += "sonra plugin'e dokunun — komutları ve açıklaması gelir.\n\n"
+
+        text += "⌨️ **Komutla da olur:**\n"
+        text += "• Yükle: `/pactive <isim>` · Kaldır: `/pinactive <isim>`\n"
+        text += "• Bilgi: `/pinfo <isim>`\n\n"
         
         text += "📢 **Yeni Plugin'ler:**\n"
         text += "Plugin kanalımızı takip ederek yeni\n"
@@ -154,8 +144,8 @@ def register(bot):
         text = "⚙️ **Komutlar Nasıl Kullanılır?**\n\n"
         
         text += "🤖 **Bot Komutları (Bu botta):**\n"
-        text += "Bot komutları `/` ile başlar ve\n"
-        text += "bu bota yazılır.\n\n"
+        text += "Bunlar **bu botun** kendi komutlarıdır.\n"
+        text += "`/` ile başlar ve **bu bota** yazılır.\n\n"
         text += "Örnekler:\n"
         text += "• `/start` - Ana menü\n"
         text += "• `/pactive ses` - Plugin yükle\n"
@@ -164,8 +154,8 @@ def register(bot):
         text += "━━━━━━━━━━━━━━━━━━━━\n\n"
         
         text += "⚡ **Userbot Komutları (Telegram'da):**\n"
-        text += "Userbot komutları `.` ile başlar ve\n"
-        text += "**herhangi bir sohbete** yazılır.\n\n"
+        text += "Bunlar **hesabınızı yöneten userbot'un** komutlarıdır.\n"
+        text += "`.` ile başlar ve **herhangi bir sohbete** yazılır.\n\n"
         text += "Örnekler:\n"
         text += "• `.afk Meşgulüm` - AFK modu aç\n"
         text += "• `.tts Merhaba` - Sesli mesaj\n"
@@ -193,7 +183,8 @@ def register(bot):
         text += "doğrulama kodunu giriyorsunuz.\n\n"
         
         text += "**S: Birisi hesabıma erişebilir mi?**\n"
-        text += "C: Session'ınız şifreli saklanır.\n"
+        text += "C: Oturum bilgileriniz sunucuda güvenle saklanır ve\n"
+        text += "yalnızca sizin userbot'unuz için kullanılır.\n"
         text += "Çıkış yapınca silinir.\n\n"
         
         text += "**S: Plugin çalışmıyor?**\n"
@@ -213,16 +204,76 @@ def register(bot):
 
     @bot.on(events.CallbackQuery(data=b"commands"))
     async def commands_handler(event):
-        text = "📝 **Bot Komutları**\n\n"
-        
-        text += "**👤 Genel Komutlar:**\n"
-        for cmd, desc in config.COMMANDS["user"].items():
-            text += f"• `{cmd}` - {desc}\n"
-        
-        if event.sender_id == config.OWNER_ID or await db.is_sudo(event.sender_id):
-            text += "\n**👑 Admin Komutları:**\n"
-            for cmd, desc in config.COMMANDS["admin"].items():
-                text += f"• `{cmd}` - {desc}\n"
-        
-        await event.edit(text, buttons=[[Button.inline("🏠 Ana Menü", b"main_menu")]])
+        """Komutlar hub'ı: Bot komutları vs Userbot komutları farkını anlatır."""
+        text = "📝 **Komutlar**\n\n"
+        text += "İki tür komut vardır, karıştırma:\n\n"
+        text += "🤖 **Bot Komutları** — **bu botun** komutlarıdır.\n"
+        text += "`/` ile başlar, **bu bota** yazılır (ör. `/start`).\n\n"
+        text += "⚡ **Userbot Komutları** — **hesabınızı yöneteceğiniz "
+        text += "userbot'un** komutlarıdır.\n"
+        text += "`.` ile başlar, **Telegram'da herhangi bir sohbete** yazılır (ör. `.afk`).\n\n"
+        text += "👇 Görmek istediğin komut türünü seç:"
+        rows = [
+            [btn.callback(" Bot Komutları", "cmds_bot", style=ButtonBuilder.STYLE_PRIMARY,
+                          icon_custom_emoji_id=5832365506916523096)],
+            [btn.callback(" Userbot Komutları", "cmds_userbot", style=ButtonBuilder.STYLE_SUCCESS,
+                          icon_custom_emoji_id=5830184853236097449)],
+            [btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER,
+                          icon_custom_emoji_id=5832654562510511307)],
+        ]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id,
+                                        text=text, reply_markup=btn.inline_keyboard(rows))
         await event.answer()
+
+    @bot.on(events.CallbackQuery(data=b"cmds_bot"))
+    async def cmds_bot_handler(event):
+        """Bu botun / komutları."""
+        text = "🤖 **Bot Komutları**\n\n"
+        text += "_Bu botun komutları. `/` ile **bu bota** yazılır._\n\n"
+        text += "**👤 Genel:**\n"
+        for cmd, desc in config.COMMANDS["user"].items():
+            text += f"• `{cmd}` — {desc}\n"
+        if event.sender_id == config.OWNER_ID or await db.is_sudo(event.sender_id):
+            text += "\n**👑 Admin:**\n"
+            for cmd, desc in config.COMMANDS["admin"].items():
+                text += f"• `{cmd}` — {desc}\n"
+        rows = [[btn.callback(" Geri", "commands", style=ButtonBuilder.STYLE_DANGER,
+                              icon_custom_emoji_id=5832646161554480591)]]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id,
+                                        text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
+
+    @bot.on(events.CallbackQuery(data=b"cmds_userbot"))
+    async def cmds_userbot_handler(event):
+        """Userbot (.) komutları — pluginlerden derlenir."""
+        text = "⚡ **Userbot Komutları**\n\n"
+        text += "_Hesabınızı yöneten userbot'un komutları._\n"
+        text += "_`.` ile **Telegram'da herhangi bir sohbete** yazılır._\n\n"
+        try:
+            plugins = await db.get_all_plugins()
+        except Exception:
+            plugins = []
+        listed = 0
+        for pl in (plugins or []):
+            if pl.get("is_disabled"):
+                continue
+            cmds = pl.get("commands", [])
+            if not cmds:
+                continue
+            name = pl.get("name", "?")
+            cmd_text = ", ".join(f"`.{c}`" for c in cmds)
+            line = f"🔌 **{name}:** {cmd_text}\n"
+            if len(text) + len(line) > 3800:  # Telegram mesaj sınırı güvenliği
+                text += "…ve daha fazlası. Detay: `/pinfo <plugin>`\n"
+                break
+            text += line
+            listed += 1
+        if listed == 0:
+            text += "_Henüz plugin komutu yok._\n"
+        text += "\n💡 Bir plugin'in detayı için: `/pinfo <isim>`"
+        rows = [[btn.callback(" Geri", "commands", style=ButtonBuilder.STYLE_DANGER,
+                              icon_custom_emoji_id=5832646161554480591)]]
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id,
+                                        text=text, reply_markup=btn.inline_keyboard(rows))
+        await event.answer()
+

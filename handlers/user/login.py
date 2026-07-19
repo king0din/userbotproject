@@ -8,14 +8,13 @@
 # KingTG UserBot Service - User Handlers
 # ============================================
 
-from telethon import events, Button
+from telethon import events
 import config
 from database import database as db
 from userbot.smart_manager import smart_session_manager
 from userbot.plugins import plugin_manager
 from utils import (
-    check_ban, check_private_mode, check_maintenance, 
-    register_user, send_log, is_valid_phone, back_button
+    check_ban, send_log, is_valid_phone
 )
 from utils.bot_api import bot_api, btn, ButtonBuilder
 
@@ -23,10 +22,8 @@ from utils.bot_api import bot_api, btn, ButtonBuilder
 userbot_manager = smart_session_manager
 
 from ._common import (
-    user_states, build_main_menu,
-    STATE_WAITING_PHONE, STATE_WAITING_CODE, STATE_WAITING_2FA,
-    STATE_WAITING_SESSION_TELETHON, STATE_WAITING_SESSION_PYROGRAM,
-    PLUGINS_PER_PAGE,
+    user_states, STATE_WAITING_PHONE,
+    STATE_WAITING_CODE, STATE_WAITING_2FA,
 )
 
 
@@ -46,70 +43,29 @@ def register(bot):
             await handle_code_input(event, bot)
         elif state == STATE_WAITING_2FA:
             await handle_2fa_input(event, bot)
-        elif state == STATE_WAITING_SESSION_TELETHON:
-            await handle_session_input(event, bot, "telethon")
-        elif state == STATE_WAITING_SESSION_PYROGRAM:
-            await handle_session_input(event, bot, "pyrogram")
     
     # ==========================================
     # GİRİŞ İŞLEMLERİ
     # ==========================================
     
 
+    @bot.on(events.CallbackQuery(data=b"login_phone"))
     @bot.on(events.CallbackQuery(data=b"login_menu"))
     @check_ban
     async def login_menu_handler(event):
-        if event.sender_id in user_states:
-            del user_states[event.sender_id]
-        
-        rows = [
-            [btn.callback(" Telefon Numarası", "login_phone",
-                         style=ButtonBuilder.STYLE_SUCCESS,
-                         icon_custom_emoji_id=5832225314889015431)],
-            [btn.callback(" Telethon Session", "login_telethon",
-                         style=ButtonBuilder.STYLE_PRIMARY,
-                         icon_custom_emoji_id=5832345561088400364)],
-            [btn.callback(" Pyrogram Session", "login_pyrogram",
-                         style=ButtonBuilder.STYLE_PRIMARY,
-                         icon_custom_emoji_id=5832345561088400364)],
-            [btn.callback(" Geri", "main_menu",
-                         style=ButtonBuilder.STYLE_DANGER,
-                         icon_custom_emoji_id=5832646161554480591)]
-        ]
-        
+        # Telefon-only giriş: tek dokunuşta doğrudan telefon numarası adımı.
+        # (Eski Telethon/Pyrogram session-string yolları kaldırıldı.)
+        user_states[event.sender_id] = {"state": STATE_WAITING_PHONE}
+        text = config.MESSAGES["login_phone"] + "\n\n⚠️ İptal: /cancel"
+        rows = [[btn.callback(" İptal", "main_menu",
+                              style=ButtonBuilder.STYLE_DANGER,
+                              icon_custom_emoji_id=5832236194041176208)]]
         await bot_api.edit_message_text(
             chat_id=event.sender_id,
             message_id=event.message_id,
-            text=config.MESSAGES["login_method"],
+            text=text,
             reply_markup=btn.inline_keyboard(rows)
         )
-        await event.answer()
-    
-
-    @bot.on(events.CallbackQuery(data=b"login_phone"))
-    async def login_phone_start(event):
-        user_states[event.sender_id] = {"state": STATE_WAITING_PHONE}
-        text = config.MESSAGES["login_phone"] + "\n\n⚠️ İptal: /cancel"
-        rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
-        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
-        await event.answer()
-    
-
-    @bot.on(events.CallbackQuery(data=b"login_telethon"))
-    async def login_telethon_start(event):
-        user_states[event.sender_id] = {"state": STATE_WAITING_SESSION_TELETHON, "session_type": "telethon"}
-        text = config.MESSAGES["login_session_telethon"] + "\n\n⚠️ İptal: /cancel"
-        rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
-        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
-        await event.answer()
-    
-
-    @bot.on(events.CallbackQuery(data=b"login_pyrogram"))
-    async def login_pyrogram_start(event):
-        user_states[event.sender_id] = {"state": STATE_WAITING_SESSION_PYROGRAM, "session_type": "pyrogram"}
-        text = config.MESSAGES["login_session_pyrogram"] + "\n\n⚠️ İptal: /cancel"
-        rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
-        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
         await event.answer()
     
 
@@ -132,12 +88,12 @@ def register(bot):
             error = result.get("error", "Bilinmeyen hata")
             if result.get("error") == "flood_wait":
                 error = f"{result['seconds']} saniye bekleyin"
-            rows = [[btn.callback(" Geri", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+            rows = [[btn.callback(" Tekrar Dene", "login_menu", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832668083067559171)]]
             await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=f"❌ Hata: {error}", reply_markup=btn.inline_keyboard(rows))
             return
         
         user_states[user_id] = {"state": STATE_WAITING_CODE, "phone": phone}
-        rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
+        rows = [[btn.callback(" İptal", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
         await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=config.MESSAGES["login_code"] + "\n\n⚠️ İptal: /cancel", reply_markup=btn.inline_keyboard(rows))
     
 
@@ -153,7 +109,7 @@ def register(bot):
         
         if result.get("stage") == "2fa":
             user_states[user_id]["state"] = STATE_WAITING_2FA
-            rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
+            rows = [[btn.callback(" İptal", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
             await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=config.MESSAGES["login_2fa"] + "\n\n⚠️ İptal: /cancel", reply_markup=btn.inline_keyboard(rows))
             return
         
@@ -163,7 +119,7 @@ def register(bot):
             error = result.get("error", "Bilinmeyen hata")
             if error in ["code_expired", "no_pending_login"]:
                 if user_id in user_states: del user_states[user_id]
-            rows = [[btn.callback(" Geri", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+            rows = [[btn.callback(" Tekrar Dene", "login_menu", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832668083067559171)]]
             await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=f"❌ {error}", reply_markup=btn.inline_keyboard(rows))
     
 
@@ -180,28 +136,8 @@ def register(bot):
         if result["success"]:
             await handle_login_success(event, bot, result, msg)
         else:
-            rows = [[btn.callback(" Geri", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+            rows = [[btn.callback(" Tekrar Dene", "login_menu", style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832668083067559171)]]
             await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=f"❌ {result.get('error', 'Hata')}", reply_markup=btn.inline_keyboard(rows))
-    
-
-    async def handle_session_input(event, bot, session_type):
-        user_id = event.sender_id
-        session_string = event.text.strip()
-        
-        try: await event.delete()
-        except Exception: pass
-        
-        msg = await bot.send_message(user_id, "⏳ Session doğrulanıyor...")
-        result = await userbot_manager.login_with_session(user_id, session_string, session_type)
-        
-        if result["success"]:
-            if not hasattr(bot, 'session_temp'): bot.session_temp = {}
-            bot.session_temp[user_id] = {"session": session_string, "phone": None, "type": session_type}
-            await handle_login_success(event, bot, result, msg)
-        else:
-            if user_id in user_states: del user_states[user_id]
-            rows = [[btn.callback(" Geri", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
-            await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=f"❌ {result.get('error', 'Session geçersiz')}", reply_markup=btn.inline_keyboard(rows))
     
 
     async def handle_login_success(event, bot, result, msg):

@@ -51,6 +51,17 @@ def _user_original_dir(uid):
     os.makedirs(d, exist_ok=True)
     return d
 
+
+def _user_clone_dir(uid):
+    """Kullanıcı-başına GEÇİCİ klon indirme dizini.
+    ÖNEMLİ: Eskiden tüm kullanıcılar tek 'clone_temp' klasörünü paylaşıyordu; iki
+    kişi aynı anda .clon yapınca birinin indirdiği hedef fotoğraflar diğerininkiyle
+    karışıp YANLIŞ kişinin fotoğrafı profile yüklenebiliyordu. Artık her hesabın
+    kendi klasörü var → çakışma yok."""
+    d = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "clone_temp", str(uid))
+    os.makedirs(d, exist_ok=True)
+    return d
+
 # Şeffaf/Görünmez emoji ID (https://t.me/addemoji/blank25 paketinden)
 # Premium olmayan kullanıcı klonlanınca bu emoji kullanılır
 INVISIBLE_EMOJI_ID = 5420560971674435677
@@ -128,7 +139,9 @@ def cleanup_user_data(user_id, reason="disable"):
     Kayıtlı orijinal profil varken silmez (.unclon ile dönülebilmeli); geçici klasör her zaman temizlenir."""
     import shutil
     try:
-        clone_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "clone_temp")
+        # Sadece BU kullanıcının geçici klasörünü sil (başka hesabın devam eden
+        # klon işlemini bozma).
+        clone_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "clone_temp", str(user_id))
         if os.path.isdir(clone_dir):
             shutil.rmtree(clone_dir, ignore_errors=True)
         state = _load_state(user_id)
@@ -334,9 +347,9 @@ async def do_clone(event, input_str):
         last_name = target_user.last_name.replace("\u2060", "") if target_user.last_name else ""
         user_bio = replied_user.full_user.about if hasattr(replied_user, 'full_user') and replied_user.full_user.about else ""
 
-        clone_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "clone_temp")
-        if not os.path.exists(clone_dir):
-            os.makedirs(clone_dir)
+        # Operatörün KENDİ id'sine göre klasör (hedefin değil): iki kişi aynı
+        # anda .clon yapsa bile fotoğraflar karışmaz.
+        clone_dir = _user_clone_dir(me.id)
         for f in os.listdir(clone_dir):
             try:
                 os.remove(os.path.join(clone_dir, f))
@@ -545,7 +558,7 @@ async def clone_info(event):
     photo_count = ORIGINAL_PROFILE["photo_count"] - video_count
     bio_display = ORIGINAL_PROFILE['about'] if ORIGINAL_PROFILE['about'] else "(boş)"
     emoji_display = "✓" if ORIGINAL_PROFILE["emoji_status"] else "yok"
-    clone_status = "🟢 şu an klonlu" if ORIGINAL_PROFILE.get("is_cloned") else "⚪ klon aktif değil"
+    clone_status = "🟢 şu an klonlu" if ORIGINAL_PROFILE.get("is_cloned") else "⚪ klon aktif değil"  # noqa: E501
 
     await event.edit(
         f"**📋 Kayıtlı Profil:**\n\n"

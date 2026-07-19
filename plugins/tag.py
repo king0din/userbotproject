@@ -1277,7 +1277,6 @@ async def run_tag_job(owner_id, chat_id, mode, group_size, interval,
 @r(outgoing=True, pattern="^.tag(?: |$)(.*)")
 async def tag_all(q):
     """Tüm üyeleri etiketler"""
-    global tag_active, tag_data
     
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
@@ -1345,7 +1344,6 @@ async def tag_all(q):
 @r(outgoing=True, pattern="^.tagadmin(?: |$)(.*)")
 async def tag_admins(q):
     """Sadece adminleri etiketler"""
-    global tag_active, tag_data
     
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
@@ -1398,7 +1396,6 @@ async def tag_admins(q):
 
 async def tag_process(q, chat, mode, status_msg, group_size=1):
     """Etiketleme işlemini gerçekleştir - Gerçek mention bildirimi ile"""
-    global tag_active, tag_data
     
     userbot_id = (await q.client.get_me()).id
     
@@ -1601,7 +1598,6 @@ async def tag_process(q, chat, mode, status_msg, group_size=1):
 @r(outgoing=True, pattern="^.tagstop$")
 async def tag_stop(q):
     """Etiketlemeyi durdurur"""
-    global tag_active, tag_data
 
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
@@ -1642,7 +1638,6 @@ async def tag_stop(q):
 @r(outgoing=True, pattern="^.tagstat$")
 async def tag_status(q):
     """Etiketleme durumunu gösterir"""
-    global tag_active, tag_data
 
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
@@ -1686,7 +1681,6 @@ async def tag_status(q):
 @r(outgoing=True, pattern="^.tagban(?: |$)(.*)")
 async def block_user(q):
     """Kullanıcıyı etiketlemeden engelle"""
-    global blocked_users
     
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
@@ -1762,7 +1756,6 @@ async def block_user(q):
 @r(outgoing=True, pattern="^.tagunban(?: |$)(.*)")
 async def unblock_user(q):
     """Kullanıcının engelini kaldır"""
-    global blocked_users
     
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
@@ -1833,7 +1826,6 @@ async def unblock_user(q):
 @r(outgoing=True, pattern="^.tagbanlistremove$")
 async def clear_blocks(q):
     """Tüm engelleri temizle"""
-    global blocked_users
     
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
@@ -1856,7 +1848,6 @@ async def clear_blocks(q):
 @r(outgoing=True, pattern="^.tagbanlist$")
 async def list_blocks(q):
     """Engellenen kullanıcıları listele"""
-    global blocked_users
     
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:

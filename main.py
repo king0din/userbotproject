@@ -10,6 +10,7 @@ import os
 import sys
 import asyncio
 import time
+import sqlite3
 
 # Proje dizinini path'e ekle
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -192,13 +193,32 @@ async def main():
     
     # Bot başlatma
     log("🔄 Bot başlatılıyor...")
-    await bot.start(bot_token=config.BOT_TOKEN)
+    try:
+        await bot.start(bot_token=config.BOT_TOKEN)
+    except sqlite3.OperationalError as e:
+        if "locked" in str(e).lower():
+            log("=" * 50)
+            log("❌ Oturum dosyası (bot_session.session) KİLİTLİ.")
+            log("   Neden: Botun BAŞKA bir kopyası zaten çalışıyor olabilir.")
+            log("   Çözüm:")
+            log("     1) Diğer 'python main.py' pencerelerini/işlemlerini kapat")
+            log("     2) Görev Yöneticisi'nden fazladan python.exe'leri sonlandır")
+            log("     3) Hâlâ sürüyorsa: bot_session.session-journal / -wal / -shm")
+            log("        dosyalarını sil ve tekrar başlat")
+            log("=" * 50)
+            return
+        raise
     
     bot_me = await bot.get_me()
     log(f"✅ Bot bağlandı: @{bot_me.username}")
     
     # Bot username'ini config'e kaydet (pluginler için)
     config.BOT_USERNAME = bot_me.username
+
+    # Premium emoji desteği: env ile verilmemişse bot hesabından otomatik tespit
+    if config.BOT_IS_PREMIUM is None:
+        config.BOT_IS_PREMIUM = bool(getattr(bot_me, "premium", False))
+    log(f"💎 Premium emoji: {'açık' if config.BOT_IS_PREMIUM else 'kapalı (normal emoji)'}")
     
     # Ayrıca dosyaya da yaz (pluginler için)
     try:

@@ -329,6 +329,7 @@ async def tts_cmd(event):
     )
 
     temp_files = []
+    final_path = None
 
     try:
         # Her chunk'ı işle
@@ -406,10 +407,11 @@ async def tts_cmd(event):
                 os.unlink(tmp_file)
             except Exception as _e:
                 log.debug(f"geçici dosya silinemedi: {_e}")
-        try:
-            os.unlink(final_path)
-        except Exception as _e:
-            log.debug(f"final dosya silinemedi: {_e}")
+        if final_path:
+            try:
+                os.unlink(final_path)
+            except Exception as _e:
+                log.debug(f"final dosya silinemedi: {_e}")
 
 @register(outgoing=True, pattern=r'^\.sesler$')
 async def list_voices(event):

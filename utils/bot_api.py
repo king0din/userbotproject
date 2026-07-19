@@ -100,10 +100,18 @@ class BotAPI:
                 if result.get('ok'):
                     return result.get('result')
                 desc = result.get('description') or ''
-                # Telegram stilli/emoji butonu reddederse → stilleri atıp sade butonla bir kez daha dene
-                if (not _stripped) and data and data.get('reply_markup') and \
-                        'button' in desc.lower() and \
-                        ('style' in desc.lower() or 'parse' in desc.lower()):
+                dl = desc.lower()
+                # "message is not modified" → içerik ZATEN aynı; ZARARSIZ.
+                # Stilleri SOYMA (yoksa buton düz'e düşer), sessizce geç.
+                if 'not modified' in dl:
+                    log.debug("editMessageText: içerik değişmedi (zararsız, atlandı)")
+                    return None
+                # SADECE gerçek stil/premium-emoji reddinde stilleri atıp sade gönder
+                if (not _stripped) and data and data.get('reply_markup') and (
+                        'button style' in dl or 'custom_emoji' in dl or 'custom emoji' in dl
+                        or 'button_type' in dl or ('button' in dl and 'invalid' in dl)):
+                    log.warning("⚠️ Buton stili/premium-emoji REDDEDİLDİ (%s) → sade butona düşülüyor. "
+                                "SEBEP: %s", method, desc)
                     self._strip_button_styles(data['reply_markup'])
                     return await self._request(method, data, _retry=False, _stripped=True)
                 log.warning("%s error: %s", method, desc)
@@ -369,7 +377,7 @@ class ButtonBuilder:
     STYLE_PRIMARY = "primary"    # Mavi
     STYLE_SUCCESS = "success"    # Yeşil
     STYLE_DANGER = "danger"      # Kırmızı
-    STYLE_SECONDARY = "secondary"  # Gri/Beyaz
+    STYLE_SECONDARY = "primary"  # Bot API "secondary" desteklemiyor → geçerli "primary"e eşlendi (renkli kalsın)
     
     # Premium emoji ID'leri
     EMOJI_LOGIN = 5233408828313192030      # Giriş

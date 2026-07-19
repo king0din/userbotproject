@@ -1,18 +1,36 @@
-# YouTube İndirici (premium) — .müzik / .video / .ytara
+# YouTube İndirici (premium) — .indir / .vindir / .ytara
 # type: premium
 # stars: 100
 # days: 30
 # title: YouTube İndirici
 # requires: yt-dlp
+#
+# Notlar (geliştirici):
+# - Sade ve HIZLI: SADECE yt-dlp (tek çağrı: ara + indir birlikte), yedek yöntem yok.
+# - Reklam/marka: gönderilen müziğin "sanatçı" alanına botun adı yazılır.
+# - .ytara inline panelinde butona sahibinden BAŞKASI dokunursa botu tanıtan uyarı çıkar.
 """
-YouTube'dan müzik/video indirir (KingTG premium plugin).
+YouTube'dan müzik (MP3) ve video indirir; butonlu, sayfalı arama sunar.
 
-Önemli:
-- Cookie GEREKTİRMEZ: tv/ios/android/mweb istemcileri sırayla denenir
-  (YouTube'un "bot değilsin" doğrulamasını cookie olmadan aşmaya çalışır).
-- İsteğe bağlı: bir cookies.txt varsa OTOMATİK kullanılır (zorunlu değil).
-- Hız: tek yt-dlp çağrısında arama + indirme birlikte yapılır (eski sürüm
-  önce bilgi sonra indirme diye İKİ çağrı yapıyordu — o yüzden yavaştı).
+🔧 Komutlar: .indir, .vindir, .ytara
+🚨 Tür: #indirici
+
+
+**Komutlar hakkında:**
+
+**.indir** — YouTube'dan müzik (MP3) indirir. Şarkı adı yazarsanız arayıp ilk
+sonucu, link verirseniz doğrudan onu indirir.
+Örnek: `.indir tarkan kuzu kuzu` · `.indir <link>` · `.indir 2`
+
+**.vindir** — Aynı şekilde çalışır ama video (720p) olarak indirir.
+Örnek: `.vindir doğa belgeseli` · `.vindir 3`
+
+**.ytara** — YouTube'da arama yapar; sonuçları sayfalı, butonlu panelde gösterir.
+Bir sonuca dokununca "Video İndir" / "Ses (MP3) İndir" çıkar, seçtiğini indirip
+sohbete gönderir.
+Örnek: `.ytara tarkan`
+
+Not: `.müzik` ve `.video` eski adlar olarak da çalışmaya devam eder.
 """
 import os
 import re
@@ -38,21 +56,37 @@ YT_REGEX = r"(https?://)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)/.+
 MAX_AUDIO_MB = 50
 MAX_VIDEO_MB = 2000
 
+# .ytara sonuçları (sohbet başına) → ".indir <numara>" / ".vindir <numara>"
+_LAST_SEARCH = {}
 
+
+# ======================================================================
+# YARDIMCILAR
+# ======================================================================
 def is_youtube_url(text):
     return bool(re.match(YT_REGEX, text or ""))
 
 
+def _resolve_pick(event, query):
+    """query yalnızca bir numaraysa, o sohbetteki son .ytara sonucundan URL döndür."""
+    try:
+        q = (query or "").strip()
+        if q.isdigit():
+            items = _LAST_SEARCH.get(event.chat_id) or []
+            idx = int(q) - 1
+            if 0 <= idx < len(items):
+                return "https://youtu.be/%s" % items[idx]["id"]
+    except Exception:
+        pass
+    return None
+
+
 def _find_cookies():
-    """Varsa cookies dosyasını bul (zorunlu değil). Birçok yere ve isme bakar."""
+    """Varsa cookies dosyasını bul (zorunlu değil)."""
     names = ("cookies.txt", "youtube_cookies.txt", "cookie.txt", "youtube.txt")
-    dirs = [
-        os.getcwd(),
-        TEMP_DOWNLOAD_DIRECTORY,
-        os.path.join(os.getcwd(), "downloads"),
-        os.path.join(os.getcwd(), "cookies"),
-        os.path.join(TEMP_DOWNLOAD_DIRECTORY, "cookies"),
-    ]
+    dirs = [os.getcwd(), TEMP_DOWNLOAD_DIRECTORY,
+            os.path.join(os.getcwd(), "downloads"),
+            os.path.join(os.getcwd(), "cookies")]
     try:
         import config as _c
         dirs.append(getattr(_c, "DATA_DIR", "."))
@@ -70,8 +104,6 @@ def _find_cookies():
 
 
 def _extra_args():
-    """PO Token sağlayıcı özel bir portta çalışıyorsa ekle.
-    Varsayılan 127.0.0.1:4416 zaten otomatik bulunur; farklı port için YT_POT_URL kullan."""
     url = os.environ.get("YT_POT_URL")
     if url:
         return ' --extractor-args "youtubepot-bgutilhttp:base_url=%s"' % url
@@ -79,41 +111,35 @@ def _extra_args():
 
 
 def _sanitize(q):
-    """Sorguyu shell için güvenli hale getir."""
     return (q or "").replace('"', "").replace("`", "").replace("$", "").strip()
 
 
 def _ytdlp():
-    """Botun KENDİ Python'undaki yt_dlp'yi çağır (PATH'teki rastgele yt-dlp.exe değil).
-    Böylece pip ile kurulan PO-token eklentisi garanti kullanılır."""
+    """Botun kendi Python'undaki yt_dlp modülünü çağır."""
     return '"%s" -m yt_dlp' % sys.executable
 
 
 def _sub_env():
-    """Subprocess ortamı: Deno/Node yollarını PATH'e ekle (bot eski terminalden
-    başlatılmış olsa bile JS runtime bulunsun)."""
     env = dict(os.environ)
     home = os.path.expanduser("~")
-    extra = [
-        os.path.join(home, ".deno", "bin"),
-        os.path.join(home, ".cargo", "bin"),
-        os.path.join(home, "AppData", "Local", "Programs", "nodejs"),
-        r"C:\Program Files\nodejs",
-    ]
+    extra = [os.path.join(home, ".deno", "bin"),
+             os.path.join(home, ".cargo", "bin"),
+             os.path.join(home, "AppData", "Local", "Programs", "nodejs"),
+             r"C:\Program Files\nodejs"]
     cur = env.get("PATH", "")
     add = os.pathsep.join(x for x in extra if os.path.isdir(x) and x not in cur)
     if add:
         env["PATH"] = cur + os.pathsep + add
+    # yt-dlp çıktısı UTF-8 olsun (Windows kod sayfasında Türkçe harfler "?" olmasın)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     return env
 
 
 async def run_command(cmd):
     proc = await asyncio.create_subprocess_shell(
-        cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=_sub_env(),
-    )
+        cmd, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE, env=_sub_env())
     out, err = await proc.communicate()
     return out.decode("utf-8", "replace"), err.decode("utf-8", "replace"), proc.returncode
 
@@ -156,227 +182,344 @@ def _last_err_line(err):
     return (lines[-1][:160] if lines else "bilinmeyen hata")
 
 
+# ======================================================================
+# MARKA (botun adı) + SERVİS BOTU
+# ======================================================================
+def _brand_username():
+    u = ""
+    try:
+        import config as _c
+        u = getattr(_c, "BOT_USERNAME", "") or ""
+    except Exception:
+        u = ""
+    if not u:
+        try:
+            with open(os.path.join(os.getcwd(), ".bot_username"), "r", encoding="utf-8") as f:
+                u = f.read().strip()
+        except Exception:
+            u = ""
+    return u.lstrip("@")
+
+
+def _brand_name():
+    """Müziğin 'sanatçı' alanına yazılacak marka (botun adı)."""
+    u = _brand_username()
+    return ("@" + u) if u else "KingTG UserBot"
+
+
+def _get_bot():
+    """Servis botunu (inline butonları gönderebilen) main modülünden al."""
+    import sys as _sys
+    try:
+        if "main" in _sys.modules:
+            b = getattr(_sys.modules["main"], "bot", None)
+            if b is not None:
+                return b
+        import __main__
+        return getattr(__main__, "bot", None)
+    except Exception:
+        return None
+
+
+# ======================================================================
+# İNDİRME (yalnızca yt-dlp, tek çağrı)
+# ======================================================================
 async def _download_audio(target, dl_dir):
-    """TEK çağrı: ara + indir birlikte. (path, meta, err) döndürür."""
+    """Ara + indir + kapak göm. (path, meta, thumb, err) döndürür."""
     cookies = _find_cookies()
     ck = ' --cookies "%s"' % cookies if cookies else ""
-    cmd = (
-        _ytdlp() + ' -x --audio-format mp3 --audio-quality 0 '
-        "--no-warnings --no-playlist --write-info-json "
-        '-o "%s" "%s"%s%s'
-    ) % (os.path.join(dl_dir, "%(id)s.%(ext)s"), target, ck, _extra_args())
+    cmd = (_ytdlp() + ' -x --audio-format mp3 --audio-quality 0 '
+           "--embed-thumbnail --write-thumbnail --convert-thumbnails jpg "
+           "--no-warnings --no-playlist --write-info-json "
+           '-o "%s" "%s"%s%s') % (
+        os.path.join(dl_dir, "%(id)s.%(ext)s"), target, ck, _extra_args())
     out, err, code = await run_command(cmd)
-    mp3 = None
+    mp3 = thumb = None
     for f in os.listdir(dl_dir):
-        if f.endswith(".mp3"):
+        fl = f.lower()
+        if fl.endswith(".mp3"):
             mp3 = os.path.join(dl_dir, f)
-            break
+        elif fl.endswith((".jpg", ".jpeg")):
+            thumb = os.path.join(dl_dir, f)
     if mp3 and os.path.exists(mp3):
-        return mp3, _read_meta(dl_dir), None
-    return None, None, err
+        return mp3, _read_meta(dl_dir), thumb, None
+    return None, None, None, err
 
 
 async def _download_video(target, dl_dir):
-    """TEK çağrı: ara + indir birlikte (720p)."""
+    """Ara + indir (720p) + önizleme kapağı. (path, meta, thumb, err) döndürür."""
     cookies = _find_cookies()
     ck = ' --cookies "%s"' % cookies if cookies else ""
-    cmd = (
-        _ytdlp() + ' -f "bestvideo[height<=720]+bestaudio/best[height<=720]/best" '
-        "--merge-output-format mp4 --no-warnings --no-playlist --write-info-json "
-        '-o "%s" "%s"%s%s'
-    ) % (os.path.join(dl_dir, "%(id)s.%(ext)s"), target, ck, _extra_args())
+    cmd = (_ytdlp() + ' -f "bestvideo[height<=720]+bestaudio/best[height<=720]/best" '
+           "--merge-output-format mp4 --write-thumbnail --convert-thumbnails jpg "
+           "--no-warnings --no-playlist --write-info-json "
+           '-o "%s" "%s"%s%s') % (
+        os.path.join(dl_dir, "%(id)s.%(ext)s"), target, ck, _extra_args())
     out, err, code = await run_command(cmd)
-    vid = None
+    vid = thumb = None
     for f in os.listdir(dl_dir):
-        if f.lower().endswith((".mp4", ".mkv", ".webm")):
+        fl = f.lower()
+        if fl.endswith((".mp4", ".mkv", ".webm")):
             vid = os.path.join(dl_dir, f)
-            break
+        elif fl.endswith((".jpg", ".jpeg")):
+            thumb = os.path.join(dl_dir, f)
     if vid and os.path.exists(vid):
-        return vid, _read_meta(dl_dir), None
-    return None, None, err
+        return vid, _read_meta(dl_dir), thumb, None
+    return None, None, None, err
 
 
-def _yt_id(text):
-    m = re.search(r"(?:v=|youtu\.be/|/shorts/|/embed/)([A-Za-z0-9_-]{11})", text or "")
-    return m.group(1) if m else None
-
-
-def _invidious_instances():
-    """Instance listesi: (1) invidious.txt dosyasi, (2) YT_INVIDIOUS ortam degiskeni,
-    (3) varsayilan guncel liste. Dosya en kolay yol; bot klasorune koy."""
-    insts = []
-    # 1) invidious.txt (bot klasoru / downloads / DATA_DIR) - her satirda bir adres
-    dirs = [os.getcwd(), TEMP_DOWNLOAD_DIRECTORY,
-            os.path.join(os.getcwd(), "downloads")]
+async def _send_audio(client, chat_id, path, meta, thumb):
+    """Müziği gönder — SANATÇI alanı = botun adı (reklam)."""
+    title, _performer, duration = meta if meta else (None, None, 0)
+    _thumb = thumb if (thumb and os.path.exists(thumb)) else None
     try:
-        import config as _c
-        dirs.append(getattr(_c, "DATA_DIR", "."))
+        from telethon.tl.types import DocumentAttributeAudio
+        attrs = [DocumentAttributeAudio(
+            duration=duration, title=(title or "Müzik"), performer=_brand_name())]
     except Exception:
-        pass
-    for d in dirs:
+        attrs = []
+    return await client.send_file(
+        chat_id, path, caption="🎵 **%s**" % (title or "Müzik"),
+        attributes=attrs, thumb=_thumb, force_document=False)
+
+
+async def _send_video(client, chat_id, path, meta, thumb):
+    title = (meta[0] if meta else None) or "Video"
+    _thumb = thumb if (thumb and os.path.exists(thumb)) else None
+    return await client.send_file(
+        chat_id, path, caption="🎬 **%s**" % title,
+        thumb=_thumb, supports_streaming=True)
+
+
+# ======================================================================
+# BOT TARAFI: .ytara inline panel + dokun-indir (TEK SEFER kaydedilir)
+# ======================================================================
+def _register_dl_bot_handlers(bot):
+    if getattr(bot, "_dl_flow_registered", False):
+        return
+    bot._dl_flow_registered = True
+    from telethon import events as _ev, Button as _Btn
+    import re as _re
+
+    PER_PAGE = 5
+
+    def _not_yours():
+        bu = _brand_username()
+        if bu:
+            return ("\U0001F512 Bu panel sana ait değil.\n\n"
+                    "Bu özelliği kullanmak için @%s userbotunu kullanabilirsin!" % bu)
+        return "\U0001F512 Bu panel sana ait değil. Bu özellik için userbot kullan!"
+
+    def _list_markup(owner, page):
+        data = getattr(bot, "_yt_search", {}).get(owner) or {}
+        items = data.get("items", [])
+        total = len(items)
+        pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+        page = max(0, min(page, pages - 1))
+        start = page * PER_PAGE
+        chunk = items[start:start + PER_PAGE]
+        text = "\U0001F50D **YouTube Arama Sonuçları**\n\nBir sonuca dokun → indirme türünü seç:"
+        rows = []
+        for j, it in enumerate(chunk):
+            gidx = start + j
+            label = "%d. %s (%s)" % (gidx + 1, it["title"][:38], it.get("dur", "?"))
+            rows.append([_Btn.inline(label, ("ytpk_%d_%d_%d" % (owner, gidx, page)).encode())])
+        nav = []
+        if page > 0:
+            nav.append(_Btn.inline("\u25C0\uFE0F Önceki", ("ytpg_%d_%d" % (owner, page - 1)).encode()))
+        nav.append(_Btn.inline("%d/%d" % (page + 1, pages), b"ytnoop"))
+        if page < pages - 1:
+            nav.append(_Btn.inline("Sonraki \u25B6\uFE0F", ("ytpg_%d_%d" % (owner, page + 1)).encode()))
+        rows.append(nav)
+        return text, rows
+
+    def _pick_markup(owner, idx, page):
+        data = getattr(bot, "_yt_search", {}).get(owner) or {}
+        items = data.get("items", [])
+        title = items[idx]["title"] if 0 <= idx < len(items) else "?"
+        text = "\U0001F3A7 **Seçildi:** %s\n\nNasıl indireyim?" % title[:60]
+        rows = [
+            [_Btn.inline("\U0001F3AC Video İndir", ("ytgo_%d_%d_v" % (owner, idx)).encode()),
+             _Btn.inline("\U0001F3B5 Ses (MP3)", ("ytgo_%d_%d_a" % (owner, idx)).encode())],
+            [_Btn.inline("\U0001F519 Geri", ("ytpg_%d_%d" % (owner, page)).encode())],
+        ]
+        return text, rows
+
+    bot._yt_list_markup = _list_markup
+
+    @bot.on(_ev.InlineQuery())
+    async def _yt_search_inline(event):
+        m = _re.match(r"ytsq_(\d+)$", event.text or "")
+        if not m:
+            return
+        owner = int(m.group(1))
+        if not getattr(bot, "_yt_search", {}).get(owner):
+            return
+        text, rows = _list_markup(owner, 0)
         try:
-            fp = os.path.join(d, "invidious.txt")
-            if os.path.isfile(fp):
-                with open(fp, "r", encoding="utf-8") as fh:
-                    for line in fh:
-                        line = line.strip()
-                        if not line or line.startswith("#"):
-                            continue
-                        if not line.startswith("http"):
-                            line = "https://" + line
-                        insts.append(line.rstrip("/"))
-                break
+            result = event.builder.article(
+                title="\U0001F50D YouTube Arama",
+                description="Sonuç seç → Video/Ses indir",
+                text=text, buttons=rows)
+            await event.answer([result], cache_time=0)
         except Exception:
             pass
-    # 2) ortam degiskeni (virgulle ayrilmis)
-    env = os.environ.get("YT_INVIDIOUS")
-    if env:
-        insts += [x.strip().rstrip("/") for x in env.split(",") if x.strip()]
-    # 3) varsayilan guncel liste (resmi listeden)
-    insts += [
-        "https://inv.nadeko.net",
-        "https://invidious.nerdvpn.de",
-        "https://yewtu.be",
-        "https://yt.artemislena.eu",
-        "https://invidious.flokinet.to",
-        "https://invidious.private.coffee",
-        "https://inv.tux.pizza",
-        "https://invidious.privacydev.net",
-    ]
-    seen, out = set(), []
-    for i in insts:
-        if i and i not in seen:
-            seen.add(i); out.append(i)
-    return out
 
+    @bot.on(_ev.CallbackQuery(pattern=rb"ytnoop"))
+    async def _yt_noop(event):
+        try:
+            await event.answer()
+        except Exception:
+            pass
 
-async def _inv_fetch(query, is_url, dl_dir, want_video=False):
-    """yt-dlp başarısızsa Invidious üzerinden indir (indirme instance'ın IP'sinden olur).
-    En iyi çaba — public instance'lar değişir/engellenebilir. (path, title) döndürür."""
-    try:
-        import aiohttp
-    except Exception:
-        return None, None
-    vid = _yt_id(query) if is_url else None
-    timeout = aiohttp.ClientTimeout(total=90, connect=12, sock_read=60)
-    try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            for inst in _invidious_instances():
+    @bot.on(_ev.CallbackQuery(pattern=rb"ytpg_(\d+)_(\d+)"))
+    async def _yt_page_cb(event):
+        owner = int(event.pattern_match.group(1))
+        page = int(event.pattern_match.group(2))
+        if event.sender_id != owner:
+            await event.answer(_not_yours(), alert=True); return
+        text, rows = _list_markup(owner, page)
+        try:
+            await event.edit(text, buttons=rows)
+        except Exception:
+            pass
+
+    @bot.on(_ev.CallbackQuery(pattern=rb"ytpk_(\d+)_(\d+)_(\d+)"))
+    async def _yt_pick_cb(event):
+        owner = int(event.pattern_match.group(1))
+        idx = int(event.pattern_match.group(2))
+        page = int(event.pattern_match.group(3))
+        if event.sender_id != owner:
+            await event.answer(_not_yours(), alert=True); return
+        text, rows = _pick_markup(owner, idx, page)
+        try:
+            await event.edit(text, buttons=rows)
+        except Exception:
+            pass
+
+    @bot.on(_ev.CallbackQuery(pattern=rb"ytgo_(\d+)_(\d+)_([av])"))
+    async def _yt_go_cb(event):
+        owner = int(event.pattern_match.group(1))
+        idx = int(event.pattern_match.group(2))
+        kind = event.pattern_match.group(3).decode()
+        if event.sender_id != owner:
+            await event.answer(_not_yours(), alert=True); return
+        data = getattr(bot, "_yt_search", {}).get(owner)
+        items = (data or {}).get("items", [])
+        if not data or idx >= len(items):
+            await event.answer("Arama süresi doldu, tekrar `.ytara` yaz.", alert=True); return
+        from userbot.smart_manager import smart_session_manager
+        client = smart_session_manager.get_client(owner)
+        if client is None:
+            await event.answer("Userbot aktif değil, önce bir komut çalıştır.", alert=True); return
+        it = items[idx]
+        url = "https://youtu.be/%s" % it["id"]
+        chat_id = data.get("chat_id")
+        title = it.get("title", "?")
+        mod = "Ses (MP3)" if kind == "a" else "Video"
+        await event.answer("⏳ İndiriliyor...")
+
+        # Paneli sil — kim gönderdiyse o silsin (inline=userbot, özel=bot)
+        pid = data.get("panel_msg_id")
+        pchat = data.get("panel_chat", chat_id)
+        if pid:
+            try:
+                if data.get("panel_by_bot"):
+                    await bot.delete_messages(pchat, [pid])
+                else:
+                    await client.delete_messages(pchat, [pid])
+            except Exception:
+                pass
+
+        # Net durum mesajı: indiriliyor mu belli olsun
+        status = None
+        try:
+            status = await client.send_message(
+                chat_id, "⏳ **%s** indiriliyor... (%s)" % (title[:50], mod))
+        except Exception:
+            status = None
+
+        dl_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "yt_pick_%d" % owner)
+        os.makedirs(dl_dir, exist_ok=True)
+        _clean_dir(dl_dir)
+        try:
+            if kind == "a":
+                path, meta, thumb, err = await _download_audio(url, dl_dir)
+            else:
+                path, meta, thumb, err = await _download_video(url, dl_dir)
+            if not path:
+                if status:
+                    try:
+                        await status.edit("❌ **%s** indirilemedi." % title[:50])
+                    except Exception:
+                        pass
+                return
+            if kind == "a":
+                await _send_audio(client, chat_id, path, meta, thumb)
+            else:
+                await _send_video(client, chat_id, path, meta, thumb)
+            if status:
                 try:
-                    title = None
-                    if not vid:
-                        async with session.get(inst + "/api/v1/search",
-                                               params={"q": query, "type": "video"}) as r:
-                            if r.status != 200:
-                                continue
-                            data = await r.json()
-                        vids = [d for d in (data or []) if d.get("videoId")]
-                        if not vids:
-                            continue
-                        vid = vids[0].get("videoId")
-                        title = vids[0].get("title")
-                    if not vid:
-                        continue
-                    # format bilgisi
-                    itag = 22 if want_video else 140
-                    ext = "mp4" if want_video else "m4a"
-                    try:
-                        async with session.get(inst + "/api/v1/videos/" + vid) as r:
-                            if r.status == 200:
-                                info = await r.json()
-                                title = title or info.get("title")
-                                if want_video:
-                                    best_h = 0
-                                    for f in info.get("formatStreams", []):
-                                        try:
-                                            h = int((f.get("resolution") or "0p").rstrip("p"))
-                                        except Exception:
-                                            h = 0
-                                        if 0 < h <= 720 and h >= best_h:
-                                            best_h = h
-                                            itag = int(f.get("itag") or 22)
-                                else:
-                                    best = 0
-                                    for f in info.get("adaptiveFormats", []):
-                                        if "audio" in (f.get("type") or ""):
-                                            br = int(f.get("bitrate") or 0)
-                                            if br >= best:
-                                                best = br
-                                                itag = int(f.get("itag") or 140)
-                    except Exception:
-                        pass
-                    url = "%s/latest_version?id=%s&itag=%s&local=true" % (inst, vid, itag)
-                    out = os.path.join(dl_dir, "%s.%s" % (vid, ext))
-                    async with session.get(url) as r:
-                        if r.status != 200:
-                            continue
-                        with open(out, "wb") as fp:
-                            async for chunk in r.content.iter_chunked(65536):
-                                fp.write(chunk)
-                    if os.path.isfile(out) and os.path.getsize(out) > 20480:
-                        return out, (title or ("Video" if want_video else "Müzik"))
-                    try:
-                        os.remove(out)
-                    except Exception:
-                        pass
+                    await status.delete()
                 except Exception:
-                    continue
-    except Exception:
-        pass
-    return None, None
+                    pass
+        except Exception:
+            if status:
+                try:
+                    await status.edit("❌ Gönderilemedi.")
+                except Exception:
+                    pass
+        finally:
+            _clean_dir(dl_dir)
 
 
-@register(outgoing=True, pattern=r"^\.m[uü]zik(?:\s+(.+))?$")
-async def music_download(event):
+async def _resolve_target(event, query):
+    """query'yi indirilecek hedefe çevir:
+      • YouTube linki → doğrudan
+      • sadece numara → o sohbetteki son .ytara sonucundan URL
+      • serbest metin → ytsearch1: ile ara
+    """
+    q = (query or "").strip()
+    if is_youtube_url(q):
+        return q
+    pick = _resolve_pick(event, q)
+    if pick:
+        return pick
+    return "ytsearch1:%s" % _sanitize(q)
+
+
+@register(outgoing=True, pattern=r"^\.indir(?:\s+(.+))?$")
+async def indir_audio(event):
+    """MP3 indir. Kullanım: .indir <şarkı/link/numara>"""
     if event.fwd_from:
         return
     query = event.pattern_match.group(1)
     if not query:
         await event.edit(
-            "**🎵 YouTube Müzik İndirme**\n\n"
-            "`.müzik <şarkı adı>` — arayıp indirir\n"
-            "`.müzik <youtube linki>` — direkt indirir"
+            "**🎵 YouTube MP3 İndirme**\n\n"
+            "`.indir <şarkı adı>` — arayıp indirir\n"
+            "`.indir <youtube linki>` — direkt indirir\n"
+            "`.indir <numara>` — son `.ytara` sonucundan seçer"
         )
         return
-
-    is_url = is_youtube_url(query)
-    target = query.strip() if is_url else "ytsearch1:%s" % _sanitize(query)
-
+    target = await _resolve_target(event, query)
     await event.edit("`🎵 İndiriliyor...`")
-    dl_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "yt_music")
+    # Operatörün KENDİ id'sine göre klasör: eşzamanlı indirmede dosyalar karışmaz
+    owner = (await event.client.get_me()).id
+    dl_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "dl_audio_%d" % owner)
     os.makedirs(dl_dir, exist_ok=True)
     _clean_dir(dl_dir)
     try:
-        path, meta, err = await _download_audio(target, dl_dir)
+        path, meta, thumb, err = await _download_audio(target, dl_dir)
         if not path:
-            await event.edit("`🔁 Invidious deneniyor...`")
-            ipath, ititle = await _inv_fetch(query, is_url, dl_dir, want_video=False)
-            if ipath:
-                path, meta = ipath, (ititle, "YouTube", 0)
-        if not path:
-            _ck = _find_cookies()
-            _ci = ("🍪 cookie: %s" % _ck) if _ck else "🍪 cookie: BULUNAMADI"
-            await event.edit(
-                "`❌ İndirilemedi`\n%s\n\n`%s`" % (_ci, _last_err_line(err)))
+            await event.edit("`❌ İndirilemedi:` `%s`" % _last_err_line(err))
             return
         size = os.path.getsize(path)
         if size > MAX_AUDIO_MB * 1024 * 1024:
             await event.edit("`❌ Dosya çok büyük (>%dMB)!`" % MAX_AUDIO_MB)
             return
-        title, performer, duration = meta
         await event.edit("`📤 Gönderiliyor: %s`" % _fmt_size(size))
-        try:
-            from telethon.tl.types import DocumentAttributeAudio
-            attrs = [DocumentAttributeAudio(duration=duration, title=title, performer=performer)]
-        except Exception:
-            attrs = []
-        await event.client.send_file(
-            event.chat_id,
-            path,
-            caption="🎵 **%s**" % (title or "Müzik"),
-            attributes=attrs,
-            force_document=False,
-        )
+        await _send_audio(event.client, event.chat_id, path, meta, thumb)
         await event.delete()
     except Exception as e:
         await event.edit("`❌ Gönderme hatası: %s`" % e)
@@ -384,51 +527,37 @@ async def music_download(event):
         _clean_dir(dl_dir)
 
 
-@register(outgoing=True, pattern=r"^\.video(?:\s+(.+))?$")
-async def video_download(event):
+@register(outgoing=True, pattern=r"^\.vindir(?:\s+(.+))?$")
+async def vindir_video(event):
+    """Video indir (720p). Kullanım: .vindir <video/link/numara>"""
     if event.fwd_from:
         return
     query = event.pattern_match.group(1)
     if not query:
         await event.edit(
             "**🎬 YouTube Video İndirme**\n\n"
-            "`.video <video adı>` — arayıp indirir\n"
-            "`.video <youtube linki>` — direkt indirir"
+            "`.vindir <video adı>` — arayıp indirir\n"
+            "`.vindir <youtube linki>` — direkt indirir\n"
+            "`.vindir <numara>` — son `.ytara` sonucundan seçer"
         )
         return
-
-    is_url = is_youtube_url(query)
-    target = query.strip() if is_url else "ytsearch1:%s" % _sanitize(query)
-
+    target = await _resolve_target(event, query)
     await event.edit("`🎬 İndiriliyor...`")
-    dl_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "yt_video")
+    owner = (await event.client.get_me()).id
+    dl_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "dl_video_%d" % owner)
     os.makedirs(dl_dir, exist_ok=True)
     _clean_dir(dl_dir)
     try:
-        path, meta, err = await _download_video(target, dl_dir)
+        path, meta, thumb, err = await _download_video(target, dl_dir)
         if not path:
-            await event.edit("`🔁 Invidious deneniyor...`")
-            ipath, ititle = await _inv_fetch(query, is_url, dl_dir, want_video=True)
-            if ipath:
-                path, meta = ipath, (ititle, "YouTube", 0)
-        if not path:
-            _ck = _find_cookies()
-            _ci = ("🍪 cookie: %s" % _ck) if _ck else "🍪 cookie: BULUNAMADI"
-            await event.edit(
-                "`❌ İndirilemedi`\n%s\n\n`%s`" % (_ci, _last_err_line(err)))
+            await event.edit("`❌ İndirilemedi:` `%s`" % _last_err_line(err))
             return
         size = os.path.getsize(path)
         if size > MAX_VIDEO_MB * 1024 * 1024:
             await event.edit("`❌ Dosya çok büyük (>%dMB)!`" % MAX_VIDEO_MB)
             return
-        title, performer, duration = meta
         await event.edit("`📤 Gönderiliyor: %s`" % _fmt_size(size))
-        await event.client.send_file(
-            event.chat_id,
-            path,
-            caption="🎬 **%s**" % (title or "Video"),
-            supports_streaming=True,
-        )
+        await _send_video(event.client, event.chat_id, path, meta, thumb)
         await event.delete()
     except Exception as e:
         await event.edit("`❌ Gönderme hatası: %s`" % e)
@@ -445,22 +574,20 @@ async def yt_search(event):
         await event.edit("`❌ Aranacak şeyi yaz: .ytara <sorgu>`")
         return
 
-    await event.edit("`🔍 Aranıyor: %s`" % query)
+    await event.edit("`\U0001F50D Aranıyor: %s`" % query)
     cookies = _find_cookies()
     ck = ' --cookies "%s"' % cookies if cookies else ""
-    cmd = (
-        _ytdlp() + ' "ytsearch5:%s" --get-id --get-title --get-duration '
-        '--no-warnings'
-    ) % _sanitize(query) + ck + _extra_args()
+    cmd = (_ytdlp() + ' "ytsearch10:%s" --get-id --get-title --get-duration '
+           '--no-warnings') % _sanitize(query) + ck + _extra_args()
     out, err, code = await run_command(cmd)
     if code != 0 or not out.strip():
         await event.edit("`❌ Sonuç bulunamadı.`")
         return
 
     lines = out.strip().split("\n")
-    results = []
+    items = []
     i, count = 0, 1
-    while i + 1 < len(lines) and count <= 5:
+    while i + 1 < len(lines) and count <= 10:
         title = lines[i]
         video_id = lines[i + 1]
         duration = lines[i + 2] if i + 2 < len(lines) else "?"
@@ -469,22 +596,77 @@ async def yt_search(event):
             duration = "%d:%02d" % (d // 60, d % 60)
         except Exception:
             duration = "?"
-        url = "https://youtu.be/%s" % video_id
-        ts = title[:40] + "..." if len(title) > 40 else title
-        results.append("`%d.` [%s](%s) `(%s)`" % (count, ts, url, duration))
+        items.append({"id": video_id, "title": title, "dur": duration})
         count += 1
         i += 3
-    if results:
-        text = "**🔍 YouTube Arama: %s**\n\n" % query + "\n".join(results)
-        text += "\n\n_İndir: `.müzik <link>` veya `.video <link>`_"
-        await event.edit(text, link_preview=False)
-    else:
+    if not items:
         await event.edit("`❌ Sonuç bulunamadı.`")
+        return
+
+    # Numaralı seçim için hafızaya al (.indir <n> / .vindir <n> fallback)
+    _LAST_SEARCH[event.chat_id] = items
+
+    # BUTONLU sayfalı panel (dokun → sonuç seç → Video/Ses indir)
+    bu = _brand_username()
+    bot = _get_bot()
+    if bu and bot is not None:
+        _register_dl_bot_handlers(bot)
+        if not hasattr(bot, "_yt_search"):
+            bot._yt_search = {}
+        owner = (await event.client.get_me()).id
+
+        # 1) Bu sohbette inline panel dene
+        try:
+            bot._yt_search[owner] = {"chat_id": event.chat_id, "items": items,
+                                     "panel_msg_id": None, "panel_chat": event.chat_id,
+                                     "panel_by_bot": False}
+            res = await event.client.inline_query(bu, "ytsq_%d" % owner)
+            if res:
+                sent = await res[0].click(event.chat_id)
+                try:
+                    bot._yt_search[owner]["panel_msg_id"] = getattr(sent, "id", None)
+                except Exception:
+                    pass
+                try:
+                    await event.delete()
+                except Exception:
+                    pass
+                return
+        except Exception:
+            pass  # inline kapalı → bot özelden göndersin
+
+        # 2) Inline kapalı → paneli BOT ÖZEL sohbetinden gönder (medya da özele)
+        try:
+            render = getattr(bot, "_yt_list_markup", None)
+            bot._yt_search[owner] = {"chat_id": owner, "items": items,
+                                     "panel_msg_id": None, "panel_chat": owner,
+                                     "panel_by_bot": True}
+            if render:
+                ptext, prows = render(owner, 0)
+            else:
+                ptext, prows = ("🔍 YouTube Arama Sonuçları", None)
+            msg = await bot.send_message(owner, ptext, buttons=prows)
+            bot._yt_search[owner]["panel_msg_id"] = getattr(msg, "id", None)
+            await event.edit(
+                "⚠️ **Bu sohbette satır içi (inline) mod kapalı.**\n"
+                "Arama paneli sana **özelden (bot sohbeti)** gönderildi. 📩\n"
+                "_Seçtiğin şarkı/video oraya indirilecek._")
+            return
+        except Exception:
+            pass
+
+    # 3) Son çare: numaralı metin (.indir <numara> ile seç)
+    lines2 = ["`%d.` %s `(%s)`" % (n + 1, it["title"][:40], it["dur"])
+              for n, it in enumerate(items)]
+    text = "**🔍 YouTube Arama: %s**\n\n" % query + "\n".join(lines2)
+    text += "\n\n🎵 MP3: `.indir <numara>`  ·  🎬 Video: `.vindir <numara>`"
+    await event.edit(text, link_preview=False)
 
 
 CMD_HELP.update({
     "youtube":
-    "`.müzik <şarkı/link>` - YouTube'dan MP3 indir\n"
-    "`.video <video/link>` - YouTube'dan video indir (720p)\n"
-    "`.ytara <sorgu>` - YouTube'da arama yap"
+    "`.indir <şarkı/link/numara>` - YouTube'dan MP3 indir (kapak + marka etiketli)\n"
+    "`.vindir <video/link/numara>` - YouTube'dan video indir (720p)\n"
+    "`.ytara <sorgu>` - Butonlu sayfalı arama: sonuç seç → Video/Ses indir\n"
+    "_(.müzik/.video eski adlar olarak da çalışır)_"
 })

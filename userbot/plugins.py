@@ -31,6 +31,11 @@ class PluginManager:
         self._compat_installed = False
         self._installed_packages: Set[str] = set()  # Kurulu paket cache
         self._packages_checked = False
+        # B1 düzeltmesi: eski stil (@register) pluginler global `_client`
+        # okuduğu için, iki kullanıcı aynı anda plugin aktive ederse
+        # handler yanlış hesaba bağlanabilir. Bu kilit, `set_client -> exec ->
+        # register` kritik bölgesini kullanıcılar arasında atomik tutar.
+        self._activation_lock = asyncio.Lock()
     
     async def preinstall_all_dependencies(self):
         """Tüm pluginlerin bağımlılıklarını önceden kur"""
@@ -373,8 +378,15 @@ class PluginManager:
             except Exception:
                 pass
             
-            patterns = re.findall(r"pattern\s*=\s*[rf]?['\"][\^]?\.?(\w+)", content)
-            info["commands"] = list(set(patterns))
+            # Komutları pattern string'lerinden çıkar (kaçışlı '\.' ve '(?: )' grupları dahil)
+            cmds = []
+            for _pm in re.finditer(r"pattern\s*=\s*[rfb]{0,2}(['\"])(.*?)\1", content, re.DOTALL):
+                _body = _pm.group(2)
+                for _cm in re.finditer(r"\\?\.\(?\??:?(\w+)", _body):
+                    _w = _cm.group(1)
+                    if _w and _w not in cmds:
+                        cmds.append(_w)
+            info["commands"] = cmds
             
             for line in content.split('\n')[:30]:
                 line = line.strip()
@@ -529,47 +541,50 @@ class PluginManager:
         
         # Plugin'i yükle - exec kullanarak
         try:
-            # userbot_compat'ı hazırla
-            try:
-                from userbot_compat import events as compat_events
-                compat_events.set_client(client)
-            except Exception as e:
-                log.error("compat_events hatası", exc_info=True)
-            
-            # Modül için namespace oluştur
-            module_name = f"plugin_{plugin_name}_{user_id}"
-            
-            # Yeni modül oluştur
-            import types
-            module = types.ModuleType(module_name)
-            module.__file__ = file_path
-            module.__name__ = module_name
-            module.client = client
-            
-            # Modülü sys.modules'a ekle
-            sys.modules[module_name] = module
-            
-            # Mevcut handler sayısını kaydet (önceki durum)
-            handlers_before = len(client.list_event_handlers())
-            
-            # Kodu çalıştır
-            exec(compile(patched_content, file_path, 'exec'), module.__dict__)
-            
-            # Register fonksiyonu varsa çağır (eski stil)
-            if hasattr(module, 'register') and callable(module.register):
-                module.register(client)
-            
-            # register_handlers fonksiyonu varsa çağır (yeni stil)
-            if hasattr(module, 'register_handlers') and callable(module.register_handlers):
+            # B1: global `_client` yarış durumunu önlemek için, compat kurulumu
+            # ve handler kaydını (senkron kritik bölge) kilit altında yap.
+            async with self._activation_lock:
+                # userbot_compat'ı hazırla
                 try:
-                    module.register_handlers(client, user_id)
-                    log.info("register_handlers çağrıldı: %s", plugin_name)
-                except Exception as e:
-                    log.error("register_handlers hatası", exc_info=True)
-            
-            # Yeni eklenen handler'ları tespit et ve kaydet
-            handlers_after = client.list_event_handlers()
-            new_handlers = handlers_after[handlers_before:]
+                    from userbot_compat import events as compat_events
+                    compat_events.set_client(client)
+                except Exception:
+                    log.error("compat_events hatası", exc_info=True)
+
+                # Modül için namespace oluştur
+                module_name = f"plugin_{plugin_name}_{user_id}"
+
+                # Yeni modül oluştur
+                import types
+                module = types.ModuleType(module_name)
+                module.__file__ = file_path
+                module.__name__ = module_name
+                module.client = client
+
+                # Modülü sys.modules'a ekle
+                sys.modules[module_name] = module
+
+                # Mevcut handler sayısını kaydet (önceki durum)
+                handlers_before = len(client.list_event_handlers())
+
+                # Kodu çalıştır
+                exec(compile(patched_content, file_path, 'exec'), module.__dict__)
+
+                # Register fonksiyonu varsa çağır (eski stil)
+                if hasattr(module, 'register') and callable(module.register):
+                    module.register(client)
+
+                # register_handlers fonksiyonu varsa çağır (yeni stil)
+                if hasattr(module, 'register_handlers') and callable(module.register_handlers):
+                    try:
+                        module.register_handlers(client, user_id)
+                        log.info("register_handlers çağrıldı: %s", plugin_name)
+                    except Exception:
+                        log.error("register_handlers hatası", exc_info=True)
+
+                # Yeni eklenen handler'ları tespit et ve kaydet
+                handlers_after = client.list_event_handlers()
+                new_handlers = handlers_after[handlers_before:]
             
             # Handler'ları kullanıcı ve plugin bazında sakla
             if user_id not in self.user_handlers:
@@ -929,9 +944,19 @@ class PluginManager:
             name = fn[:-3]
             if name.startswith("_") or name.startswith("temp_") or name == "__init__":
                 continue
-            if name in existing:
-                continue
             path = os.path.join(config.PLUGINS_DIR, fn)
+            if name in existing:
+                # Var olan plugin: komut/açıklama metadatasını dosyadan TAZELE
+                # (is_public/premium/izin gibi admin ayarlarına dokunmaz)
+                try:
+                    _info = self.extract_plugin_info(path)
+                    await _db.update_plugin(name, {
+                        "commands": _info.get("commands", []),
+                        "description": _info.get("description", ""),
+                    })
+                except Exception:
+                    pass
+                continue
             try:
                 info = self.extract_plugin_info(path)
                 await _db.add_plugin(

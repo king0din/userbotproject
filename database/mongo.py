@@ -2,10 +2,9 @@
 # KingTG UserBot Service - MongoDB İşlemleri
 # ============================================
 
-import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List
 import config
 import logging
 
@@ -19,17 +18,23 @@ class MongoDB:
         self.connected = False
     
     async def connect(self):
-        """MongoDB'ye bağlan"""
+        """MongoDB'ye bağlan. Placeholder/boş URI'de hiç denemez (temiz başlangıç)."""
+        uri = (config.MONGO_URI or "").strip()
+        # Örnek/placeholder değerler → yerel dosya sistemine geç, DNS hatası basma
+        if (not uri) or ("CLUSTER.mongodb.net" in uri) or ("KULLANICI" in uri) or ("<" in uri):
+            log.info("MONGO_URI ayarlı değil ya da placeholder — yerel dosya sistemi kullanılacak.")
+            self.connected = False
+            return False
         try:
-            self.client = AsyncIOMotorClient(config.MONGO_URI)
+            # Hızlı başarısızlık için kısa sunucu seçimi zaman aşımı
+            self.client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=5000)
             self.db = self.client[config.MONGO_DB_NAME]
-            # Bağlantıyı test et
             await self.client.admin.command('ping')
             self.connected = True
             log.info("MongoDB bağlantısı başarılı")
             return True
-        except Exception as e:
-            log.error("MongoDB bağlantı hatası", exc_info=True)
+        except Exception:
+            log.warning("MongoDB'ye bağlanılamadı — yerel dosya sistemine geçiliyor.")
             self.connected = False
             return False
     

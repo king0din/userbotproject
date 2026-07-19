@@ -162,8 +162,8 @@ async def _render_premium_settings(event, target_user_id, gi):
         text = (f"💎 **{name} — Tip Seçimi**\n\n"
                 "Bu plugin yeni eklendi. Nasıl sunulacak?\n\n"
                 "🌐 **Genel** — herkes ücretsiz kullanır\n"
-                "🔒 **Özel** — sadece izin verdiğin kullanıcılar\n"
-                "💎 **Premium** — yıldız karşılığı abonelik")
+                "💎 **Premium** — yıldız karşılığı abonelik\n\n"
+                "ℹ️ Kullanıcıya özel/kısıtlama plugin detayından yönetilir.")
     else:
         tl = premium.TYPE_LABELS.get(ptype, ptype)
         text = f"💎 **{name} — Premium Ayarları**\n\nTip: {tl}"
@@ -176,7 +176,6 @@ async def _render_premium_settings(event, target_user_id, gi):
         return ("✅ " if (configured and ptype == t) else "") + premium.TYPE_LABELS.get(t, t)
     buttons = [[
         Button.inline(_mk("genel"), f"ipty_{target_user_id}_{gi}_genel".encode()),
-        Button.inline(_mk("ozel"), f"ipty_{target_user_id}_{gi}_ozel".encode()),
         Button.inline(_mk("premium"), f"ipty_{target_user_id}_{gi}_premium".encode()),
     ]]
     if configured and ptype == "premium":
@@ -701,6 +700,13 @@ def register_bot_handlers(bot):
         name = await _pset_name(event, gi)
         if name and t in premium.TYPES:
             premium.set_config(name, ptype=t)
+            # Admin paneliyle AYNI senkron: premium yapılınca erişim 'Genel'e çekilir
+            # (premium kapısı erişimi zaten yönetir) → iki panel asla çakışmaz.
+            if t == "premium":
+                try:
+                    await db.update_plugin(name, {"is_public": True})
+                except Exception:
+                    pass
             try:
                 await event.answer(f"Tip: {premium.TYPE_LABELS.get(t, t)}")
             except Exception:
@@ -949,7 +955,6 @@ def register_bot_handlers(bot):
 
 def register_handlers(client, user_id):
     """Userbot handler'larını kaydet"""
-    global _handlers
     
     # Bot handler'larını kaydet (bir kez)
     bot = get_bot()
@@ -1186,7 +1191,6 @@ def register_handlers(client, user_id):
 
 def unregister_handlers(client, user_id):
     """Handler'ları kaldır"""
-    global _handlers
     if user_id in _handlers:
         for h, e in _handlers[user_id]:
             try:
