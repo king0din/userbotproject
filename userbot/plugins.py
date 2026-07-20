@@ -544,6 +544,13 @@ class PluginManager:
             # B1: global `_client` yarış durumunu önlemek için, compat kurulumu
             # ve handler kaydını (senkron kritik bölge) kilit altında yap.
             async with self._activation_lock:
+                # YARIŞ KORUMASI: "zaten aktif" kontrolü kilit DIŞINDA yapıldığı için,
+                # iki eşzamanlı aktivasyon (paralel yükleme) kilidi beklerken ikisi de
+                # geçebilir; kilit içinde TEKRAR kontrol et → aksi halde plugin ikinci
+                # kez exec edilip handler'lar ÇİFT kaydolur (komutlar iki kez tetiklenir).
+                if plugin_name in self.user_active_plugins.get(user_id, {}):
+                    return True, f"`{plugin_name}` zaten aktif"
+
                 # userbot_compat'ı hazırla
                 try:
                     from userbot_compat import events as compat_events

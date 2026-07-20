@@ -332,6 +332,11 @@ async def build_main_menu(user_id, user_first_name):
                     icon_custom_emoji_id=5832365506916523096)
     ])
 
+    # Dil seçimi
+    rows.append([
+        btn.callback("🌐 Dil / Language", "lang_menu", style=ButtonBuilder.STYLE_PRIMARY)
+    ])
+
     # Plugin Kanalı
     rows.append([
         btn.url(f" {config.PLUGIN_CHANNEL}", f"https://t.me/{config.PLUGIN_CHANNEL}",

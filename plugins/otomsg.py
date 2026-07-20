@@ -37,6 +37,44 @@ from telethon.errors import (
 from userbot import bot
 from userbot.events import register as r
 from userbot.cmdhelp import CmdHelp
+import utils.i18n as _i18n
+# === i18n yardımcıları (start.py ile aynı desen) ===
+
+async def _sedit(event, text, buttons=None):
+    try:
+        lang = _i18n.get_user_lang_cached(getattr(event, "sender_id", None))
+        if lang and lang != _i18n.SOURCE_LANG:
+            if isinstance(text, str) and text:
+                text = await _i18n.translate(text, lang)
+            if buttons:
+                buttons = await _i18n.translate_telethon_buttons(buttons, lang)
+    except Exception:
+        pass
+    return await event.edit(text, buttons=buttons)
+
+
+async def _sans(event, text=None, **kw):
+    try:
+        if isinstance(text, str) and text:
+            lang = _i18n.get_user_lang_cached(getattr(event, "sender_id", None))
+            if lang and lang != _i18n.SOURCE_LANG:
+                text = await _i18n.translate(text, lang)
+    except Exception:
+        pass
+    if text is None:
+        return await event.answer(**kw)
+    return await event.answer(text, **kw)
+
+
+async def _tbtns(uid, buttons):
+    try:
+        lang = _i18n.get_user_lang_cached(uid)
+        if lang and lang != _i18n.SOURCE_LANG and buttons:
+            return await _i18n.translate_telethon_buttons(buttons, lang)
+    except Exception:
+        pass
+    return buttons
+
 
 # ==========================================
 # SÜRE AYRIŞTIRICISI
@@ -737,8 +775,8 @@ async def _show_om_flow_panel(q, pid):
         pend = _om_pending_store(bot).get(pid)
         if not pend or not pend.get("owner"):
             return False
-        await bot.send_message(pend["owner"], _om_interval_text(pend),
-                               buttons=_om_interval_buttons(pid))
+        _ib = await _tbtns(pend["owner"], _om_interval_buttons(pid))
+        await bot.send_message(pend["owner"], _om_interval_text(pend), buttons=_ib)
         return True
     except Exception:
         return False
@@ -760,7 +798,8 @@ async def _show_om_help_panel(q, owner):
             pass
     if bot is not None:
         try:
-            await bot.send_message(owner, _om_help_text(), buttons=_om_help_buttons(owner))
+            _hb = await _tbtns(owner, _om_help_buttons(owner))
+            await bot.send_message(owner, _om_help_text(), buttons=_hb)
             return True
         except Exception:
             pass
@@ -788,7 +827,7 @@ def _register_otomsg_bot_handlers(bot):
                 text=text,
                 buttons=_omsg_page_buttons(owner, 0, total_pages) if total_pages else None,
             )
-            await event.answer([result], cache_time=0)
+            await _sans(event, [result], cache_time=0)
         except Exception:
             pass
 
@@ -797,11 +836,11 @@ def _register_otomsg_bot_handlers(bot):
         owner = int(event.pattern_match.group(1))
         page = int(event.pattern_match.group(2))
         if event.sender_id != owner:
-            await event.answer("Bu liste sana ait değil.", alert=True)
+            await _sans(event, "Bu liste sana ait değil.", alert=True)
             return
         text, total_pages, total = _render_omsg_page(owner, page)
         try:
-            await event.edit(text, buttons=_omsg_page_buttons(owner, page, total_pages) if total_pages else None)
+            await _sedit(event, text, buttons=_omsg_page_buttons(owner, page, total_pages) if total_pages else None)
         except Exception:
             pass
 
@@ -809,10 +848,10 @@ def _register_otomsg_bot_handlers(bot):
     async def _omsg_cls_cb(event):
         owner = int(event.pattern_match.group(1))
         if event.sender_id != owner:
-            await event.answer("Bu liste sana ait değil.", alert=True)
+            await _sans(event, "Bu liste sana ait değil.", alert=True)
             return
         try:
-            await event.edit("✅ Liste kapatıldı.")
+            await _sedit(event, "✅ Liste kapatıldı.")
         except Exception:
             pass
 
@@ -830,7 +869,7 @@ def _register_otomsg_bot_handlers(bot):
                     text=_om_interval_text(),
                     buttons=_om_interval_buttons(pid),
                 )
-                await event.answer([result], cache_time=0)
+                await _sans(event, [result], cache_time=0)
             except Exception:
                 pass
         elif mh:
@@ -842,7 +881,7 @@ def _register_otomsg_bot_handlers(bot):
                     text=_om_help_text(),
                     buttons=_om_help_buttons(owner),
                 )
-                await event.answer([result], cache_time=0)
+                await _sans(event, [result], cache_time=0)
             except Exception:
                 pass
 
@@ -852,11 +891,11 @@ def _register_otomsg_bot_handlers(bot):
         minutes = int(event.pattern_match.group(2).decode())
         pend = _om_pending_store(bot).get(pid)
         if not pend or event.sender_id != pend.get("owner"):
-            await event.answer("Bu menü sana ait değil veya süresi doldu.", alert=True)
+            await _sans(event, "Bu menü sana ait değil veya süresi doldu.", alert=True)
             return
         pend["interval"] = minutes
         try:
-            await event.edit(_om_count_text(minutes, pend), buttons=_om_count_buttons(pid))
+            await _sedit(event, _om_count_text(minutes, pend), buttons=_om_count_buttons(pid))
         except Exception:
             pass
 
@@ -865,10 +904,10 @@ def _register_otomsg_bot_handlers(bot):
         pid = event.pattern_match.group(1).decode()
         pend = _om_pending_store(bot).get(pid)
         if not pend or event.sender_id != pend.get("owner"):
-            await event.answer("Bu menü sana ait değil veya süresi doldu.", alert=True)
+            await _sans(event, "Bu menü sana ait değil veya süresi doldu.", alert=True)
             return
         try:
-            await event.edit(_om_interval_text(pend), buttons=_om_interval_buttons(pid))
+            await _sedit(event, _om_interval_text(pend), buttons=_om_interval_buttons(pid))
         except Exception:
             pass
 
@@ -878,11 +917,11 @@ def _register_otomsg_bot_handlers(bot):
         store = _om_pending_store(bot)
         pend = store.get(pid)
         if pend and event.sender_id != pend.get("owner"):
-            await event.answer("Bu menü sana ait değil.", alert=True)
+            await _sans(event, "Bu menü sana ait değil.", alert=True)
             return
         store.pop(pid, None)
         try:
-            await event.edit("❌ OtoMsg ekleme iptal edildi.")
+            await _sedit(event, "❌ OtoMsg ekleme iptal edildi.")
         except Exception:
             pass
 
@@ -893,7 +932,7 @@ def _register_otomsg_bot_handlers(bot):
         store = _om_pending_store(bot)
         pend = store.get(pid)
         if not pend or event.sender_id != pend.get("owner"):
-            await event.answer("Bu menü sana ait değil veya süresi doldu.", alert=True)
+            await _sans(event, "Bu menü sana ait değil veya süresi doldu.", alert=True)
             return
         owner = pend["owner"]
         minutes = pend.get("interval") or 1
@@ -903,12 +942,12 @@ def _register_otomsg_bot_handlers(bot):
         except Exception:
             client = None
         if client is None:
-            await event.answer("Hesap bağlantısı bulunamadı.", alert=True)
+            await _sans(event, "Hesap bağlantısı bulunamadı.", alert=True)
             return
         if _user_task_count(owner) >= OM_MAX_TASKS:
             store.pop(pid, None)
             try:
-                await event.edit(f"❌ En fazla {OM_MAX_TASKS} görev olabilir.")
+                await _sedit(event, f"❌ En fazla {OM_MAX_TASKS} görev olabilir.")
             except Exception:
                 pass
             return
@@ -926,7 +965,7 @@ def _register_otomsg_bot_handlers(bot):
         except Exception as e:
             store.pop(pid, None)
             try:
-                await event.edit(f"❌ Görev oluşturulamadı: {e}")
+                await _sedit(event, f"❌ Görev oluşturulamadı: {e}")
             except Exception:
                 pass
             return
@@ -934,7 +973,7 @@ def _register_otomsg_bot_handlers(bot):
         cnt_label = "sınırsız" if count == 0 else f"{count} kez"
         msg_short = (pend["text"][:60] + "…") if len(pend["text"]) > 60 else pend["text"]
         try:
-            await event.edit(
+            await _sedit(event, 
                 f"✅ **OtoMsg eklendi!**\n\n"
                 f"🆔 `{task_id}`\n"
                 f"💬 {pend['chat_title']}\n"
@@ -949,11 +988,11 @@ def _register_otomsg_bot_handlers(bot):
     async def _om_list_cb(event):
         owner = int(event.pattern_match.group(1).decode())
         if event.sender_id != owner:
-            await event.answer("Bu liste sana ait değil.", alert=True)
+            await _sans(event, "Bu liste sana ait değil.", alert=True)
             return
         text, total_pages, total = _render_omsg_page(owner, 0)
         try:
-            await event.edit(text, buttons=_omsg_page_buttons(owner, 0, total_pages) if total_pages else None)
+            await _sedit(event, text, buttons=_omsg_page_buttons(owner, 0, total_pages) if total_pages else None)
         except Exception:
             pass
 

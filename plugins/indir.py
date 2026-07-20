@@ -310,7 +310,8 @@ def _register_dl_bot_handlers(bot):
                     "Bu özelliği kullanmak için @%s userbotunu kullanabilirsin!" % bu)
         return "\U0001F512 Bu panel sana ait değil. Bu özellik için userbot kullan!"
 
-    def _list_markup(owner, page):
+    async def _list_markup(owner, page):
+        import utils.i18n as _i18n
         data = getattr(bot, "_yt_search", {}).get(owner) or {}
         items = data.get("items", [])
         total = len(items)
@@ -331,18 +332,30 @@ def _register_dl_bot_handlers(bot):
         if page < pages - 1:
             nav.append(_Btn.inline("Sonraki \u25B6\uFE0F", ("ytpg_%d_%d" % (owner, page + 1)).encode()))
         rows.append(nav)
+        lang = _i18n.get_user_lang_cached(owner)
+        if lang and lang != "tr":
+            text = await _i18n.translate(text, lang)
+            rows = await _i18n.translate_telethon_buttons(rows, lang, skip_prefixes=("ytpk",))
         return text, rows
 
-    def _pick_markup(owner, idx, page):
+    async def _pick_markup(owner, idx, page):
+        import utils.i18n as _i18n
         data = getattr(bot, "_yt_search", {}).get(owner) or {}
         items = data.get("items", [])
         title = items[idx]["title"] if 0 <= idx < len(items) else "?"
-        text = "\U0001F3A7 **Seçildi:** %s\n\nNasıl indireyim?" % title[:60]
+        lang = _i18n.get_user_lang_cached(owner)
+        sel, how = "\U0001F3A7 **Seçildi:**", "Nasıl indireyim?"
+        if lang and lang != "tr":
+            sel = await _i18n.translate(sel, lang)
+            how = await _i18n.translate(how, lang)
+        text = "%s %s\n\n%s" % (sel, title[:60], how)
         rows = [
             [_Btn.inline("\U0001F3AC Video İndir", ("ytgo_%d_%d_v" % (owner, idx)).encode()),
              _Btn.inline("\U0001F3B5 Ses (MP3)", ("ytgo_%d_%d_a" % (owner, idx)).encode())],
             [_Btn.inline("\U0001F519 Geri", ("ytpg_%d_%d" % (owner, page)).encode())],
         ]
+        if lang and lang != "tr":
+            rows = await _i18n.translate_telethon_buttons(rows, lang)
         return text, rows
 
     bot._yt_list_markup = _list_markup
@@ -355,7 +368,7 @@ def _register_dl_bot_handlers(bot):
         owner = int(m.group(1))
         if not getattr(bot, "_yt_search", {}).get(owner):
             return
-        text, rows = _list_markup(owner, 0)
+        text, rows = await _list_markup(owner, 0)
         try:
             result = event.builder.article(
                 title="\U0001F50D YouTube Arama",
@@ -378,7 +391,7 @@ def _register_dl_bot_handlers(bot):
         page = int(event.pattern_match.group(2))
         if event.sender_id != owner:
             await event.answer(_not_yours(), alert=True); return
-        text, rows = _list_markup(owner, page)
+        text, rows = await _list_markup(owner, page)
         try:
             await event.edit(text, buttons=rows)
         except Exception:
@@ -391,7 +404,7 @@ def _register_dl_bot_handlers(bot):
         page = int(event.pattern_match.group(3))
         if event.sender_id != owner:
             await event.answer(_not_yours(), alert=True); return
-        text, rows = _pick_markup(owner, idx, page)
+        text, rows = await _pick_markup(owner, idx, page)
         try:
             await event.edit(text, buttons=rows)
         except Exception:
@@ -642,7 +655,7 @@ async def yt_search(event):
                                      "panel_msg_id": None, "panel_chat": owner,
                                      "panel_by_bot": True}
             if render:
-                ptext, prows = render(owner, 0)
+                ptext, prows = await render(owner, 0)
             else:
                 ptext, prows = ("🔍 YouTube Arama Sonuçları", None)
             msg = await bot.send_message(owner, ptext, buttons=prows)

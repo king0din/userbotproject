@@ -42,7 +42,24 @@ def register(bot):
             admin_input_state.pop(event.sender_id, None)
         except Exception:
             pass
-        
+
+        # Otomatik dil tespiti (çeviri için): kayıtlı dil varsa onu, yoksa
+        # kullanıcının Telegram diline göre başlangıç dili ayarla.
+        try:
+            import utils.i18n as _i18n
+            _snd = await event.get_sender()
+            _ud = await db.get_user(event.sender_id)
+            _saved = (_ud or {}).get("lang")
+            if _saved:
+                _i18n.set_user_lang(event.sender_id, _saved)
+            else:
+                _dl = _i18n.default_lang_from_tg(getattr(_snd, "lang_code", None))
+                _i18n.set_user_lang(event.sender_id, _dl)
+                if _dl != "tr":
+                    await db.update_user(event.sender_id, {"lang": _dl})
+        except Exception:
+            pass
+
         # Deep link parametresi kontrol et
         param = event.pattern_match.group(1)
 
@@ -135,6 +152,59 @@ def register(bot):
     async def close_handler(event):
         await event.delete()
     
+
+    @bot.on(events.CallbackQuery(data=b"lang_menu"))
+    async def lang_menu_handler(event):
+        """Dil seçim menüsü — dil adları kendi dilinde (çeviri KAPALI)."""
+        import utils.i18n as _i18n
+        cur = _i18n.get_user_lang_cached(event.sender_id)
+        langs = _i18n.all_langs()
+        text = ("🌐 **Dil / Language**\n\n"
+                f"Şu an / Current: **{langs.get(cur, cur)}**\n\n"
+                "Bir dil seç / Choose your language:")
+        rows, row = [], []
+        for code, name in langs.items():
+            mark = "✅ " if code == cur else ""
+            row.append(btn.callback(mark + name, f"setlang_{code}"))
+            if len(row) == 2:
+                rows.append(row); row = []
+        if row:
+            rows.append(row)
+        rows.append([btn.callback(" Ana Menü / Home", "main_menu",
+                                  style=ButtonBuilder.STYLE_DANGER,
+                                  icon_custom_emoji_id=5832654562510511307)])
+        # translate=False → dil adları olduğu gibi kalsın (herkes kendi dilini bulsun)
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id,
+                                        text=text, reply_markup=btn.inline_keyboard(rows),
+                                        translate=False)
+        await event.answer()
+
+    @bot.on(events.CallbackQuery(pattern=rb"setlang_([a-zA-Z]{2,5})"))
+    async def setlang_handler(event):
+        import utils.i18n as _i18n
+        code = event.data.decode().split("_", 1)[1]
+        _i18n.set_user_lang(event.sender_id, code)
+        _nl = _i18n.norm_lang(code)
+        try:
+            await db.update_user(event.sender_id, {"lang": _nl})
+        except Exception:
+            pass
+        # Yeni dili ARKA PLANDA ön-çevir (bot + plugin metinleri hızlı olsun)
+        if _nl != "tr":
+            try:
+                import asyncio as _a
+                _a.create_task(_i18n.prewarm(_i18n.get_prewarm_strings(), langs=[_nl]))
+            except Exception:
+                pass
+        try:
+            await event.answer("✅ " + _i18n.all_langs().get(_i18n.norm_lang(code), code))
+        except Exception:
+            pass
+        # Ana menüyü YENİ dilde göster (bot_api otomatik çevirir)
+        user = await event.get_sender()
+        text, rows = await build_main_menu(event.sender_id, user.first_name)
+        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id,
+                                        text=text, reply_markup=btn.inline_keyboard(rows))
 
     @bot.on(events.CallbackQuery(data=b"noop"))
     async def noop_handler(event):

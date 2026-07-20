@@ -22,10 +22,12 @@ bu omutu herhangi bir sohbete girdiğiniz zaman klonladığınız kişinin bilgi
 herhangi bir sohbete kulanıldığı zaman kayıtlı profil bilgilerinzizi siler. (bu işlmeden sonra .clon komutu'nu kulandığınız zaman otomotik mevcut profilinizi kaydeder).
 """
 import os
+import asyncio
 from telethon.tl.functions.photos import GetUserPhotosRequest, DeletePhotosRequest, UploadProfilePhotoRequest
+from telethon.errors import FloodWaitError
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.account import UpdateEmojiStatusRequest
-from telethon.tl.types import InputPhoto, EmojiStatus, EmojiStatusEmpty
+from telethon.tl.types import InputPhoto, EmojiStatus, EmojiStatusEmpty, PeerUser
 from telethon.tl import functions
 from userbot.events import register
 from userbot import CMD_HELP
@@ -68,7 +70,7 @@ INVISIBLE_EMOJI_ID = 5420560971674435677
 
 # Klonlarken/geri dönerken en fazla bu kadar fotoğraf işlenir
 # (100+ fotoğraflı profillerde çökme ve uzun beklemeyi önler)
-MAX_PHOTOS = 10
+MAX_PHOTOS = 10  # klonlanan kişiden kaç fotoğraf alınıp ÜSTE eklenir (kendi fotoğrafların silinmez)
 
 ORIGINAL_PROFILE = {
     "first_name": None,
@@ -78,7 +80,8 @@ ORIGINAL_PROFILE = {
     "photo_count": 0,
     "emoji_status": None,
     "is_saved": False,
-    "is_cloned": False
+    "is_cloned": False,
+    "cloned_photo_count": 0
 }
 
 
@@ -110,7 +113,7 @@ def _clon_save_all(data):
 
 def _default_profile():
     return {"first_name": None, "last_name": None, "about": None,
-            "photos": [], "photo_count": 0, "emoji_status": None, "is_saved": False, "is_cloned": False}
+            "photos": [], "photo_count": 0, "emoji_status": None, "is_saved": False, "is_cloned": False, "cloned_photo_count": 0}
 
 
 def _load_state(uid):
@@ -161,40 +164,90 @@ def cleanup_user_data(user_id, reason="disable"):
 async def download_all_profile_photos(client, user_id, save_dir, prefix="photo", max_count=None):
     photos_info = []
     try:
-        result = await client(GetUserPhotosRequest(user_id=user_id, offset=0, max_id=0, limit=(max_count or 100)))
-        if not result.photos:
-            return photos_info
-        for idx, photo in enumerate(result.photos):
-            if max_count and len(photos_info) >= max_count:
+        offset = 0
+        while True:
+            batch = 100
+            if max_count:
+                remaining = max_count - len(photos_info)
+                if remaining <= 0:
+                    break
+                batch = min(100, remaining)
+            result = await client(GetUserPhotosRequest(user_id=user_id, offset=offset, max_id=0, limit=batch))
+            if not result.photos:
                 break
-            try:
-                is_video = hasattr(photo, 'video_sizes') and photo.video_sizes
-                if is_video:
-                    file_path = os.path.join(save_dir, f"{prefix}_{idx}.mp4")
-                    for video_size in photo.video_sizes:
-                        if hasattr(video_size, 'type'):
-                            try:
-                                downloaded = await client.download_media(photo, file=file_path, thumb=-1)
-                                if downloaded:
-                                    photos_info.append((downloaded, True))
+            for photo in result.photos:
+                if max_count and len(photos_info) >= max_count:
+                    break
+                idx = len(photos_info)
+                try:
+                    is_video = hasattr(photo, 'video_sizes') and photo.video_sizes
+                    if is_video:
+                        file_path = os.path.join(save_dir, f"{prefix}_{idx}.mp4")
+                        for video_size in photo.video_sizes:
+                            if hasattr(video_size, 'type'):
+                                try:
+                                    downloaded = await client.download_media(photo, file=file_path, thumb=-1)
+                                    if downloaded:
+                                        photos_info.append((downloaded, True))
+                                        break
+                                except Exception:
+                                    file_path = os.path.join(save_dir, f"{prefix}_{idx}.jpg")
+                                    downloaded = await client.download_media(photo, file=file_path)
+                                    if downloaded:
+                                        photos_info.append((downloaded, False))
                                     break
-                            except Exception:
-                                file_path = os.path.join(save_dir, f"{prefix}_{idx}.jpg")
-                                downloaded = await client.download_media(photo, file=file_path)
-                                if downloaded:
-                                    photos_info.append((downloaded, False))
-                                break
-                else:
-                    file_path = os.path.join(save_dir, f"{prefix}_{idx}.jpg")
-                    downloaded = await client.download_media(photo, file=file_path)
-                    if downloaded:
-                        photos_info.append((downloaded, False))
-            except Exception as _e:
-                log.debug(f"profil fotoğrafı atlandı: {_e}")
-                continue
+                    else:
+                        file_path = os.path.join(save_dir, f"{prefix}_{idx}.jpg")
+                        downloaded = await client.download_media(photo, file=file_path)
+                        if downloaded:
+                            photos_info.append((downloaded, False))
+                except Exception as _e:
+                    log.debug(f"profil fotoğrafı atlandı: {_e}")
+                    continue
+            offset += len(result.photos)
+            if len(result.photos) < batch:
+                break  # son sayfa
     except Exception as _e:
         log.warning(f"profil fotoğrafları indirilemedi: {_e}")
     return photos_info
+
+
+async def _upload_profile_photos(client, photos):
+    """[(path, is_video)] listesini profile yükler (flood-güvenli).
+    reversed() ile en eski→en yeni sırada yüklenir ki en YENİ profil fotoğrafı
+    doğru olsun. Telegram FloodWait verirse kısa beklemelerde otomatik bekler,
+    çok uzun beklemede güvenle durur. Döner: (uploaded, missing, last_err, flood_stopped)."""
+    uploaded = 0
+    missing = 0
+    last_err = None
+    flood_stopped = False
+    for photo_path, is_video in reversed(photos or []):
+        if not (photo_path and os.path.exists(photo_path)):
+            missing += 1
+            continue
+        for _attempt in range(3):
+            try:
+                pfile = await client.upload_file(photo_path)
+                if is_video:
+                    await client(UploadProfilePhotoRequest(video=pfile))
+                else:
+                    await client(UploadProfilePhotoRequest(file=pfile))
+                uploaded += 1
+                break
+            except FloodWaitError as fw:
+                wait = int(getattr(fw, "seconds", 0) or 0)
+                if wait <= 90:
+                    await asyncio.sleep(wait + 1)
+                    continue  # bekleyip tekrar dene
+                flood_stopped = True
+                last_err = f"FloodWait {wait}s"
+                break
+            except Exception as e:
+                last_err = str(e)
+                break
+        if flood_stopped:
+            break
+    return uploaded, missing, last_err, flood_stopped
 
 
 async def delete_all_my_photos(client):
@@ -212,6 +265,109 @@ async def delete_all_my_photos(client):
         log.warning(f"profil fotoğrafları silinemedi: {_e}")
 
 
+async def delete_top_photos(client, n):
+    """En ÜSTTEKİ (en yeni) n profil fotoğrafını siler — yani klonlarken eklenenleri.
+    Kullanıcının kendi eski fotoğraflarına DOKUNMAZ. Döner: silinen adet."""
+    n = int(n or 0)
+    if n <= 0:
+        return 0
+    deleted = 0
+    try:
+        remaining = n
+        while remaining > 0:
+            batch = min(100, remaining)
+            photos = await client(GetUserPhotosRequest(user_id="me", offset=0, max_id=0, limit=batch))
+            if not photos.photos:
+                break
+            take = photos.photos[:remaining]
+            input_photos = [InputPhoto(id=p.id, access_hash=p.access_hash, file_reference=p.file_reference) for p in take]
+            if not input_photos:
+                break
+            await client(DeletePhotosRequest(id=input_photos))
+            deleted += len(input_photos)
+            remaining -= len(input_photos)
+            if len(photos.photos) < batch:
+                break
+    except Exception as _e:
+        log.warning(f"klon fotoğrafları silinemedi: {_e}")
+    return deleted
+
+
+_last_id_sync = 0.0  # en son kişiler/sohbet senkron zamanı (kısıtlama için)
+
+
+async def _resolve_user_by_id(client, uid):
+    """Bir kullanıcıyı SADECE ID ile çözmeye çalışır (birçok yöntem).
+    Döner: (UserFull|None, last_err). Profili açabildiğin ama önbellekte olmayan
+    kişiler için önce kişiler/sohbetler senkronlanıp tekrar denenir."""
+    last_err = None
+
+    async def _full(x):
+        return await client(GetFullUserRequest(x))
+
+    # a) Doğrudan (önbellekte/erişilebilirse en hızlısı)
+    try:
+        u = await _full(uid)
+        return u, None
+    except Exception as e:
+        last_err = e
+
+    # b) get_entity / get_input_entity (oturum önbelleği)
+    for _name, _attempt in (("get_entity", lambda: client.get_entity(uid)),
+                            ("get_input_entity", lambda: client.get_input_entity(uid))):
+        try:
+            ent = await _attempt()
+            if ent is not None:
+                _eid = getattr(ent, "id", None) or getattr(ent, "user_id", uid)
+                u = await _full(ent if hasattr(ent, "user_id") else _eid)
+                return u, None
+        except Exception as e:
+            last_err = e
+
+    # c) ÖNBELLEĞİ TAZELE: kişiler + son sohbetler → sonra tekrar dene
+    #    (profilini açabildiğin kişi genelde kişilerinde veya son sohbetlerindedir)
+    #    NOT: Her başarısız denemede senkron yapmayalım → 3 dk'da bir yeterli.
+    import time as _t
+    global _last_id_sync
+    if _t.time() - _last_id_sync > 180:
+        _last_id_sync = _t.time()
+        try:
+            from telethon.tl.functions.contacts import GetContactsRequest
+            await client(GetContactsRequest(hash=0))
+        except Exception:
+            pass
+        try:
+            await client.get_dialogs(limit=200)
+        except Exception:
+            pass
+
+    for _name, _attempt in (("get_entity(2)", lambda: client.get_entity(uid)),
+                            ("direct(2)", lambda: _full(uid))):
+        try:
+            r = await _attempt()
+            if hasattr(r, "full_user"):     # zaten UserFull
+                return r, None
+            _eid = getattr(r, "id", None) or uid
+            u = await _full(_eid)
+            return u, None
+        except Exception as e:
+            last_err = e
+
+    # d) Son çare: GetUsers([InputUser(uid,0)]) → geçerli access_hash dönerse kullan
+    try:
+        from telethon.tl.types import InputUser
+        from telethon.tl.functions.users import GetUsersRequest
+        res = await client(GetUsersRequest(id=[InputUser(uid, 0)]))
+        if res and getattr(res[0], "access_hash", None) is not None:
+            iu = InputUser(uid, res[0].access_hash)
+            u = await _full(iu)
+            return u, None
+    except Exception as e:
+        last_err = e
+
+    return None, last_err
+
+
 async def get_target_user(client, event, input_str=None):
     """Hedef kullanıcıyı bul - yanıt, ID veya kullanıcı adı ile"""
     
@@ -223,7 +379,7 @@ async def get_target_user(client, event, input_str=None):
                 user = await client(GetFullUserRequest(reply.sender_id))
                 return user, None
             except Exception as e:
-                return None, f"Yanıtlanan kullanıcı bulunamadı: {e}"
+                return None, f"Yanıtlanan kullanıcı bulunamadı: {str(e)[:80]}"
     
     # 2. Input string varsa kontrol et
     if input_str:
@@ -234,12 +390,14 @@ async def get_target_user(client, event, input_str=None):
             input_str = input_str[1:]
         
         # ID olarak dene
-        if input_str.isdigit():
-            try:
-                user = await client(GetFullUserRequest(int(input_str)))
+        if input_str.lstrip("-").isdigit():
+            uid = int(input_str)
+            user, last_err = await _resolve_user_by_id(client, uid)
+            if user is not None:
                 return user, None
-            except Exception as e:
-                return None, f"ID bulunamadı: {e}"
+            return None, (f"ID çözümlenemedi: {str(last_err)[:70]}. "
+                          "Hesap bu kişiyi hiç görmediyse yalnızca ID ile bulamaz — "
+                          "kişiye YANIT vererek ya da @kullanıcıadı ile dene.")
         
         # Kullanıcı adı olarak dene
         try:
@@ -247,7 +405,7 @@ async def get_target_user(client, event, input_str=None):
             user = await client(GetFullUserRequest(entity.id))
             return user, None
         except Exception as e:
-            return None, f"Kullanıcı bulunamadı: {e}"
+            return None, f"Kullanıcı bulunamadı (@{input_str}): {str(e)[:80]}"
     
     return None, "Kullanıcı belirtilmedi"
 
@@ -255,6 +413,8 @@ async def get_target_user(client, event, input_str=None):
 @register(outgoing=True, pattern=r"^\.[kc]lon$")
 async def klon_help(event):
     if event.fwd_from:
+        return
+    if _dupe_cmd(event):
         return
     
     # Yanıt varsa klonla
@@ -281,11 +441,52 @@ async def klon_help(event):
 async def klon_with_input(event):
     if event.fwd_from:
         return
+    if _dupe_cmd(event):
+        return
     input_str = event.pattern_match.group(1).strip()
     await do_clone(event, input_str)
 
 
+# Çift tetikleme / eşzamanlı çalışma koruması (aynı kullanıcı için tek işlem)
+_clone_busy = set()
+
+# Aynı KOMUT MESAJININ iki kez işlenmesini engelle (handler çift kaydı / çift event)
+_seen_cmd_ids = []
+_seen_cmd_set = set()
+
+
+def _dupe_cmd(event):
+    """Bu komut mesajı daha önce işlendiyse True döner → ikinci tetikleme yok sayılır."""
+    try:
+        key = (getattr(event, "chat_id", None), getattr(event, "id", None))
+    except Exception:
+        return False
+    if key[1] is None:
+        return False
+    if key in _seen_cmd_set:
+        return True
+    _seen_cmd_set.add(key)
+    _seen_cmd_ids.append(key)
+    if len(_seen_cmd_ids) > 400:
+        _old = _seen_cmd_ids.pop(0)
+        _seen_cmd_set.discard(_old)
+    return False
+
+
 async def do_clone(event, input_str):
+    global ORIGINAL_PROFILE
+
+    _uid = event.sender_id
+    if _uid in _clone_busy:
+        return  # zaten bir klon/geri-dönüş işlemi sürüyor → çift tetiklemeyi yok say
+    _clone_busy.add(_uid)
+    try:
+        await _do_clone_inner(event, input_str)
+    finally:
+        _clone_busy.discard(_uid)
+
+
+async def _do_clone_inner(event, input_str):
     global ORIGINAL_PROFILE
 
     await event.edit("`🔄 Klonlanıyor...`")
@@ -304,15 +505,10 @@ async def do_clone(event, input_str):
             ORIGINAL_PROFILE["last_name"] = me.last_name or ""
             ORIGINAL_PROFILE["about"] = my_full.full_user.about or "" if hasattr(my_full, 'full_user') else ""
 
-            _udir = _user_original_dir(me.id)
-            for f in os.listdir(_udir):
-                try:
-                    os.remove(os.path.join(_udir, f))
-                except Exception:
-                    pass
-
-            ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, _udir, "original", max_count=MAX_PHOTOS)
-            ORIGINAL_PROFILE["photo_count"] = len(ORIGINAL_PROFILE["photos"])
+            # Kendi fotoğraflarını ARTIK indirmiyoruz/silmiyoruz. Klon fotoğrafları
+            # üste eklenir; .unclon yalnızca eklenen klon fotoğraflarını siler.
+            ORIGINAL_PROFILE["photos"] = []
+            ORIGINAL_PROFILE["photo_count"] = 0
 
             if hasattr(me, 'emoji_status') and me.emoji_status and hasattr(me.emoji_status, 'document_id'):
                 ORIGINAL_PROFILE["emoji_status"] = me.emoji_status.document_id
@@ -359,19 +555,12 @@ async def do_clone(event, input_str):
         target_photos = await download_all_profile_photos(event.client, user_id, clone_dir, "clone", max_count=MAX_PHOTOS)
 
         await event.client(functions.account.UpdateProfileRequest(first_name=first_name, last_name=last_name, about=user_bio))
-        await delete_all_my_photos(event.client)
 
+        # Kendi fotoğraflarını SİLMİYORUZ — klon fotoğraflarını sadece ÜSTE ekliyoruz.
+        cloned_added = 0
         if target_photos:
-            for photo_path, is_video in reversed(target_photos):
-                if os.path.exists(photo_path):
-                    try:
-                        pfile = await event.client.upload_file(photo_path)
-                        if is_video:
-                            await event.client(UploadProfilePhotoRequest(video=pfile))
-                        else:
-                            await event.client(UploadProfilePhotoRequest(file=pfile))
-                    except Exception:
-                        pass
+            cloned_added, _m, _cerr, _cfs = await _upload_profile_photos(event.client, target_photos)
+        ORIGINAL_PROFILE["cloned_photo_count"] = int(ORIGINAL_PROFILE.get("cloned_photo_count", 0) or 0) + cloned_added
 
         # Hedefin indirilen fotoğrafları profile yüklendi — yerel kopyaları temizle (çöp bırakma)
         for _cf in os.listdir(clone_dir):
@@ -398,7 +587,7 @@ async def do_clone(event, input_str):
                 emoji_status_msg = ", emoji ✗ (premium gerekli)"
             pass
 
-        photo_status = f"{len(target_photos)} fotoğraf/video" if target_photos else "fotoğraf yok"
+        photo_status = f"{cloned_added} fotoğraf/video üste eklendi" if cloned_added else "fotoğraf yok"
         bio_status = "bio var" if user_bio else "bio yok"
 
         ORIGINAL_PROFILE["is_cloned"] = True
@@ -415,6 +604,21 @@ async def unclone(event):
     global ORIGINAL_PROFILE
     if event.fwd_from:
         return
+    if _dupe_cmd(event):
+        return
+
+    _uid = event.sender_id
+    if _uid in _clone_busy:
+        return  # çift tetikleme koruması
+    _clone_busy.add(_uid)
+    try:
+        await _unclone_inner(event)
+    finally:
+        _clone_busy.discard(_uid)
+
+
+async def _unclone_inner(event):
+    global ORIGINAL_PROFILE
 
     me = await event.client.get_me()
     ORIGINAL_PROFILE = _load_state(me.id)  # diskten: restart sonrası bile geri dönebilir
@@ -426,13 +630,24 @@ async def unclone(event):
     await event.edit("`🔄 Orijinal profile dönülüyor...`")
 
     try:
-        await event.client(functions.account.UpdateProfileRequest(
-            first_name=ORIGINAL_PROFILE["first_name"],
-            last_name=ORIGINAL_PROFILE["last_name"],
-            about=ORIGINAL_PROFILE["about"]
-        ))
+        # Her adım BAĞIMSIZ: isim/bio ya da foto-silme hata verse bile
+        # orijinal fotoğraflar MUTLAKA geri yüklenir (eskiden biri patlayınca
+        # "profil yüklenmiyor" oluyordu).
+        try:
+            await event.client(functions.account.UpdateProfileRequest(
+                first_name=ORIGINAL_PROFILE["first_name"],
+                last_name=ORIGINAL_PROFILE["last_name"],
+                about=ORIGINAL_PROFILE["about"]
+            ))
+        except Exception as _npe:
+            log.warning("clon geri dönüş: isim/bio güncellenemedi: %s", _npe)
 
-        await delete_all_my_photos(event.client)
+        removed = 0
+        try:
+            _cnt = int(ORIGINAL_PROFILE.get("cloned_photo_count", 0) or 0)
+            removed = await delete_top_photos(event.client, _cnt)
+        except Exception as _dpe:
+            log.warning("clon geri dönüş: klon fotoğrafları silinemedi: %s", _dpe)
 
         try:
             if ORIGINAL_PROFILE["emoji_status"]:
@@ -444,27 +659,14 @@ async def unclone(event):
         except Exception:
             pass
 
-        uploaded_count = 0
-        if ORIGINAL_PROFILE["photos"]:
-            for photo_path, is_video in reversed(ORIGINAL_PROFILE["photos"]):
-                if os.path.exists(photo_path):
-                    try:
-                        pfile = await event.client.upload_file(photo_path)
-                        if is_video:
-                            await event.client(UploadProfilePhotoRequest(video=pfile))
-                        else:
-                            await event.client(UploadProfilePhotoRequest(file=pfile))
-                        uploaded_count += 1
-                    except Exception:
-                        pass
-
+        ORIGINAL_PROFILE["cloned_photo_count"] = 0
         ORIGINAL_PROFILE["is_cloned"] = False
         _save_state(me.id, ORIGINAL_PROFILE)
 
-        if uploaded_count > 0:
-            await event.edit(f"`✅ Orijinal profile döndün! ({uploaded_count} fotoğraf/video)`")
+        if removed > 0:
+            await event.edit(f"`✅ Orijinal profile döndün! ({removed} klon fotoğrafı kaldırıldı, kendi fotoğrafların korundu)`")
         else:
-            await event.edit("`✅ Orijinal profile döndün!`")
+            await event.edit("`✅ Orijinal profile döndün! (isim/bio geri yüklendi)`")
 
     except Exception as e:
         await event.edit(f"`❌ Hata: {str(e)}`")
@@ -508,15 +710,9 @@ async def save_my_profile(event):
         ORIGINAL_PROFILE["last_name"] = me.last_name or ""
         ORIGINAL_PROFILE["about"] = my_full.full_user.about or "" if hasattr(my_full, 'full_user') else ""
 
-        _udir = _user_original_dir(me.id)
-        for f in os.listdir(_udir):
-            try:
-                os.remove(os.path.join(_udir, f))
-            except Exception:
-                pass
-
-        ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, _udir, "original", max_count=MAX_PHOTOS)
-        ORIGINAL_PROFILE["photo_count"] = len(ORIGINAL_PROFILE["photos"])
+        # Kendi fotoğraflarını KAYDETMİYORUZ — klonda hiç silinmiyorlar.
+        ORIGINAL_PROFILE["photos"] = []
+        ORIGINAL_PROFILE["photo_count"] = 0
 
         if hasattr(me, 'emoji_status') and me.emoji_status and hasattr(me.emoji_status, 'document_id'):
             ORIGINAL_PROFILE["emoji_status"] = me.emoji_status.document_id
@@ -526,16 +722,15 @@ async def save_my_profile(event):
         ORIGINAL_PROFILE["is_saved"] = True
         _save_state(me.id, ORIGINAL_PROFILE)  # KALICI
 
-        video_count = sum(1 for _, is_video in ORIGINAL_PROFILE["photos"] if is_video)
-        photo_count = ORIGINAL_PROFILE["photo_count"] - video_count
         bio_display = ORIGINAL_PROFILE['about'][:50] + '...' if len(ORIGINAL_PROFILE['about']) > 50 else (ORIGINAL_PROFILE['about'] or "(boş)")
         emoji_display = "✓" if ORIGINAL_PROFILE["emoji_status"] else "yok"
 
         await event.edit(
-            f"`✅ Profilin kaydedildi!`\n"
+            f"`✅ Profil bilgin kaydedildi!`\n"
             f"`👤 {ORIGINAL_PROFILE['first_name']} {ORIGINAL_PROFILE['last_name']}`\n"
             f"`📝 {bio_display}`\n"
-            f"`📷 {photo_count} 🎥 {video_count} 😀 {emoji_display}`"
+            f"`😀 emoji: {emoji_display}`\n"
+            f"`ℹ️ Fotoğrafların .unclon'da korunur (silinmez).`"
         )
     except Exception as e:
         await event.edit(f"`❌ Hata: {str(e)}`")
@@ -554,17 +749,17 @@ async def clone_info(event):
         await event.edit("`❌ Kayıtlı profil yok!`")
         return
 
-    video_count = sum(1 for _, is_video in ORIGINAL_PROFILE["photos"] if is_video)
-    photo_count = ORIGINAL_PROFILE["photo_count"] - video_count
     bio_display = ORIGINAL_PROFILE['about'] if ORIGINAL_PROFILE['about'] else "(boş)"
     emoji_display = "✓" if ORIGINAL_PROFILE["emoji_status"] else "yok"
+    cloned_cnt = int(ORIGINAL_PROFILE.get("cloned_photo_count", 0) or 0)
     clone_status = "🟢 şu an klonlu" if ORIGINAL_PROFILE.get("is_cloned") else "⚪ klon aktif değil"  # noqa: E501
 
     await event.edit(
         f"**📋 Kayıtlı Profil:**\n\n"
         f"`👤` {ORIGINAL_PROFILE['first_name']} {ORIGINAL_PROFILE['last_name']}\n"
         f"`📝` {bio_display}\n"
-        f"`📷` {photo_count} `🎥` {video_count} `😀` {emoji_display}\n"
+        f"`😀` emoji: {emoji_display}\n"
+        f"`🖼️` üste eklenen klon fotoğrafı: {cloned_cnt}\n"
         f"`🔁` {clone_status}"
     )
 

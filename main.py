@@ -219,6 +219,13 @@ async def main():
     if config.BOT_IS_PREMIUM is None:
         config.BOT_IS_PREMIUM = bool(getattr(bot_me, "premium", False))
     log(f"💎 Premium emoji: {'açık' if config.BOT_IS_PREMIUM else 'kapalı (normal emoji)'}")
+
+    # Servis botunun doğrudan gönderdiği mesajları da (bot_api dışı) alıcıya göre çevir
+    try:
+        import utils.i18n as _i18n
+        _i18n.install_bot_translation(bot)
+    except Exception:
+        pass
     
     # Ayrıca dosyaya da yaz (pluginler için)
     try:
@@ -250,6 +257,43 @@ async def main():
     except Exception as _e:
         log(f"⚠️ Plugin senkron hatası: {_e}")
     
+    # Kullanıcı dillerini belleğe al (otomatik çeviri için)
+    try:
+        import utils.i18n as _i18n
+        _all_users = await db.get_all_users()
+        _n = _i18n.load_user_langs(_all_users)
+        log(f"🌐 {_n} kullanıcı dili yüklendi (çeviri hazır)")
+
+        # Ön-çeviri metin havuzu: bot mesajları + plugin/handler dosyalarındaki metinler
+        _pw_strings = []
+        try:
+            _pw_strings += [v for v in config.MESSAGES.values() if isinstance(v, str)]
+            _pw_strings += [v for v in config.BUTTONS.values() if isinstance(v, str)]
+            for _grp in config.COMMANDS.values():
+                _pw_strings += [x for x in _grp.values() if isinstance(x, str)]
+        except Exception:
+            pass
+        try:
+            import glob as _glob
+            _files = (_glob.glob("plugins/*.py")
+                      + _glob.glob("handlers/**/*.py", recursive=True)
+                      + _glob.glob("userbot/**/*.py", recursive=True))
+            _pw_strings += _i18n.extract_translatable_strings(_files)
+        except Exception:
+            pass
+        _i18n.set_prewarm_strings(_pw_strings)
+
+        # SADECE kullanımdaki dilleri arka planda ön-çevir (dosyaya yaz).
+        _use = _i18n.inuse_langs()
+        if _pw_strings and _use:
+            asyncio.create_task(_i18n.prewarm(_pw_strings))
+            log(f"🌐 {len(_use)} dil arka planda ön-çevriliyor "
+                f"({len(set(_pw_strings))} metin) → data/lang/")
+        else:
+            log("🌐 Ön-çeviri: aktif kullanıcı dili yok (yalnız Türkçe), atlandı")
+    except Exception as _e:
+        log(f"⚠️ Dil yükleme atlandı: {_e}")
+
     # Session'ları geri yükle
     log("🔄 Session'lar geri yükleniyor...")
     restored = await smart_session_manager.restore_sessions()
@@ -307,6 +351,13 @@ async def shutdown():
     """Kapanış işlemleri"""
     log("🔄 Bot kapatılıyor...")
     
+    # Çeviri önbelleğini diske kaydet
+    try:
+        import utils.i18n as _i18n
+        _i18n.flush_cache()
+    except Exception:
+        pass
+
     # Smart Session Manager'ı kapat
     await smart_session_manager.shutdown()
     

@@ -25,6 +25,48 @@ from telethon.tl import functions, types
 
 log = get_logger(__name__)
 
+import utils.i18n as _i18n
+
+
+async def _sedit(event, text, buttons=None, skip_labels=()):
+    """event.edit — metni ve butonları ALICI diline çevirir (plugin adları korunur)."""
+    try:
+        lang = _i18n.get_user_lang_cached(getattr(event, "sender_id", None))
+        if lang and lang != _i18n.SOURCE_LANG:
+            if isinstance(text, str) and text:
+                text = await _i18n.translate(text, lang)
+            if buttons:
+                buttons = await _i18n.translate_telethon_buttons(buttons, lang, skip_labels=skip_labels)
+    except Exception:
+        pass
+    return await event.edit(text, buttons=buttons)
+
+
+async def _sans(event, text=None, **kw):
+    """event.answer — (varsa) uyarı metnini çevirir; inline sonuç listelerine dokunmaz."""
+    try:
+        if isinstance(text, str) and text:
+            lang = _i18n.get_user_lang_cached(getattr(event, "sender_id", None))
+            if lang and lang != _i18n.SOURCE_LANG:
+                text = await _i18n.translate(text, lang)
+    except Exception:
+        pass
+    if text is None:
+        return await event.answer(**kw)
+    return await event.answer(text, **kw)
+
+
+async def _tbtns(uid, buttons):
+    """bot.send_message butonlarını çevir (metni servis-botu hook'u zaten çeviriyor)."""
+    try:
+        lang = _i18n.get_user_lang_cached(uid)
+        if lang and lang != _i18n.SOURCE_LANG and buttons:
+            return await _i18n.translate_telethon_buttons(buttons, lang)
+    except Exception:
+        pass
+    return buttons
+
+
 
 # Plugin bilgileri
 __name__ = "inline_start"
@@ -65,6 +107,10 @@ def get_bot():
 
 def _filter_accessible(all_plugins, uid):
     """ip_plugins ile AYNI sıralı/filtreli erişilebilir plugin listesi (index tutarlılığı için)."""
+    try:
+        _i18n.note_plugin_names({p.get("name", "") for p in all_plugins})
+    except Exception:
+        pass
     return [
         p for p in all_plugins
         if not p.get("is_disabled")
@@ -82,7 +128,7 @@ async def _render_plugin_detail(event, target_user_id, gi, full=False):
 
     if gi < 0 or gi >= len(accessible):
         try:
-            await event.edit(
+            await _sedit(event, 
                 "⚠️ **Plugin bulunamadı** (liste değişmiş olabilir).",
                 buttons=[[Button.inline("🔙 Listeye Dön", f"ip_plugins_{target_user_id}_0".encode())]],
             )
@@ -129,7 +175,7 @@ async def _render_plugin_detail(event, target_user_id, gi, full=False):
     buttons.append([Button.inline("🔙 Listeye Dön", f"ip_plugins_{target_user_id}_{page}".encode())])
 
     try:
-        await event.edit(text, buttons=buttons)
+        await _sedit(event, text, buttons=buttons)
     except Exception:
         pass
 
@@ -138,7 +184,7 @@ async def _render_premium_settings(event, target_user_id, gi):
     """Sahip için: bir pluginin premium/özel/genel ayar paneli."""
     if event.sender_id != config.OWNER_ID:
         try:
-            await event.answer("❌ Sadece sahip.", alert=True)
+            await _sans(event, "❌ Sadece sahip.", alert=True)
         except Exception:
             pass
         return
@@ -146,7 +192,7 @@ async def _render_premium_settings(event, target_user_id, gi):
     accessible = _filter_accessible(all_plugins, event.sender_id)
     if gi < 0 or gi >= len(accessible):
         try:
-            await event.edit("⚠️ Plugin bulunamadı.",
+            await _sedit(event, "⚠️ Plugin bulunamadı.",
                 buttons=[[Button.inline("🔙 Geri", f"ip_plugins_{target_user_id}_0".encode())]])
         except Exception:
             pass
@@ -192,7 +238,7 @@ async def _render_premium_settings(event, target_user_id, gi):
         buttons.append([Button.inline("👥 Aboneler", f"ipsub_{target_user_id}_{gi}".encode())])
     buttons.append([Button.inline("🔙 Plugin Detayı", f"ipd_{target_user_id}_{gi}".encode())])
     try:
-        await event.edit(text, buttons=buttons)
+        await _sedit(event, text, buttons=buttons)
     except Exception:
         pass
 
@@ -214,9 +260,9 @@ async def _send_premium_reminder(bot, item):
                 f"**{stars} ⭐** ödemelisin.\n"
                 f"Ödenmezse **{exp_str}** itibarıyla kullanım **otomatik durdurulacak**.")
     try:
-        await bot.send_message(
-            item["uid"], text,
-            buttons=[[Button.inline(f"🔄 Yenile ({stars}⭐)", f"prenew_{plugin}".encode())]])
+        _rbtns = [[Button.inline(f"🔄 Yenile ({stars}⭐)", f"prenew_{plugin}".encode())]]
+        _rbtns = await _tbtns(item["uid"], _rbtns)
+        await bot.send_message(item["uid"], text, buttons=_rbtns)
         return True
     except Exception:
         log.info("premium hatırlatma gönderilemedi uid=%s", item["uid"])
@@ -406,10 +452,19 @@ def register_bot_handlers(bot):
                         Button.url("🤖 Bot Ayarları", f"https://t.me/{bot_username}?start=panel")
                     ])
                 
-                await event.answer(
+                _il = _i18n.get_user_lang_cached(event.sender_id)
+                _title = "⚡ Userbot Kontrol Paneli"
+                if _il and _il != _i18n.SOURCE_LANG:
+                    try:
+                        text = await _i18n.translate(text, _il)
+                        _title = await _i18n.translate(_title, _il)
+                        buttons = await _i18n.translate_telethon_buttons(buttons, _il)
+                    except Exception:
+                        pass
+                await _sans(event, 
                     results=[
                         event.builder.article(
-                            title="⚡ Userbot Kontrol Paneli",
+                            title=_title,
                             description=f"{status_text} | {len(active_plugins)} plugin",
                             text=text,
                             buttons=buttons
@@ -432,7 +487,7 @@ def register_bot_handlers(bot):
         page = int(match.group(2).decode()) if match.group(2) else 0
 
         if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            await _sans(event, "❌ Bu panel size ait değil!", alert=True)
             return
 
         user_data = await db.get_user(event.sender_id)
@@ -483,10 +538,10 @@ def register_bot_handlers(bot):
             ])
 
         try:
-            await event.edit(text, buttons=buttons)
+            await _sedit(event, text, buttons=buttons)
         except Exception:
             pass
-        await event.answer()
+        await _sans(event, )
 
     @bot.on(events.CallbackQuery(pattern=rb"ipd_(\d+)_(\d+)"))
     async def ip_pdetail_cb(event):
@@ -494,11 +549,11 @@ def register_bot_handlers(bot):
         target_user_id = int(event.pattern_match.group(1).decode())
         gi = int(event.pattern_match.group(2).decode())
         if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            await _sans(event, "❌ Bu panel size ait değil!", alert=True)
             return
         await _render_plugin_detail(event, target_user_id, gi, full=False)
         try:
-            await event.answer()
+            await _sans(event, )
         except Exception:
             pass
 
@@ -508,11 +563,11 @@ def register_bot_handlers(bot):
         target_user_id = int(event.pattern_match.group(1).decode())
         gi = int(event.pattern_match.group(2).decode())
         if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            await _sans(event, "❌ Bu panel size ait değil!", alert=True)
             return
         await _render_plugin_detail(event, target_user_id, gi, full=True)
         try:
-            await event.answer()
+            await _sans(event, )
         except Exception:
             pass
 
@@ -522,13 +577,13 @@ def register_bot_handlers(bot):
         target_user_id = int(event.pattern_match.group(1).decode())
         gi = int(event.pattern_match.group(2).decode())
         if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            await _sans(event, "❌ Bu panel size ait değil!", alert=True)
             return
 
         all_plugins = await db.get_all_plugins()
         accessible = _filter_accessible(all_plugins, event.sender_id)
         if gi < 0 or gi >= len(accessible):
-            await event.answer("Plugin bulunamadı.", alert=True)
+            await _sans(event, "Plugin bulunamadı.", alert=True)
             return
         p = accessible[gi]
         name = p.get("name")
@@ -546,7 +601,7 @@ def register_bot_handlers(bot):
         if name in active:
             # KAPAT
             if p.get("default_active"):
-                await event.answer("⭐ Zorunlu plugin, kapatılamaz.", alert=True)
+                await _sans(event, "⭐ Zorunlu plugin, kapatılamaz.", alert=True)
                 return
             active.remove(name)
             await db.update_user(event.sender_id, {"active_plugins": active})
@@ -555,13 +610,13 @@ def register_bot_handlers(bot):
             except Exception:
                 pass
             try:
-                await event.answer(f"⛔ {name} kapatıldı")
+                await _sans(event, f"⛔ {name} kapatıldı")
             except Exception:
                 pass
         else:
             # YÜKLE
             if p.get("is_disabled"):
-                await event.answer("⛔ Bu plugin devre dışı.", alert=True)
+                await _sans(event, "⛔ Bu plugin devre dışı.", alert=True)
                 return
             # Premium kontrolü: erişim yoksa Yıldız faturası gönder (yükleme öncesi)
             try:
@@ -576,7 +631,7 @@ def register_bot_handlers(bot):
                 except Exception:
                     _sent = False
                 try:
-                    await event.answer(
+                    await _sans(event, 
                         f"💎 {name} premium ({_stars}⭐/{_days}g) — fatura gönderildi, ödeyince açılır"
                         if _sent else f"💎 {name} premium — fatura gönderilemedi", alert=True)
                 except Exception:
@@ -585,7 +640,7 @@ def register_bot_handlers(bot):
                 return
             if _reason == "need_grant":
                 try:
-                    await event.answer(f"🔒 {name} özel — yöneticiye başvur", alert=True)
+                    await _sans(event, f"🔒 {name} özel — yöneticiye başvur", alert=True)
                 except Exception:
                     pass
                 return
@@ -598,7 +653,7 @@ def register_bot_handlers(bot):
                 except Exception as e:
                     ok, msg = False, str(e)
             try:
-                await event.answer(f"✅ {name} yüklendi" if ok else f"❌ {str(msg)[:60]}")
+                await _sans(event, f"✅ {name} yüklendi" if ok else f"❌ {str(msg)[:60]}")
             except Exception:
                 pass
 
@@ -617,10 +672,10 @@ def register_bot_handlers(bot):
         plugin = event.pattern_match.group(1).decode()
         try:
             ok = await premium.send_star_invoice(bot, event.sender_id, plugin)
-            await event.answer("📩 Fatura gönderildi!" if ok else "❌ Fatura gönderilemedi.",
+            await _sans(event, "📩 Fatura gönderildi!" if ok else "❌ Fatura gönderilemedi.",
                                alert=not ok)
         except Exception:
-            await event.answer("❌ Hata oluştu.", alert=True)
+            await _sans(event, "❌ Hata oluştu.", alert=True)
 
     if not getattr(bot, "_premium_reminder_started", False):
         bot._premium_reminder_started = True
@@ -683,10 +738,10 @@ def register_bot_handlers(bot):
         tu = int(event.pattern_match.group(1).decode())
         gi = int(event.pattern_match.group(2).decode())
         if tu != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True); return
+            await _sans(event, "❌ Bu panel size ait değil!", alert=True); return
         await _render_premium_settings(event, tu, gi)
         try:
-            await event.answer()
+            await _sans(event, )
         except Exception:
             pass
 
@@ -696,7 +751,7 @@ def register_bot_handlers(bot):
         gi = int(event.pattern_match.group(2).decode())
         t = event.pattern_match.group(3).decode()
         if tu != event.sender_id or event.sender_id != config.OWNER_ID:
-            await event.answer("❌ İzin yok.", alert=True); return
+            await _sans(event, "❌ İzin yok.", alert=True); return
         name = await _pset_name(event, gi)
         if name and t in premium.TYPES:
             premium.set_config(name, ptype=t)
@@ -708,7 +763,7 @@ def register_bot_handlers(bot):
                 except Exception:
                     pass
             try:
-                await event.answer(f"Tip: {premium.TYPE_LABELS.get(t, t)}")
+                await _sans(event, f"Tip: {premium.TYPE_LABELS.get(t, t)}")
             except Exception:
                 pass
         await _render_premium_settings(event, tu, gi)
@@ -719,12 +774,12 @@ def register_bot_handlers(bot):
         gi = int(event.pattern_match.group(2).decode())
         stars = int(event.pattern_match.group(3).decode())
         if tu != event.sender_id or event.sender_id != config.OWNER_ID:
-            await event.answer("❌ İzin yok.", alert=True); return
+            await _sans(event, "❌ İzin yok.", alert=True); return
         name = await _pset_name(event, gi)
         if name:
             premium.set_config(name, stars=stars)
             try:
-                await event.answer(f"Fiyat: {stars} ⭐")
+                await _sans(event, f"Fiyat: {stars} ⭐")
             except Exception:
                 pass
         await _render_premium_settings(event, tu, gi)
@@ -735,12 +790,12 @@ def register_bot_handlers(bot):
         gi = int(event.pattern_match.group(2).decode())
         days = int(event.pattern_match.group(3).decode())
         if tu != event.sender_id or event.sender_id != config.OWNER_ID:
-            await event.answer("❌ İzin yok.", alert=True); return
+            await _sans(event, "❌ İzin yok.", alert=True); return
         name = await _pset_name(event, gi)
         if name:
             premium.set_config(name, days=days)
             try:
-                await event.answer(f"Süre: {days} gün")
+                await _sans(event, f"Süre: {days} gün")
             except Exception:
                 pass
         await _render_premium_settings(event, tu, gi)
@@ -750,7 +805,7 @@ def register_bot_handlers(bot):
         tu = int(event.pattern_match.group(1).decode())
         gi = int(event.pattern_match.group(2).decode())
         if tu != event.sender_id or event.sender_id != config.OWNER_ID:
-            await event.answer("❌ İzin yok.", alert=True); return
+            await _sans(event, "❌ İzin yok.", alert=True); return
         name = await _pset_name(event, gi)
         subs = premium.list_active_subs(name) if name else {}
         if not subs:
@@ -763,11 +818,11 @@ def register_bot_handlers(bot):
                 lines.append(f"• `{uid}` — {left} gün")
             text = f"👥 **{name} — Aboneler ({len(subs)})**\n\n" + "\n".join(lines[:30])
         try:
-            await event.edit(text, buttons=[[Button.inline("🔙 Geri", f"ipset_{tu}_{gi}".encode())]])
+            await _sedit(event, text, buttons=[[Button.inline("🔙 Geri", f"ipset_{tu}_{gi}".encode())]])
         except Exception:
             pass
         try:
-            await event.answer()
+            await _sans(event, )
         except Exception:
             pass
 
@@ -779,7 +834,7 @@ def register_bot_handlers(bot):
         page = int(match.group(2).decode()) if match.group(2) else 0
         
         if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            await _sans(event, "❌ Bu panel size ait değil!", alert=True)
             return
         
         user_data = await db.get_user(event.sender_id)
@@ -835,17 +890,17 @@ def register_bot_handlers(bot):
         buttons.append([Button.inline("🔙 Geri", f"ip_main_{target_user_id}".encode())])
         
         try:
-            await event.edit(text, buttons=buttons)
+            await _sedit(event, text, buttons=buttons)
         except Exception:
             pass
-        await event.answer()
+        await _sans(event, )
     
     @bot.on(events.CallbackQuery(pattern=rb"ip_help_(\d+)"))
     async def ip_help_cb(event):
         """Tüm Komutlar — kategori menüsü"""
         target_user_id = int(event.pattern_match.group(1).decode())
         if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            await _sans(event, "❌ Bu panel size ait değil!", alert=True)
             return
 
         text = (
@@ -854,10 +909,10 @@ def register_bot_handlers(bot):
             "💡 Tüm komutlar `.` ile başlar."
         )
         try:
-            await event.edit(text, buttons=_cmdcat_buttons(target_user_id))
+            await _sedit(event, text, buttons=_cmdcat_buttons(target_user_id))
         except Exception:
             pass
-        await event.answer()
+        await _sans(event, )
 
     @bot.on(events.CallbackQuery(pattern=rb"ip_cmdcat_(\d+)_(\d+)"))
     async def ip_cmdcat_cb(event):
@@ -865,25 +920,25 @@ def register_bot_handlers(bot):
         target_user_id = int(event.pattern_match.group(1).decode())
         idx = int(event.pattern_match.group(2).decode())
         if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            await _sans(event, "❌ Bu panel size ait değil!", alert=True)
             return
         if idx < 0 or idx >= len(ALL_COMMANDS):
-            await event.answer("Kategori bulunamadı.", alert=True)
+            await _sans(event, "Kategori bulunamadı.", alert=True)
             return
         text = _render_cmd_category(idx)
         buttons = [[Button.inline("🔙 Kategoriler", f"ip_help_{target_user_id}".encode())]]
         try:
-            await event.edit(text, buttons=buttons)
+            await _sedit(event, text, buttons=buttons)
         except Exception:
             pass
-        await event.answer()
+        await _sans(event, )
 
     @bot.on(events.CallbackQuery(pattern=rb"ip_channel_(\d+)"))
     async def ip_channel_cb(event):
         """Plugin kanalı"""
         target_user_id = int(event.pattern_match.group(1).decode())
         if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            await _sans(event, "❌ Bu panel size ait değil!", alert=True)
             return
         
         channel = getattr(config, 'PLUGIN_CHANNEL', 'KingTGPlugins')
@@ -899,23 +954,23 @@ def register_bot_handlers(bot):
         ]
         
         try:
-            await event.edit(text, buttons=buttons)
+            await _sedit(event, text, buttons=buttons)
         except Exception:
             pass
-        await event.answer()
+        await _sans(event, )
     
     @bot.on(events.CallbackQuery(pattern=rb"ip_main_(\d+)"))
     async def ip_main_cb(event):
         """Ana panel"""
         target_user_id = int(event.pattern_match.group(1).decode())
         if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
+            await _sans(event, "❌ Bu panel size ait değil!", alert=True)
             return
         
         bot_username = get_bot_username()
         user_data = await db.get_user(event.sender_id)
         if not user_data:
-            await event.answer("❌ Hata!", alert=True)
+            await _sans(event, "❌ Hata!", alert=True)
             return
         
         active_plugins = user_data.get("active_plugins", [])
@@ -945,10 +1000,10 @@ def register_bot_handlers(bot):
             buttons.append([Button.url("🤖 Bot Ayarları", f"https://t.me/{bot_username}?start=panel")])
         
         try:
-            await event.edit(text, buttons=buttons)
+            await _sedit(event, text, buttons=buttons)
         except Exception:
             pass
-        await event.answer()
+        await _sans(event, )
     
     log.info("Bot inline handler'ları kaydedildi")
 

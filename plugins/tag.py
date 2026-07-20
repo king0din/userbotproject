@@ -881,6 +881,17 @@ def _register_tag_bot_handlers(bot):
 
     from telethon import events
     import re as _re
+    import utils.i18n as _i18n
+
+    async def _tr(owner, text, buttons=None):
+        """Panel metnini + butonlarını sahibin diline çevirir."""
+        lang = _i18n.get_user_lang_cached(owner)
+        if lang and lang != "tr":
+            if text:
+                text = await _i18n.translate(text, lang)
+            if buttons:
+                buttons = await _i18n.translate_telethon_buttons(buttons, lang)
+        return text, buttons
 
     @bot.on(events.InlineQuery())
     async def _tag_inline(event):
@@ -892,11 +903,13 @@ def _register_tag_bot_handlers(bot):
         pend = bot._tag_pending.get(owner)
         has_msg = bool(pend and pend.get("has_msg"))
         try:
+            _tt, _tb = await _tr(owner, _panel_text_step1(has_msg),
+                                 _step1_buttons(owner, has_msg))
             result = event.builder.article(
                 title="🏷️ Etiketleme Paneli",
                 description="Seçim yapmak için dokunun",
-                text=_panel_text_step1(has_msg),
-                buttons=_step1_buttons(owner, has_msg),
+                text=_tt,
+                buttons=_tb,
             )
             await event.answer([result], cache_time=0)
         except Exception:
@@ -916,7 +929,8 @@ def _register_tag_bot_handlers(bot):
             return
         pend["group_size"] = max(1, min(10, n))
         try:
-            await event.edit(_panel_text_interval(), buttons=_interval_buttons(owner))
+            _tt, _tb = await _tr(owner, _panel_text_interval(), _interval_buttons(owner))
+            await event.edit(_tt, buttons=_tb)
         except Exception:
             pass
 
@@ -938,7 +952,8 @@ def _register_tag_bot_handlers(bot):
         pend["category"] = key
         # Grup boyutunu kullanıcı seçsin (sözlü modda da: 1 önerilir)
         try:
-            await event.edit(_panel_text_groupsize(), buttons=_group_size_buttons(owner))
+            _tt, _tb = await _tr(owner, _panel_text_groupsize(), _group_size_buttons(owner))
+            await event.edit(_tt, buttons=_tb)
         except Exception:
             pass
 
@@ -978,12 +993,12 @@ def _register_tag_bot_handlers(bot):
         else:
             src = "girdiğiniz mesajla"
         try:
-            await event.edit(
+            _tt, _ = await _tr(owner,
                 f"✅ **Etiketleme başladı!**\n\n"
                 f"Tüm {mode_txt}, {gsize}'erli gruplar halinde, {interval:g} sn arayla "
                 f"{src} etiketliyorum.\n\n"
-                f"⏹️ Durdurmak için: `.tagstop`"
-            )
+                f"⏹️ Durdurmak için: `.tagstop`")
+            await event.edit(_tt)
         except Exception:
             pass
 
