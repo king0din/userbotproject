@@ -9,7 +9,8 @@
 sessions/
 bot_session.session
 # Veri
-data/
+data/*
+!data/lang/
 *.json
 plugins/otomsg_tasks.json
 plugins/tag_blocked.json
