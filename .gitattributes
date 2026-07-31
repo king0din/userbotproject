@@ -1,0 +1,46 @@
+# ============================================
+# Satır sonu (line ending) kuralları
+# ============================================
+# Amaç: dosyalar hangi makinede açılırsa açılsın aynı davransın.
+# Depoda her şey LF saklanır, Windows çalışma kopyasında CRLF olur.
+# Bu sayede "LF will be replaced by CRLF" uyarıları biter ve
+# PC ile sunucu arasında sahte "değişmiş dosya" farkı oluşmaz.
+
+* text=auto
+
+# --- Kod / metin ---
+*.py    text
+*.md    text
+*.txt   text
+*.json  text
+*.yml   text
+*.yaml  text
+*.cfg   text
+*.ini   text
+*.env   text
+
+# --- Windows scriptleri: CRLF ZORUNLU ---
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# --- Unix scriptleri: LF ZORUNLU ---
+# (CRLF olursa Linux'ta "bad interpreter: /bin/bash^M" hatası verir)
+*.sh    text eol=lf
+
+# --- İkili dosyalar: git ASLA dokunmasın ---
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.webp    binary
+*.webm    binary
+*.tgs     binary
+*.mp4     binary
+*.mp3     binary
+*.ogg     binary
+*.zip     binary
+*.gz      binary
+*.session binary
+*.db      binary
+*.ico     binary

@@ -6,6 +6,10 @@ from .mongo import db, MongoDB
 from .local import local_db, LocalStorage
 from typing import Optional, Dict, List, Any
 import config
+import logging
+
+log = logging.getLogger(f"kingtg.{__name__}")
+
 
 class Database:
     """
@@ -94,7 +98,7 @@ class Database:
     async def save_session(self, user_id: int, session_data: str, session_type: str,
                           phone: str = None, remember: bool = False) -> bool:
         """Session kaydet"""
-        print(f"[DB] Session kaydediliyor: user={user_id}, type={session_type}, remember={remember}")
+        log.info("Session kaydediliyor: user=%s, type=%s, remember=%s", user_id, session_type, remember)
         
         # Yerel dosyaya kaydet
         local_result = self.local.save_session(user_id, session_data, session_type, phone, remember)
@@ -103,7 +107,7 @@ class Database:
         if self.mongo.connected:
             await self.mongo.save_session(user_id, session_data, session_type, phone, remember)
         
-        print(f"[DB] Session kaydedildi: {local_result}")
+        log.info("Session kaydedildi: %s", local_result)
         return local_result
     
     async def get_session(self, user_id: int) -> Optional[Dict]:
@@ -111,14 +115,14 @@ class Database:
         # Önce yerel dosyadan dene
         session = self.local.get_session(user_id)
         if session and session.get("data"):
-            print(f"[DB] Session bulundu (local): user={user_id}, type={session.get('type')}")
+            log.info("Session bulundu (local): user=%s, type=%s", user_id, session.get('type'))
             return session
         
         # MongoDB'den dene
         if self.mongo.connected:
             user = await self.mongo.get_user(user_id)
             if user and user.get("session_data"):
-                print(f"[DB] Session bulundu (mongo): user={user_id}")
+                log.info("Session bulundu (mongo): user=%s", user_id)
                 return {
                     "data": user.get("session_data"),
                     "type": user.get("session_type"),
@@ -126,12 +130,12 @@ class Database:
                     "remember": user.get("remember_session", False)
                 }
         
-        print(f"[DB] Session bulunamadı: user={user_id}")
+        log.info("Session bulunamadı: user=%s", user_id)
         return None
     
     async def clear_session(self, user_id: int, keep_data: bool = False) -> bool:
         """Session temizle"""
-        print(f"[DB] Session temizleniyor: user={user_id}, keep_data={keep_data}")
+        log.info("Session temizleniyor: user=%s, keep_data=%s", user_id, keep_data)
         
         # Yerel temizle
         self.local.clear_session(user_id, keep_data)

@@ -26,3 +26,9 @@ speedtest-cli>=2.1.3
 # Opsiyonel: Pyrogram desteği için
 # pyrogram>=2.0.0
 # tgcrypto>=1.2.0
+yt-dlp
+
+# Çıkartma plugini (.stic) — video/GIF dönüştürme
+# NOT: Asıl gereksinim sistemde kurulu 'ffmpeg'dir.
+# Sistemde ffmpeg yoksa aşağıdaki paket yedek olarak kullanılır.
+imageio-ffmpeg

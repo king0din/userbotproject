@@ -6,7 +6,6 @@
 
 import asyncio
 import subprocess
-import os
 
 # Geçici dizin
 TEMP_DIR = "/tmp"
@@ -21,7 +20,7 @@ async def edit_or_reply(event, text, **kwargs):
     """Mesajı düzenle veya yanıtla"""
     try:
         return await event.edit(text, **kwargs)
-    except:
+    except Exception:
         return await event.reply(text, **kwargs)
 
 async def edit_delete(event, text, time=5):
@@ -110,5 +109,5 @@ async def progress(current, total, event, start_time, action="İşleniyor"):
     
     try:
         await event.edit(text)
-    except:
+    except Exception:
         pass

@@ -35,17 +35,68 @@ Not: Türkçe için ülke kodu girmenize gerek yok sadece cinsiyet yazmanız yet
 Örnek: .sesayar erkek
 """
 
-from telethon import events
-import asyncio
+
+from userbot.events import register
 import os
 import tempfile
 import edge_tts
+import json
+from utils.logger import get_logger
+
+log = get_logger(__name__)
 
 # Varsayılan ses (Türkçe erkek)
 DEFAULT_VOICE = "tr-TR-AhmetNeural"
 
-# Mevcut ses ayarı
-current_voice = DEFAULT_VOICE
+
+# ── SES TERCİHİ KALICILIĞI (restart'ta seçtiğin ses kaybolmasın) ──
+_VOICE_FILE = os.path.join(os.path.dirname(__file__), "ses_voice.json")
+
+
+def _load_voice(uid):
+    try:
+        if os.path.exists(_VOICE_FILE):
+            with open(_VOICE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f).get(str(uid))
+    except Exception as _e:
+        log.debug(f"ses tercihi okunamadı: {_e}")
+    return None
+
+
+def _save_voice(uid, code):
+    data = {}
+    try:
+        if os.path.exists(_VOICE_FILE):
+            with open(_VOICE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+    except Exception as _e:
+        log.debug(f"ses tercihi okunamadı: {_e}")
+    data[str(uid)] = code
+    try:
+        _tmp = _VOICE_FILE + ".tmp"
+        with open(_tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(_tmp, _VOICE_FILE)
+    except Exception as _e:
+        log.warning(f"ses tercihi kaydedilemedi: {_e}")
+
+
+def cleanup_user_data(user_id, reason="disable"):
+    """Kullanıcının ses tercihini temizle. Çıkışta korunur (tercih); devre dışı/silmede silinir."""
+    try:
+        if reason == "logout":
+            return
+        if os.path.exists(_VOICE_FILE):
+            with open(_VOICE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if str(user_id) in data:
+                data.pop(str(user_id), None)
+                _tmp = _VOICE_FILE + ".tmp"
+                with open(_tmp, "w", encoding="utf-8") as f:
+                    json.dump(data, f)
+                os.replace(_tmp, _VOICE_FILE)
+    except Exception:
+        pass
 
 # Chunk boyutu (karakter)
 CHUNK_SIZE = 4000
@@ -171,226 +222,226 @@ async def get_text_from_file(client, message):
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.unlink(tmp_path)
-            except:
-                pass
+            except Exception as _e:
+                log.debug(f"geçici ses dosyası silinemedi: {_e}")
         return None
 
 
-def register(client):
-    
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.ses(?:\s+(.+))?$'))
-    async def tts_cmd(event):
-        global current_voice
-        
-        text = event.pattern_match.group(1)
-        
-        # Yanıt verilen mesajdan metin al
-        reply = await event.get_reply_message()
-        if reply and not text:
-            # Önce dosya var mı kontrol et
-            if reply.document:
-                # Dosya adını kontrol et
-                file_name = ""
-                if hasattr(reply.document, 'attributes'):
-                    for attr in reply.document.attributes:
-                        if hasattr(attr, 'file_name'):
-                            file_name = attr.file_name or ""
-                            break
-                
-                # .txt dosyası mı?
-                if file_name.lower().endswith('.txt') or reply.document.mime_type == 'text/plain':
-                    await event.edit("📄 **Dosya okunuyor...**")
-                    text = await get_text_from_file(client, reply)
-                    
-                    if not text:
-                        await event.edit("❌ Dosya okunamadı!")
-                        return
-                else:
-                    await event.edit("❌ Sadece `.txt` dosyaları desteklenir!")
+
+@register(outgoing=True, pattern=r'^\.(?:ses|tts)(?:\s+(.+))?$')
+async def tts_cmd(event):
+    # Her kullanıcının kendi sesini KULLAN (global paylaşım = yarış hatası).
+    # Kullanıcının kayıtlı sesi yoksa varsayılan ses kullanılır.
+    me = await event.client.get_me()
+    voice = _load_voice(me.id) or DEFAULT_VOICE
+
+    text = event.pattern_match.group(1)
+
+    # Yanıt verilen mesajdan metin al
+    reply = await event.get_reply_message()
+    if reply and not text:
+        # Önce dosya var mı kontrol et
+        if reply.document:
+            # Dosya adını kontrol et
+            file_name = ""
+            if hasattr(reply.document, 'attributes'):
+                for attr in reply.document.attributes:
+                    if hasattr(attr, 'file_name'):
+                        file_name = attr.file_name or ""
+                        break
+
+            # .txt dosyası mı?
+            if file_name.lower().endswith('.txt') or reply.document.mime_type == 'text/plain':
+                await event.edit("📄 **Dosya okunuyor...**")
+                text = await get_text_from_file(event.client, reply)
+
+                if not text:
+                    await event.edit("❌ Dosya okunamadı!")
                     return
             else:
-                # Normal metin mesajı
-                text = reply.raw_text
-        
-        if not text:
-            await event.edit(
-                "❌ **Kullanım:**\n"
-                "`.ses <metin>`\n"
-                "veya bir mesaja yanıt vererek: `.ses`\n"
-                "veya bir `.txt` dosyasına yanıt vererek: `.ses`"
-            )
-            return
-        
-        char_count = len(text)
-        
-        # Kısa metin - direkt işle
-        if char_count <= CHUNK_SIZE:
-            await event.edit(f"🎙️ **Ses oluşturuluyor...**\n`{char_count} karakter`")
-            
-            try:
-                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-                    tmp_path = tmp.name
-                
-                communicate = edge_tts.Communicate(text, current_voice)
-                await communicate.save(tmp_path)
-                
-                await event.edit("📤 **Gönderiliyor...**")
-                
-                if reply:
-                    await client.send_file(
-                        event.chat_id,
-                        tmp_path,
-                        voice_note=True,
-                        reply_to=reply.id
-                    )
-                else:
-                    await client.send_file(
-                        event.chat_id,
-                        tmp_path,
-                        voice_note=True
-                    )
-                
-                await event.delete()
-                os.unlink(tmp_path)
-                
-            except Exception as e:
-                await event.edit(f"❌ **Hata:** `{e}`")
-                try:
-                    os.unlink(tmp_path)
-                except:
-                    pass
-            return
-        
-        # Uzun metin - parçalara böl
-        chunks = split_text_into_chunks(text)
-        total_chunks = len(chunks)
-        
-        await event.edit(
-            f"🎙️ **Uzun metin işleniyor...**\n"
-            f"`{char_count} karakter` → `{total_chunks} parça`"
-        )
-        
-        temp_files = []
-        
-        try:
-            # Her chunk'ı işle
-            for i, chunk in enumerate(chunks):
-                await event.edit(
-                    f"🎙️ **Ses oluşturuluyor...**\n"
-                    f"`Parça {i + 1}/{total_chunks}`"
-                )
-                
-                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-                    chunk_path = tmp.name
-                
-                await text_to_speech_chunk(chunk, current_voice, chunk_path)
-                temp_files.append(chunk_path)
-            
-            # Dosyaları birleştir
-            await event.edit(f"🔗 **Ses dosyaları birleştiriliyor...**\n`{total_chunks} parça`")
-            
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-                final_path = tmp.name
-            
-            success = await combine_audio_files(temp_files, final_path)
-            
-            if not success:
-                await event.edit("❌ Ses dosyaları birleştirilemedi!")
+                await event.edit("❌ Sadece `.txt` dosyaları desteklenir!")
                 return
-            
-            # Gönder
+        else:
+            # Normal metin mesajı
+            text = reply.raw_text
+
+    if not text:
+        await event.edit(
+            "❌ **Kullanım:**\n"
+            "`.ses <metin>`\n"
+            "veya bir mesaja yanıt vererek: `.ses`\n"
+            "veya bir `.txt` dosyasına yanıt vererek: `.ses`"
+        )
+        return
+
+    char_count = len(text)
+
+    # Kısa metin - direkt işle
+    if char_count <= CHUNK_SIZE:
+        await event.edit(f"🎙️ **Ses oluşturuluyor...**\n`{char_count} karakter`")
+
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                tmp_path = tmp.name
+
+            communicate = edge_tts.Communicate(text, voice)
+            await communicate.save(tmp_path)
+
             await event.edit("📤 **Gönderiliyor...**")
-            
-            # Dosya boyutunu kontrol et
-            file_size = os.path.getsize(final_path)
-            file_size_mb = file_size / (1024 * 1024)
-            
-            if file_size_mb > 50:
-                # 50MB'dan büyükse dosya olarak gönder
-                if reply:
-                    await client.send_file(
-                        event.chat_id,
-                        final_path,
-                        caption=f"🎙️ TTS ({char_count} karakter, {file_size_mb:.1f}MB)",
-                        reply_to=reply.id
-                    )
-                else:
-                    await client.send_file(
-                        event.chat_id,
-                        final_path,
-                        caption=f"🎙️ TTS ({char_count} karakter, {file_size_mb:.1f}MB)"
-                    )
+
+            if reply:
+                await event.client.send_file(
+                    event.chat_id,
+                    tmp_path,
+                    voice_note=True,
+                    reply_to=reply.id
+                )
             else:
-                # Voice note olarak gönder
-                if reply:
-                    await client.send_file(
-                        event.chat_id,
-                        final_path,
-                        voice_note=True,
-                        reply_to=reply.id
-                    )
-                else:
-                    await client.send_file(
-                        event.chat_id,
-                        final_path,
-                        voice_note=True
-                    )
-            
+                await event.client.send_file(
+                    event.chat_id,
+                    tmp_path,
+                    voice_note=True
+                )
+
             await event.delete()
-            
         except Exception as e:
             await event.edit(f"❌ **Hata:** `{e}`")
-        
         finally:
-            # Geçici dosyaları temizle
-            for tmp_file in temp_files:
+            if tmp_path and os.path.exists(tmp_path):
                 try:
-                    os.unlink(tmp_file)
-                except:
+                    os.unlink(tmp_path)
+                except Exception:
                     pass
-            try:
-                os.unlink(final_path)
-            except:
-                pass
-    
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.sesler$'))
-    async def list_voices(event):
-        text = "🎙️ **Mevcut Sesler**\n\n"
-        
-        text += "**🇹🇷 Türkçe:**\n"
-        for name, code in TURKISH_VOICES.items():
-            marker = " ✓" if code == current_voice else ""
-            text += f"• `{name}` - {code}{marker}\n"
-        
-        text += "\n**🌍 Diğer Diller:**\n"
-        for name, code in OTHER_VOICES.items():
-            marker = " ✓" if code == current_voice else ""
-            text += f"• `{name}` - {code}{marker}\n"
-        
-        text += f"\n**Şu anki ses:** `{current_voice}`"
-        text += "\n\n💡 Değiştirmek için: `.sesayar <isim>`"
-        
-        await event.edit(text)
-    
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.sesayar\s+(\S+)$'))
-    async def set_voice(event):
-        global current_voice
-        
-        voice_input = event.pattern_match.group(1).lower()
-        
-        if voice_input in ALL_VOICES:
-            current_voice = ALL_VOICES[voice_input]
-            await event.edit(f"✅ Ses değiştirildi: `{current_voice}`")
-        elif voice_input.count("-") >= 2:
-            # Direkt ses kodu girilmiş olabilir (örn: tr-TR-AhmetNeural)
-            current_voice = voice_input
-            await event.edit(f"✅ Ses değiştirildi: `{current_voice}`")
+        return
+
+    # Uzun metin - parçalara böl
+    chunks = split_text_into_chunks(text)
+    total_chunks = len(chunks)
+
+    await event.edit(
+        f"🎙️ **Uzun metin işleniyor...**\n"
+        f"`{char_count} karakter` → `{total_chunks} parça`"
+    )
+
+    temp_files = []
+
+    try:
+        # Her chunk'ı işle
+        for i, chunk in enumerate(chunks):
+            await event.edit(
+                f"🎙️ **Ses oluşturuluyor...**\n"
+                f"`Parça {i + 1}/{total_chunks}`"
+            )
+
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                chunk_path = tmp.name
+
+            await text_to_speech_chunk(chunk, voice, chunk_path)
+            temp_files.append(chunk_path)
+
+        # Dosyaları birleştir
+        await event.edit(f"🔗 **Ses dosyaları birleştiriliyor...**\n`{total_chunks} parça`")
+
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            final_path = tmp.name
+
+        success = await combine_audio_files(temp_files, final_path)
+
+        if not success:
+            await event.edit("❌ Ses dosyaları birleştirilemedi!")
+            return
+
+        # Gönder
+        await event.edit("📤 **Gönderiliyor...**")
+
+        # Dosya boyutunu kontrol et
+        file_size = os.path.getsize(final_path)
+        file_size_mb = file_size / (1024 * 1024)
+
+        if file_size_mb > 50:
+            # 50MB'dan büyükse dosya olarak gönder
+            if reply:
+                await event.client.send_file(
+                    event.chat_id,
+                    final_path,
+                    caption=f"🎙️ TTS ({char_count} karakter, {file_size_mb:.1f}MB)",
+                    reply_to=reply.id
+                )
+            else:
+                await event.client.send_file(
+                    event.chat_id,
+                    final_path,
+                    caption=f"🎙️ TTS ({char_count} karakter, {file_size_mb:.1f}MB)"
+                )
         else:
-            await event.edit(f"❌ Ses bulunamadı: `{voice_input}`\n\n💡 Mevcut sesler için: `.sesler`")
-    
-    @client.on(events.NewMessage(outgoing=True, pattern=r'^\.tts(?:\s+(.+))?$'))
-    async def tts_alias(event):
-        """Alias for .ses command - aynı işlevi görür"""
-        # .ses komutunu simüle et
-        event.pattern_match = type('obj', (object,), {'group': lambda self, x: event.text[4:].strip() if x == 1 and len(event.text) > 4 else None})()
-        await tts_cmd(event)
+            # Voice note olarak gönder
+            if reply:
+                await event.client.send_file(
+                    event.chat_id,
+                    final_path,
+                    voice_note=True,
+                    reply_to=reply.id
+                )
+            else:
+                await event.client.send_file(
+                    event.chat_id,
+                    final_path,
+                    voice_note=True
+                )
+
+        await event.delete()
+
+    except Exception as e:
+        await event.edit(f"❌ **Hata:** `{e}`")
+
+    finally:
+        # Geçici dosyaları temizle
+        for tmp_file in temp_files:
+            try:
+                os.unlink(tmp_file)
+            except Exception as _e:
+                log.debug(f"geçici dosya silinemedi: {_e}")
+        try:
+            os.unlink(final_path)
+        except Exception as _e:
+            log.debug(f"final dosya silinemedi: {_e}")
+
+@register(outgoing=True, pattern=r'^\.sesler$')
+async def list_voices(event):
+    me = await event.client.get_me()
+    voice = _load_voice(me.id) or DEFAULT_VOICE
+    text = "🎙️ **Mevcut Sesler**\n\n"
+
+    text += "**🇹🇷 Türkçe:**\n"
+    for name, code in TURKISH_VOICES.items():
+        marker = " ✓" if code == voice else ""
+        text += f"• `{name}` - {code}{marker}\n"
+
+    text += "\n**🌍 Diğer Diller:**\n"
+    for name, code in OTHER_VOICES.items():
+        marker = " ✓" if code == voice else ""
+        text += f"• `{name}` - {code}{marker}\n"
+
+    text += f"\n**Şu anki ses:** `{voice}`"
+    text += "\n\n💡 Değiştirmek için: `.sesayar <isim>`"
+
+    await event.edit(text)
+
+@register(outgoing=True, pattern=r'^\.sesayar\s+(\S+)$')
+async def set_voice(event):
+    voice_input = event.pattern_match.group(1).lower()
+
+    if voice_input in ALL_VOICES:
+        new_voice = ALL_VOICES[voice_input]
+    elif voice_input.count("-") >= 2:
+        # Direkt ses kodu girilmiş olabilir (örn: tr-TR-AhmetNeural)
+        new_voice = voice_input
+    else:
+        await event.edit(f"❌ Ses bulunamadı: `{voice_input}`\n\n💡 Mevcut sesler için: `.sesler`")
+        return
+
+    # Başarılı: kalıcı kaydet + bildir (kullanıcı bazlı, global değil)
+    me = await event.client.get_me()
+    _save_voice(me.id, new_voice)
+    await event.edit(f"✅ Ses değiştirildi: `{new_voice}` (kalıcı)")

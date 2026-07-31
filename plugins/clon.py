@@ -25,11 +25,13 @@ import os
 from telethon.tl.functions.photos import GetUserPhotosRequest, DeletePhotosRequest, UploadProfilePhotoRequest
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.account import UpdateEmojiStatusRequest
-from telethon import events
 from telethon.tl.types import InputPhoto, EmojiStatus, EmojiStatusEmpty
 from telethon.tl import functions
 from userbot.events import register
 from userbot import CMD_HELP
+from utils.logger import get_logger
+
+log = get_logger(__name__)
 
 try:
     from userbot import TEMP_DOWNLOAD_DIRECTORY
@@ -42,9 +44,20 @@ ORIGINAL_PROFILE_DIR = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "original_profile")
 if not os.path.exists(ORIGINAL_PROFILE_DIR):
     os.makedirs(ORIGINAL_PROFILE_DIR)
 
+
+def _user_original_dir(uid):
+    """Kullanıcı-başına orijinal profil foto dizini (çoklu hesapta foto çakışmasını önler)."""
+    d = os.path.join(ORIGINAL_PROFILE_DIR, str(uid))
+    os.makedirs(d, exist_ok=True)
+    return d
+
 # Şeffaf/Görünmez emoji ID (https://t.me/addemoji/blank25 paketinden)
 # Premium olmayan kullanıcı klonlanınca bu emoji kullanılır
 INVISIBLE_EMOJI_ID = 5420560971674435677
+
+# Klonlarken/geri dönerken en fazla bu kadar fotoğraf işlenir
+# (100+ fotoğraflı profillerde çökme ve uzun beklemeyi önler)
+MAX_PHOTOS = 10
 
 ORIGINAL_PROFILE = {
     "first_name": None,
@@ -53,17 +66,94 @@ ORIGINAL_PROFILE = {
     "photos": [],
     "photo_count": 0,
     "emoji_status": None,
-    "is_saved": False
+    "is_saved": False,
+    "is_cloned": False
 }
 
 
-async def download_all_profile_photos(client, user_id, save_dir, prefix="photo"):
+# ── KALICI DURUM (restart sonrası klon kilidini önler) ─────────────
+import json
+
+_CLON_STATE_FILE = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "clon_state.json")
+
+
+def _clon_load_all():
+    try:
+        if os.path.exists(_CLON_STATE_FILE):
+            with open(_CLON_STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as _e:
+        log.debug(f"Klon durumu okunamadı: {_e}")
+    return {}
+
+
+def _clon_save_all(data):
+    try:
+        _tmp = _CLON_STATE_FILE + ".tmp"
+        with open(_tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(_tmp, _CLON_STATE_FILE)
+    except Exception as _e:
+        log.warning(f"Klon durumu kaydedilemedi: {_e}")
+
+
+def _default_profile():
+    return {"first_name": None, "last_name": None, "about": None,
+            "photos": [], "photo_count": 0, "emoji_status": None, "is_saved": False, "is_cloned": False}
+
+
+def _load_state(uid):
+    p = _clon_load_all().get(str(uid))
+    if not p:
+        return _default_profile()
+    base = _default_profile()
+    base.update(p)
+    return base
+
+
+def _save_state(uid, profile):
+    data = _clon_load_all()
+    data[str(uid)] = profile
+    _clon_save_all(data)
+
+
+def _clear_state(uid):
+    data = _clon_load_all()
+    data.pop(str(uid), None)
+    _clon_save_all(data)
+
+
+def cleanup_user_data(user_id, reason="disable"):
+    """Kullanıcının klon verilerini temizle (çıkış/devre dışı/silme).
+    Kayıtlı orijinal profil varken silmez (.unclon ile dönülebilmeli); geçici klasör her zaman temizlenir."""
+    import shutil
+    try:
+        clone_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "clone_temp")
+        if os.path.isdir(clone_dir):
+            shutil.rmtree(clone_dir, ignore_errors=True)
+        state = _load_state(user_id)
+        if state.get("is_saved") and reason != "delete":
+            return
+        udir = os.path.join(ORIGINAL_PROFILE_DIR, str(user_id))
+        if os.path.isdir(udir):
+            shutil.rmtree(udir, ignore_errors=True)
+        data = _clon_load_all()
+        if str(user_id) in data:
+            data.pop(str(user_id), None)
+            _clon_save_all(data)
+    except Exception:
+        pass
+
+
+async def download_all_profile_photos(client, user_id, save_dir, prefix="photo", max_count=None):
     photos_info = []
     try:
-        result = await client(GetUserPhotosRequest(user_id=user_id, offset=0, max_id=0, limit=100))
+        result = await client(GetUserPhotosRequest(user_id=user_id, offset=0, max_id=0, limit=(max_count or 100)))
         if not result.photos:
             return photos_info
         for idx, photo in enumerate(result.photos):
+            if max_count and len(photos_info) >= max_count:
+                break
             try:
                 is_video = hasattr(photo, 'video_sizes') and photo.video_sizes
                 if is_video:
@@ -75,7 +165,7 @@ async def download_all_profile_photos(client, user_id, save_dir, prefix="photo")
                                 if downloaded:
                                     photos_info.append((downloaded, True))
                                     break
-                            except:
+                            except Exception:
                                 file_path = os.path.join(save_dir, f"{prefix}_{idx}.jpg")
                                 downloaded = await client.download_media(photo, file=file_path)
                                 if downloaded:
@@ -86,10 +176,11 @@ async def download_all_profile_photos(client, user_id, save_dir, prefix="photo")
                     downloaded = await client.download_media(photo, file=file_path)
                     if downloaded:
                         photos_info.append((downloaded, False))
-            except:
+            except Exception as _e:
+                log.debug(f"profil fotoğrafı atlandı: {_e}")
                 continue
-    except:
-        pass
+    except Exception as _e:
+        log.warning(f"profil fotoğrafları indirilemedi: {_e}")
     return photos_info
 
 
@@ -104,8 +195,8 @@ async def delete_all_my_photos(client):
                 await client(DeletePhotosRequest(id=input_photos))
             else:
                 break
-    except:
-        pass
+    except Exception as _e:
+        log.warning(f"profil fotoğrafları silinemedi: {_e}")
 
 
 async def get_target_user(client, event, input_str=None):
@@ -183,54 +274,53 @@ async def klon_with_input(event):
 
 async def do_clone(event, input_str):
     global ORIGINAL_PROFILE
-    
+
     await event.edit("`🔄 Klonlanıyor...`")
-    
-    # Orijinal profili kaydet
+
+    me = await event.client.get_me()
+    ORIGINAL_PROFILE = _load_state(me.id)  # diskten (restart sonrası bile)
+
+    # Orijinal profili kaydet (henüz kaydedilmemişse)
     if not ORIGINAL_PROFILE["is_saved"]:
         try:
             await event.edit("`📸 Orijinal profilin kaydediliyor...`")
-            
-            me = await event.client.get_me()
+
             my_full = await event.client(GetFullUserRequest(me.id))
-            
+
             ORIGINAL_PROFILE["first_name"] = me.first_name or ""
             ORIGINAL_PROFILE["last_name"] = me.last_name or ""
             ORIGINAL_PROFILE["about"] = my_full.full_user.about or "" if hasattr(my_full, 'full_user') else ""
-            
-            for f in os.listdir(ORIGINAL_PROFILE_DIR):
+
+            _udir = _user_original_dir(me.id)
+            for f in os.listdir(_udir):
                 try:
-                    os.remove(os.path.join(ORIGINAL_PROFILE_DIR, f))
-                except:
+                    os.remove(os.path.join(_udir, f))
+                except Exception:
                     pass
-            
-            ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, ORIGINAL_PROFILE_DIR, "original")
+
+            ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, _udir, "original", max_count=MAX_PHOTOS)
             ORIGINAL_PROFILE["photo_count"] = len(ORIGINAL_PROFILE["photos"])
-            
-            # Emoji status kaydet
-            if hasattr(me, 'emoji_status') and me.emoji_status:
-                if hasattr(me.emoji_status, 'document_id'):
-                    ORIGINAL_PROFILE["emoji_status"] = me.emoji_status.document_id
-                else:
-                    ORIGINAL_PROFILE["emoji_status"] = None
+
+            if hasattr(me, 'emoji_status') and me.emoji_status and hasattr(me.emoji_status, 'document_id'):
+                ORIGINAL_PROFILE["emoji_status"] = me.emoji_status.document_id
             else:
                 ORIGINAL_PROFILE["emoji_status"] = None
-            
+
             ORIGINAL_PROFILE["is_saved"] = True
-            
+            _save_state(me.id, ORIGINAL_PROFILE)  # KALICI: restart'ta kaybolmaz
+
         except Exception as e:
             await event.edit(f"`❌ Profil kaydedilemedi: {e}`")
             return
-    
+
     # Hedef kullanıcıyı bul
     replied_user, error = await get_target_user(event.client, event, input_str)
-    
+
     if not replied_user:
         await event.edit(f"`❌ {error}`")
         return
-    
+
     try:
-        # Kullanıcı bilgilerini al
         if hasattr(replied_user, 'users') and replied_user.users:
             target_user = replied_user.users[0]
         elif hasattr(replied_user, 'user'):
@@ -238,29 +328,26 @@ async def do_clone(event, input_str):
         else:
             await event.edit("`❌ Kullanıcı bilgisi alınamadı!`")
             return
-        
+
         user_id = target_user.id
         first_name = target_user.first_name.replace("\u2060", "") if target_user.first_name else ""
         last_name = target_user.last_name.replace("\u2060", "") if target_user.last_name else ""
         user_bio = replied_user.full_user.about if hasattr(replied_user, 'full_user') and replied_user.full_user.about else ""
-        
-        # Hedef fotoğrafları indir
+
         clone_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "clone_temp")
         if not os.path.exists(clone_dir):
             os.makedirs(clone_dir)
         for f in os.listdir(clone_dir):
             try:
                 os.remove(os.path.join(clone_dir, f))
-            except:
+            except Exception:
                 pass
-        
-        target_photos = await download_all_profile_photos(event.client, user_id, clone_dir, "clone")
-        
-        # Profili güncelle
+
+        target_photos = await download_all_profile_photos(event.client, user_id, clone_dir, "clone", max_count=MAX_PHOTOS)
+
         await event.client(functions.account.UpdateProfileRequest(first_name=first_name, last_name=last_name, about=user_bio))
         await delete_all_my_photos(event.client)
-        
-        # Fotoğrafları yükle
+
         if target_photos:
             for photo_path, is_video in reversed(target_photos):
                 if os.path.exists(photo_path):
@@ -270,10 +357,16 @@ async def do_clone(event, input_str):
                             await event.client(UploadProfilePhotoRequest(video=pfile))
                         else:
                             await event.client(UploadProfilePhotoRequest(file=pfile))
-                    except:
+                    except Exception:
                         pass
-        
-        # Emoji status klonla (premium gerektirir)
+
+        # Hedefin indirilen fotoğrafları profile yüklendi — yerel kopyaları temizle (çöp bırakma)
+        for _cf in os.listdir(clone_dir):
+            try:
+                os.remove(os.path.join(clone_dir, _cf))
+            except Exception:
+                pass
+
         emoji_status_msg = ""
         try:
             if hasattr(target_user, 'emoji_status') and target_user.emoji_status:
@@ -283,22 +376,23 @@ async def do_clone(event, input_str):
                     ))
                     emoji_status_msg = ", emoji ✓"
             else:
-                # Hedefin emoji status'u yoksa şeffaf emoji koy (premium gibi görünmemesi için)
                 await event.client(UpdateEmojiStatusRequest(
                     emoji_status=EmojiStatus(document_id=INVISIBLE_EMOJI_ID)
                 ))
                 emoji_status_msg = ", emoji 👻"
         except Exception as e:
-            # Premium değilse veya hata olursa sessizce geç
             if "PREMIUM_ACCOUNT_REQUIRED" in str(e):
                 emoji_status_msg = ", emoji ✗ (premium gerekli)"
             pass
 
         photo_status = f"{len(target_photos)} fotoğraf/video" if target_photos else "fotoğraf yok"
         bio_status = "bio var" if user_bio else "bio yok"
-        
+
+        ORIGINAL_PROFILE["is_cloned"] = True
+        _save_state(me.id, ORIGINAL_PROFILE)
+
         await event.edit(f"`✅ Klonlandı! ({photo_status}, {bio_status}{emoji_status_msg})`")
-        
+
     except Exception as e:
         await event.edit(f"`❌ Hata: {str(e)}`")
 
@@ -308,23 +402,25 @@ async def unclone(event):
     global ORIGINAL_PROFILE
     if event.fwd_from:
         return
-    
+
+    me = await event.client.get_me()
+    ORIGINAL_PROFILE = _load_state(me.id)  # diskten: restart sonrası bile geri dönebilir
+
     if not ORIGINAL_PROFILE["is_saved"]:
         await event.edit("`❌ Kayıtlı profil yok! Önce birini klonla.`")
         return
-    
+
     await event.edit("`🔄 Orijinal profile dönülüyor...`")
-    
+
     try:
         await event.client(functions.account.UpdateProfileRequest(
             first_name=ORIGINAL_PROFILE["first_name"],
             last_name=ORIGINAL_PROFILE["last_name"],
             about=ORIGINAL_PROFILE["about"]
         ))
-        
+
         await delete_all_my_photos(event.client)
-        
-        # Emoji status geri yükle
+
         try:
             if ORIGINAL_PROFILE["emoji_status"]:
                 await event.client(UpdateEmojiStatusRequest(
@@ -332,9 +428,9 @@ async def unclone(event):
                 ))
             else:
                 await event.client(UpdateEmojiStatusRequest(emoji_status=EmojiStatusEmpty()))
-        except:
+        except Exception:
             pass
-        
+
         uploaded_count = 0
         if ORIGINAL_PROFILE["photos"]:
             for photo_path, is_video in reversed(ORIGINAL_PROFILE["photos"]):
@@ -346,14 +442,17 @@ async def unclone(event):
                         else:
                             await event.client(UploadProfilePhotoRequest(file=pfile))
                         uploaded_count += 1
-                    except:
+                    except Exception:
                         pass
-        
+
+        ORIGINAL_PROFILE["is_cloned"] = False
+        _save_state(me.id, ORIGINAL_PROFILE)
+
         if uploaded_count > 0:
             await event.edit(f"`✅ Orijinal profile döndün! ({uploaded_count} fotoğraf/video)`")
         else:
             await event.edit("`✅ Orijinal profile döndün!`")
-        
+
     except Exception as e:
         await event.edit(f"`❌ Hata: {str(e)}`")
 
@@ -363,15 +462,19 @@ async def reset_clone_data(event):
     global ORIGINAL_PROFILE
     if event.fwd_from:
         return
-    
+
+    me = await event.client.get_me()
+    ORIGINAL_PROFILE = _load_state(me.id)
+
     for photo_path, _ in ORIGINAL_PROFILE.get("photos", []):
         if photo_path and os.path.exists(photo_path):
             try:
                 os.remove(photo_path)
-            except:
+            except Exception:
                 pass
-    
-    ORIGINAL_PROFILE = {"first_name": None, "last_name": None, "about": None, "photos": [], "photo_count": 0, "emoji_status": None, "is_saved": False}
+
+    ORIGINAL_PROFILE = _default_profile()
+    _clear_state(me.id)  # diskten de sil
     await event.edit("`✅ Klon verileri sıfırlandı!`")
 
 
@@ -380,42 +483,41 @@ async def save_my_profile(event):
     global ORIGINAL_PROFILE
     if event.fwd_from:
         return
-    
+
     await event.edit("`🔄 Profilin kaydediliyor...`")
-    
+
     try:
         me = await event.client.get_me()
+        ORIGINAL_PROFILE = _load_state(me.id)
         my_full = await event.client(GetFullUserRequest(me.id))
-        
+
         ORIGINAL_PROFILE["first_name"] = me.first_name or ""
         ORIGINAL_PROFILE["last_name"] = me.last_name or ""
         ORIGINAL_PROFILE["about"] = my_full.full_user.about or "" if hasattr(my_full, 'full_user') else ""
-        
-        for f in os.listdir(ORIGINAL_PROFILE_DIR):
+
+        _udir = _user_original_dir(me.id)
+        for f in os.listdir(_udir):
             try:
-                os.remove(os.path.join(ORIGINAL_PROFILE_DIR, f))
-            except:
+                os.remove(os.path.join(_udir, f))
+            except Exception:
                 pass
-        
-        ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, ORIGINAL_PROFILE_DIR, "original")
+
+        ORIGINAL_PROFILE["photos"] = await download_all_profile_photos(event.client, me.id, _udir, "original", max_count=MAX_PHOTOS)
         ORIGINAL_PROFILE["photo_count"] = len(ORIGINAL_PROFILE["photos"])
-        
-        # Emoji status kaydet
-        if hasattr(me, 'emoji_status') and me.emoji_status:
-            if hasattr(me.emoji_status, 'document_id'):
-                ORIGINAL_PROFILE["emoji_status"] = me.emoji_status.document_id
-            else:
-                ORIGINAL_PROFILE["emoji_status"] = None
+
+        if hasattr(me, 'emoji_status') and me.emoji_status and hasattr(me.emoji_status, 'document_id'):
+            ORIGINAL_PROFILE["emoji_status"] = me.emoji_status.document_id
         else:
             ORIGINAL_PROFILE["emoji_status"] = None
-        
+
         ORIGINAL_PROFILE["is_saved"] = True
-        
+        _save_state(me.id, ORIGINAL_PROFILE)  # KALICI
+
         video_count = sum(1 for _, is_video in ORIGINAL_PROFILE["photos"] if is_video)
         photo_count = ORIGINAL_PROFILE["photo_count"] - video_count
         bio_display = ORIGINAL_PROFILE['about'][:50] + '...' if len(ORIGINAL_PROFILE['about']) > 50 else (ORIGINAL_PROFILE['about'] or "(boş)")
         emoji_display = "✓" if ORIGINAL_PROFILE["emoji_status"] else "yok"
-        
+
         await event.edit(
             f"`✅ Profilin kaydedildi!`\n"
             f"`👤 {ORIGINAL_PROFILE['first_name']} {ORIGINAL_PROFILE['last_name']}`\n"
@@ -431,21 +533,26 @@ async def clone_info(event):
     global ORIGINAL_PROFILE
     if event.fwd_from:
         return
-    
+
+    me = await event.client.get_me()
+    ORIGINAL_PROFILE = _load_state(me.id)
+
     if not ORIGINAL_PROFILE["is_saved"]:
         await event.edit("`❌ Kayıtlı profil yok!`")
         return
-    
+
     video_count = sum(1 for _, is_video in ORIGINAL_PROFILE["photos"] if is_video)
     photo_count = ORIGINAL_PROFILE["photo_count"] - video_count
     bio_display = ORIGINAL_PROFILE['about'] if ORIGINAL_PROFILE['about'] else "(boş)"
     emoji_display = "✓" if ORIGINAL_PROFILE["emoji_status"] else "yok"
-    
+    clone_status = "🟢 şu an klonlu" if ORIGINAL_PROFILE.get("is_cloned") else "⚪ klon aktif değil"
+
     await event.edit(
         f"**📋 Kayıtlı Profil:**\n\n"
         f"`👤` {ORIGINAL_PROFILE['first_name']} {ORIGINAL_PROFILE['last_name']}\n"
         f"`📝` {bio_display}\n"
-        f"`📷` {photo_count} `🎥` {video_count} `😀` {emoji_display}"
+        f"`📷` {photo_count} `🎥` {video_count} `😀` {emoji_display}\n"
+        f"`🔁` {clone_status}"
     )
 
 

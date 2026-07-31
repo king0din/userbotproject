@@ -122,7 +122,7 @@ def register(bot):
             return
         
         try: await event.delete()
-        except: pass
+        except Exception: pass
         
         msg = await bot.send_message(user_id, "⏳ Kod gönderiliyor...")
         result = await userbot_manager.start_phone_login(user_id, phone)
@@ -146,7 +146,7 @@ def register(bot):
         code = event.text.strip().replace(" ", "").replace("-", "")
         
         try: await event.delete()
-        except: pass
+        except Exception: pass
         
         msg = await bot.send_message(user_id, "⏳ Doğrulanıyor...")
         result = await userbot_manager.verify_code(user_id, code)
@@ -172,7 +172,7 @@ def register(bot):
         password = event.text.strip()
         
         try: await event.delete()
-        except: pass
+        except Exception: pass
         
         msg = await bot.send_message(user_id, "⏳ Doğrulanıyor...")
         result = await userbot_manager.verify_2fa(user_id, password)
@@ -189,7 +189,7 @@ def register(bot):
         session_string = event.text.strip()
         
         try: await event.delete()
-        except: pass
+        except Exception: pass
         
         msg = await bot.send_message(user_id, "⏳ Session doğrulanıyor...")
         result = await userbot_manager.login_with_session(user_id, session_string, session_type)
