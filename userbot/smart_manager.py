@@ -222,7 +222,14 @@ class SmartSessionManager:
                 log.info("Kullanıcı yetkili değil: user=%s", user_id)
                 await client.disconnect()
                 return None
-            
+
+            # Plugin çıktılarını (send/edit/respond) sahibin diline çevir
+            try:
+                import utils.i18n as _i18n
+                _i18n.install_client_translation(client, user_id)
+            except Exception:
+                pass
+
             return client
             
         except (AuthKeyUnregisteredError, UserDeactivatedBanError, UserDeactivatedError) as e:

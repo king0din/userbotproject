@@ -410,9 +410,9 @@ def register(bot):
         ]]
         if configured and ptype == "premium":
             sp = _prem.STAR_PRESETS
-            rows.append([btn.callback(("✅" if s == stars else "") + f"{s}⭐", f"psetpstars_{plugin_name}_{s}", style=ButtonBuilder.STYLE_SECONDARY) for s in sp[:3]])
-            rows.append([btn.callback(("✅" if s == stars else "") + f"{s}⭐", f"psetpstars_{plugin_name}_{s}", style=ButtonBuilder.STYLE_SECONDARY) for s in sp[3:]])
-            rows.append([btn.callback(("✅" if d == days else "") + lbl, f"psetpdays_{plugin_name}_{d}", style=ButtonBuilder.STYLE_SECONDARY) for lbl, d in _prem.DAY_PRESETS])
+            rows.append([btn.callback(("✅" if s == stars else "") + f"{s}⭐", f"psetpstars_{plugin_name}_{s}", style=ButtonBuilder.STYLE_PRIMARY) for s in sp[:3]])
+            rows.append([btn.callback(("✅" if s == stars else "") + f"{s}⭐", f"psetpstars_{plugin_name}_{s}", style=ButtonBuilder.STYLE_PRIMARY) for s in sp[3:]])
+            rows.append([btn.callback(("✅" if d == days else "") + lbl, f"psetpdays_{plugin_name}_{d}", style=ButtonBuilder.STYLE_PRIMARY) for lbl, d in _prem.DAY_PRESETS])
             rows.append([btn.callback(" 👥 Aboneler", f"psetpsubs_{plugin_name}", style=ButtonBuilder.STYLE_PRIMARY)])
         rows.append([btn.callback(" 🔙 Geri", f"psetsel_{plugin_name}", style=ButtonBuilder.STYLE_DANGER)])
         await _safe_edit(event, text, rows)

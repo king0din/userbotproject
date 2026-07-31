@@ -199,7 +199,14 @@ async def main():
     
     # Bot username'ini config'e kaydet (pluginler için)
     config.BOT_USERNAME = bot_me.username
-    
+
+    # Servis botunun doğrudan gönderdiği mesajları da (bot_api dışı) alıcıya göre çevir
+    try:
+        import utils.i18n as _i18n
+        _i18n.install_bot_translation(bot)
+    except Exception:
+        pass
+
     # Ayrıca dosyaya da yaz (pluginler için)
     try:
         with open('.bot_username', 'w') as f:
@@ -229,7 +236,42 @@ async def main():
             log(f"📥 {_synced} yeni plugin klasörden eklendi")
     except Exception as _e:
         log(f"⚠️ Plugin senkron hatası: {_e}")
-    
+
+    # Kullanıcı dillerini belleğe al (otomatik çeviri için)
+    try:
+        import utils.i18n as _i18n
+        _all_users = await db.get_all_users()
+        _n = _i18n.load_user_langs(_all_users)
+        log(f"🌐 {_n} kullanıcı dili yüklendi (çeviri hazır)")
+
+        # Ön-çeviri metin havuzu: bot mesajları + plugin/handler/userbot dosyalarındaki metinler
+        _pw_strings = []
+        try:
+            _pw_strings += [v for v in config.MESSAGES.values() if isinstance(v, str)]
+            _pw_strings += [v for v in config.BUTTONS.values() if isinstance(v, str)]
+            for _grp in config.COMMANDS.values():
+                _pw_strings += [x for x in _grp.values() if isinstance(x, str)]
+        except Exception:
+            pass
+        try:
+            import glob as _glob
+            _files = (_glob.glob("plugins/*.py")
+                      + _glob.glob("handlers/**/*.py", recursive=True)
+                      + _glob.glob("userbot/**/*.py", recursive=True))
+            _pw_strings += _i18n.extract_translatable_strings(_files)
+        except Exception:
+            pass
+        _i18n.set_prewarm_strings(_pw_strings)
+
+        # EKLENMİŞ TÜM dilleri arka planda ön-çevir (kimse kullanmasa bile) → data/lang/
+        _langs = list(_i18n.all_langs().keys())
+        if _pw_strings and _langs:
+            asyncio.create_task(_i18n.prewarm(_pw_strings, langs=_langs))
+            log(f"🌐 {len(_langs)} dil arka planda ön-çevriliyor "
+                f"({len(set(_pw_strings))} metin) → data/lang/")
+    except Exception as _e:
+        log(f"⚠️ Dil yükleme atlandı: {_e}")
+
     # Session'ları geri yükle
     log("🔄 Session'lar geri yükleniyor...")
     restored = await smart_session_manager.restore_sessions()
@@ -286,7 +328,14 @@ async def main():
 async def shutdown():
     """Kapanış işlemleri"""
     log("🔄 Bot kapatılıyor...")
-    
+
+    # Çeviri önbelleğini diske kaydet
+    try:
+        import utils.i18n as _i18n
+        _i18n.flush_cache()
+    except Exception:
+        pass
+
     # Smart Session Manager'ı kapat
     await smart_session_manager.shutdown()
     
