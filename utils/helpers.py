@@ -4,15 +4,11 @@
 
 import time
 import functools
-from typing import Callable, List
-from telethon import Button
+from typing import Callable, Union, List
+from telethon import events, Button
 from telethon.tl.types import User
 import config
 from database import database as db
-from utils.logger import get_logger
-
-log = get_logger(__name__)
-
 
 # ==========================================
 # ZAMAN FONKSİYONLARI
@@ -65,7 +61,7 @@ async def get_user_info(user_id: int, bot) -> str:
         return f"👤 **{user.first_name or 'Kullanıcı'}**\n" \
                f"🆔 ID: `{user.id}`\n" \
                f"📍 Username: @{user.username or 'Yok'}"
-    except Exception:
+    except:
         return f"🆔 ID: `{user_id}`"
 
 # ==========================================
@@ -203,7 +199,7 @@ async def send_log(bot, log_type: str, message: str, user_id: int = None):
         await db.add_log(log_type, user_id, message)
         
     except Exception as e:
-        log.error("Hata", exc_info=True)
+        print(f"[LOG] Hata: {e}")
 
 # ==========================================
 # BUTON OLUŞTURUCULAR
@@ -312,5 +308,5 @@ def is_valid_session_string(session: str) -> bool:
     try:
         decoded = base64.urlsafe_b64decode(session + '===')
         return len(decoded) > 100  # Minimum uzunluk kontrolü
-    except Exception:
+    except:
         return False

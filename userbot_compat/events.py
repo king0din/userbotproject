@@ -6,10 +6,6 @@
 
 from telethon import events
 import functools
-from utils.logger import get_logger
-
-log = get_logger(__name__)
-
 
 # Client referansı (plugin yüklenirken ayarlanacak)
 _client = None
@@ -61,7 +57,7 @@ def register(outgoing=True, incoming=False, pattern=None, **kwargs):
                 return await func(event)
             except Exception as e:
                 # disable_errors=True olan pluginler için hataları yut
-                log.error("Plugin hatası (%s)", func.__name__, exc_info=True)
+                print(f"[PLUGIN HATA] {func.__name__}: {e}")
                 return None
         
         if _client is not None:

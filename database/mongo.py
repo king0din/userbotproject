@@ -7,10 +7,6 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 import config
-import logging
-
-log = logging.getLogger(f"kingtg.{__name__}")
-
 
 class MongoDB:
     def __init__(self):
@@ -26,10 +22,10 @@ class MongoDB:
             # Bağlantıyı test et
             await self.client.admin.command('ping')
             self.connected = True
-            log.info("MongoDB bağlantısı başarılı")
+            print("[MONGO] ✅ MongoDB bağlantısı başarılı")
             return True
         except Exception as e:
-            log.error("MongoDB bağlantı hatası", exc_info=True)
+            print(f"[MONGO] ❌ MongoDB bağlantı hatası: {e}")
             self.connected = False
             return False
     
@@ -38,7 +34,7 @@ class MongoDB:
         if self.client:
             self.client.close()
             self.connected = False
-            log.info("MongoDB bağlantısı kapatıldı")
+            print("[MONGO] 🔌 MongoDB bağlantısı kapatıldı")
     
     # ==========================================
     # KULLANICI İŞLEMLERİ
@@ -84,7 +80,7 @@ class MongoDB:
             )
             return True
         except Exception as e:
-            log.error("Kullanıcı ekleme hatası", exc_info=True)
+            print(f"[MONGO] Kullanıcı ekleme hatası: {e}")
             return False
     
     async def update_user(self, user_id: int, data: Dict) -> bool:
@@ -101,7 +97,7 @@ class MongoDB:
             )
             return True
         except Exception as e:
-            log.error("Kullanıcı güncelleme hatası", exc_info=True)
+            print(f"[MONGO] Kullanıcı güncelleme hatası: {e}")
             return False
     
     async def delete_user(self, user_id: int) -> bool:
@@ -113,7 +109,7 @@ class MongoDB:
             await self.db.users.delete_one({"user_id": user_id})
             return True
         except Exception as e:
-            log.error("Kullanıcı silme hatası", exc_info=True)
+            print(f"[MONGO] Kullanıcı silme hatası: {e}")
             return False
     
     async def get_all_users(self) -> List[Dict]:
@@ -211,7 +207,7 @@ class MongoDB:
             )
             return True
         except Exception as e:
-            log.error("Plugin ekleme hatası", exc_info=True)
+            print(f"[MONGO] Plugin ekleme hatası: {e}")
             return False
     
     async def update_plugin(self, name: str, data: Dict) -> bool:
@@ -226,7 +222,7 @@ class MongoDB:
             )
             return True
         except Exception as e:
-            log.error("Plugin güncelleme hatası", exc_info=True)
+            print(f"[MONGO] Plugin güncelleme hatası: {e}")
             return False
     
     async def delete_plugin(self, name: str) -> bool:
@@ -238,7 +234,7 @@ class MongoDB:
             await self.db.plugins.delete_one({"name": name})
             return True
         except Exception as e:
-            log.error("Plugin silme hatası", exc_info=True)
+            print(f"[MONGO] Plugin silme hatası: {e}")
             return False
     
     async def get_all_plugins(self) -> List[Dict]:
@@ -299,7 +295,7 @@ class MongoDB:
             )
             return True
         except Exception as e:
-            log.error("Plugin erişim ekleme hatası", exc_info=True)
+            print(f"[MONGO] Plugin erişim ekleme hatası: {e}")
             return False
     
     async def remove_plugin_user_access(self, plugin_name: str, user_id: int) -> bool:
@@ -314,7 +310,7 @@ class MongoDB:
             )
             return True
         except Exception as e:
-            log.error("Plugin erişim kaldırma hatası", exc_info=True)
+            print(f"[MONGO] Plugin erişim kaldırma hatası: {e}")
             return False
     
     async def restrict_plugin_user(self, plugin_name: str, user_id: int) -> bool:
@@ -329,7 +325,7 @@ class MongoDB:
             )
             return True
         except Exception as e:
-            log.error("Plugin kısıtlama hatası", exc_info=True)
+            print(f"[MONGO] Plugin kısıtlama hatası: {e}")
             return False
     
     async def unrestrict_plugin_user(self, plugin_name: str, user_id: int) -> bool:
@@ -344,7 +340,7 @@ class MongoDB:
             )
             return True
         except Exception as e:
-            log.error("Plugin kısıtlama kaldırma hatası", exc_info=True)
+            print(f"[MONGO] Plugin kısıtlama kaldırma hatası: {e}")
             return False
     
     # ==========================================
@@ -368,7 +364,7 @@ class MongoDB:
             )
             return True
         except Exception as e:
-            log.error("Ban hatası", exc_info=True)
+            print(f"[MONGO] Ban hatası: {e}")
             return False
     
     async def unban_user(self, user_id: int) -> bool:
@@ -388,7 +384,7 @@ class MongoDB:
             )
             return True
         except Exception as e:
-            log.error("Unban hatası", exc_info=True)
+            print(f"[MONGO] Unban hatası: {e}")
             return False
     
     async def is_banned(self, user_id: int) -> bool:
@@ -459,7 +455,7 @@ class MongoDB:
             )
             return True
         except Exception as e:
-            log.error("Ayar güncelleme hatası", exc_info=True)
+            print(f"[MONGO] Ayar güncelleme hatası: {e}")
             return False
     
     # ==========================================
@@ -484,7 +480,7 @@ class MongoDB:
             await self.db.logs.insert_one(log_data)
             return True
         except Exception as e:
-            log.error("Log ekleme hatası", exc_info=True)
+            print(f"[MONGO] Log ekleme hatası: {e}")
             return False
     
     async def get_logs(self, limit: int = 100, log_type: str = None) -> List[Dict]:

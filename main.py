@@ -32,7 +32,6 @@ userbot_manager = smart_session_manager
 from handlers import register_user_handlers, register_admin_handlers
 from utils import send_log, get_readable_time
 from utils.bot_api import bot_api
-from utils.logger import get_logger
 
 # ============================================
 # GLOBAL DEĞİŞKENLER
@@ -47,11 +46,9 @@ RESTART_FILE = ".restart_info"
 # LOG FONKSİYONU
 # ============================================
 
-_logger = get_logger("main")
-
 def log(text):
     """Konsola log yaz"""
-    _logger.info(text)
+    print(f"\033[94m[KingTG]\033[0m {text}")
 
 # ============================================
 # CALLBACK'LER
@@ -204,7 +201,7 @@ async def main():
     try:
         with open('.bot_username', 'w') as f:
             f.write(bot_me.username)
-    except Exception:
+    except:
         pass
     
     # Handler'ları kaydet
@@ -221,14 +218,6 @@ async def main():
     # Plugin bağımlılıklarını önceden kur
     log("🔄 Plugin bağımlılıkları kontrol ediliyor...")
     await plugin_manager.preinstall_all_dependencies()
-
-    # Klasördeki yeni pluginleri DB'ye senkronla (dosya atınca panele düşsün)
-    try:
-        _synced = await plugin_manager.sync_folder_plugins()
-        if _synced:
-            log(f"📥 {_synced} yeni plugin klasörden eklendi")
-    except Exception as _e:
-        log(f"⚠️ Plugin senkron hatası: {_e}")
     
     # Session'ları geri yükle
     log("🔄 Session'lar geri yükleniyor...")
@@ -254,6 +243,7 @@ async def main():
     # Log kanalına başlangıç mesajı
     if config.LOG_CHANNEL:
         try:
+            uptime = get_readable_time(time.time() - start_time)
             db_stats = await db.get_stats()
             
             text = f"🤖 **Bot Başlatıldı!**\n\n"

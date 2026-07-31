@@ -327,7 +327,7 @@ def register(bot):
             if not message:
                 await event.answer("Mesaj bulunamadı!")
                 return
-        except Exception:
+        except:
             await event.answer("Hata!")
             return
         
@@ -356,7 +356,7 @@ def register(bot):
                     # Mevcut sayıyı al
                     try:
                         current_count = int(btn_text.split()[-1])
-                    except Exception:
+                    except:
                         current_count = 0
                     
                     if btn_emoji == emoji:

@@ -7,12 +7,8 @@
 
 import aiohttp
 import re
-from typing import Optional, List, Dict, Union
+from typing import Optional, List, Dict, Any, Union
 import config
-from utils.logger import get_logger
-
-log = get_logger(__name__)
-
 
 def md_to_html(text: str) -> str:
     """Markdown'ı HTML'e çevir ve HTML karakterlerini escape et"""
@@ -65,60 +61,22 @@ class BotAPI:
     def __init__(self, token: str = None):
         self.token = token or config.BOT_TOKEN
         self.base_url = f"https://api.telegram.org/bot{self.token}"
-        self._session = None
-
-    async def _get_session(self):
-        """Tek bir oturumu yeniden kullan (her istekte yeni session açma + kısa timeout)."""
-        if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(
-                total=12, connect=6, sock_connect=6, sock_read=10
-            )
-            self._session = aiohttp.ClientSession(timeout=timeout)
-        return self._session
-
-    @staticmethod
-    def _strip_button_styles(markup):
-        """Bot API stil/emoji alanlarını çıkar (Telegram reddederse sade buton kalsın)."""
-        try:
-            rows = markup.get('inline_keyboard') if isinstance(markup, dict) else None
-            for row in (rows or []):
-                for b in row:
-                    if isinstance(b, dict):
-                        b.pop('style', None)
-                        b.pop('icon_custom_emoji_id', None)
-        except Exception:
-            pass
-
-    async def _request(self, method: str, data: Dict = None, _retry: bool = True, _stripped: bool = False) -> Optional[Dict]:
-        """API isteği gönder (kısa timeout + geçici hata/stil reddi durumunda yeniden dener)"""
+    
+    async def _request(self, method: str, data: Dict = None) -> Optional[Dict]:
+        """API isteği gönder"""
         url = f"{self.base_url}/{method}"
-
+        
         try:
-            session = await self._get_session()
-            async with session.post(url, json=data) as response:
-                result = await response.json()
-                if result.get('ok'):
-                    return result.get('result')
-                desc = result.get('description') or ''
-                # Telegram stilli/emoji butonu reddederse → stilleri atıp sade butonla bir kez daha dene
-                if (not _stripped) and data and data.get('reply_markup') and \
-                        'button' in desc.lower() and \
-                        ('style' in desc.lower() or 'parse' in desc.lower()):
-                    self._strip_button_styles(data['reply_markup'])
-                    return await self._request(method, data, _retry=False, _stripped=True)
-                log.warning("%s error: %s", method, desc)
-                return None
-        except Exception:
-            # geçici bağlantı/timeout → session'ı tazeleyip bir kez daha dene
-            if _retry:
-                try:
-                    if self._session and not self._session.closed:
-                        await self._session.close()
-                except Exception:
-                    pass
-                self._session = None
-                return await self._request(method, data, _retry=False)
-            log.error("%s exception", method, exc_info=True)
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=data) as response:
+                    result = await response.json()
+                    if result.get('ok'):
+                        return result.get('result')
+                    else:
+                        print(f"[BOT_API] {method} error: {result.get('description')}")
+                        return None
+        except Exception as e:
+            print(f"[BOT_API] {method} exception: {e}")
             return None
     
     async def send_message(
@@ -230,7 +188,7 @@ class BotAPI:
                     result = await response.json()
                     if result.get('ok'):
                         return result.get('result')
-                    log.warning("send_photo error: %s", result.get('description'))
+                    print(f"[BOT_API] send_photo error: {result.get('description')}")
                     return None
             else:
                 # URL olarak gönder
@@ -249,7 +207,7 @@ class BotAPI:
                     result = await response.json()
                     if result.get('ok'):
                         return result.get('result')
-                    log.warning("send_photo error: %s", result.get('description'))
+                    print(f"[BOT_API] send_photo error: {result.get('description')}")
                     return None
     
     async def send_document(
@@ -284,7 +242,7 @@ class BotAPI:
                     result = await response.json()
                     if result.get('ok'):
                         return result.get('result')
-                    log.warning("send_document error: %s", result)
+                    print(f"[BOT_API] send_document error: {result}")
                     return None
             else:
                 json_data = {
@@ -301,7 +259,7 @@ class BotAPI:
                     result = await response.json()
                     if result.get('ok'):
                         return result.get('result')
-                    log.warning("send_document error: %s", result)
+                    print(f"[BOT_API] send_document error: {result}")
                     return None
     
     async def edit_message_reply_markup(

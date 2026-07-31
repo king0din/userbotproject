@@ -19,22 +19,15 @@ Komular hakında:
 from telethon import events, Button
 import config
 from database import database as db
-from utils.logger import get_logger
-from utils import premium
-from telethon.tl import functions, types
-
-log = get_logger(__name__)
-
 
 # Plugin bilgileri
-# NOT: __name__ üzerine YAZMAYIN — plugin yöneticisi modül adını
-# "plugin_<isim>_<uid>" olarak atar ve handler temizliği buna dayanır.
-__plugin_name__ = "inline_start"
+__name__ = "inline_start"
 __description__ = "Herhangi bir sohbetten .start ile ayar panelini aç"
 __commands__ = ["start", "panel", "plugins", "pluginler", "pload", "punload", "mystats", "uhelp"]
 
 # Handler referanslarını sakla (global)
 _handlers = {}
+_bot_handlers_registered = False
 
 def get_bot_username():
     """Bot username'ini al"""
@@ -47,7 +40,7 @@ def get_bot_username():
         if os.path.exists('.bot_username'):
             with open('.bot_username', 'r') as f:
                 return f.read().strip()
-    except Exception:
+    except:
         pass
     return ''
 
@@ -61,312 +54,18 @@ def get_bot():
         # Alternatif yol
         import __main__
         return getattr(__main__, 'bot', None)
-    except Exception:
+    except:
         pass
     return None
 
-def _filter_accessible(all_plugins, uid):
-    """ip_plugins ile AYNI sıralı/filtreli erişilebilir plugin listesi (index tutarlılığı için)."""
-    return [
-        p for p in all_plugins
-        if not p.get("is_disabled")
-        and (p.get("is_public", True) or uid in p.get("allowed_users", []))
-        and uid not in p.get("restricted_users", [])
-    ]
-
-
-async def _render_plugin_detail(event, target_user_id, gi, full=False):
-    """Tek bir plugin için detay panelini ÇİZER (sadece edit, answer çağırmaz)."""
-    user_data = await db.get_user(event.sender_id)
-    active_plugins = user_data.get("active_plugins", []) if user_data else []
-    all_plugins = await db.get_all_plugins()
-    accessible = _filter_accessible(all_plugins, event.sender_id)
-
-    if gi < 0 or gi >= len(accessible):
-        try:
-            await event.edit(
-                "⚠️ **Plugin bulunamadı** (liste değişmiş olabilir).",
-                buttons=[[Button.inline("🔙 Listeye Dön", f"ip_plugins_{target_user_id}_0".encode())]],
-            )
-        except Exception:
-            pass
-        return
-
-    p = accessible[gi]
-    name = p.get("name", "?")
-    on = name in active_plugins
-    page = gi // 8
-    desc = p.get("description") or "Açıklama yok."
-    cmds = p.get("commands", []) or []
-    status = "🟢 **Yüklü (aktif)**" if on else "🔴 **Yüklü değil**"
-
-    text = f"🔌 **{name}**\n\n{status}\n\n📝 {desc}"
-    if full:
-        if cmds:
-            cmd_list = "\n".join(f"• `.{c}`" for c in cmds)
-            text += f"\n\n**Komutlar ({len(cmds)}):**\n{cmd_list}"
-        else:
-            text += "\n\n_Komut bilgisi yok._"
-    else:
-        if cmds:
-            preview = ", ".join(f"`.{c}`" for c in cmds[:3])
-            extra = f" +{len(cmds) - 3}" if len(cmds) > 3 else ""
-            text += f"\n\n🔧 {preview}{extra}"
-
-    buttons = []
-    if p.get("default_active"):
-        buttons.append([Button.inline("⭐ Zorunlu Plugin", f"ipt_{target_user_id}_{gi}".encode())])
-    elif on:
-        buttons.append([Button.inline("⛔ Plugini Kapat", f"ipt_{target_user_id}_{gi}".encode())])
-    else:
-        buttons.append([Button.inline("✅ Plugini Yükle", f"ipt_{target_user_id}_{gi}".encode())])
-
-    if full:
-        buttons.append([Button.inline("🔼 Özet", f"ipd_{target_user_id}_{gi}".encode())])
-    else:
-        buttons.append([Button.inline("📄 Plugin Detayı", f"ipi_{target_user_id}_{gi}".encode())])
-
-    if event.sender_id == config.OWNER_ID:
-        buttons.append([Button.inline("💎 Premium Ayarları", f"ipset_{target_user_id}_{gi}".encode())])
-    buttons.append([Button.inline("🔙 Listeye Dön", f"ip_plugins_{target_user_id}_{page}".encode())])
-
-    try:
-        await event.edit(text, buttons=buttons)
-    except Exception:
-        pass
-
-
-async def _render_premium_settings(event, target_user_id, gi):
-    """Sahip için: bir pluginin premium/özel/genel ayar paneli."""
-    if event.sender_id != config.OWNER_ID:
-        try:
-            await event.answer("❌ Sadece sahip.", alert=True)
-        except Exception:
-            pass
-        return
-    all_plugins = await db.get_all_plugins()
-    accessible = _filter_accessible(all_plugins, event.sender_id)
-    if gi < 0 or gi >= len(accessible):
-        try:
-            await event.edit("⚠️ Plugin bulunamadı.",
-                buttons=[[Button.inline("🔙 Geri", f"ip_plugins_{target_user_id}_0".encode())]])
-        except Exception:
-            pass
-        return
-    name = accessible[gi].get("name", "?")
-    cfg = premium.get_config(name)
-    configured = bool(cfg and cfg.get("type") in premium.TYPES)
-    ptype = (cfg or {}).get("type", "genel")
-    stars = int((cfg or {}).get("stars", 100))
-    days = int((cfg or {}).get("days", 30))
-
-    if not configured:
-        text = (f"💎 **{name} — Tip Seçimi**\n\n"
-                "Bu plugin yeni eklendi. Nasıl sunulacak?\n\n"
-                "🌐 **Genel** — herkes ücretsiz kullanır\n"
-                "🔒 **Özel** — sadece izin verdiğin kullanıcılar\n"
-                "💎 **Premium** — yıldız karşılığı abonelik")
-    else:
-        tl = premium.TYPE_LABELS.get(ptype, ptype)
-        text = f"💎 **{name} — Premium Ayarları**\n\nTip: {tl}"
-        if ptype == "premium":
-            text += f"\n⭐ Fiyat: **{stars}** yıldız\n📅 Süre: **{days}** gün"
-        elif ptype == "ozel":
-            text += f"\n👥 İzinli kullanıcı: {len(premium.ozel_users(name))}"
-
-    def _mk(t):
-        return ("✅ " if (configured and ptype == t) else "") + premium.TYPE_LABELS.get(t, t)
-    buttons = [[
-        Button.inline(_mk("genel"), f"ipty_{target_user_id}_{gi}_genel".encode()),
-        Button.inline(_mk("ozel"), f"ipty_{target_user_id}_{gi}_ozel".encode()),
-        Button.inline(_mk("premium"), f"ipty_{target_user_id}_{gi}_premium".encode()),
-    ]]
-    if configured and ptype == "premium":
-        sp = premium.STAR_PRESETS
-        row1 = [Button.inline(("✅" if s == stars else "") + f"{s}⭐",
-                f"ipst_{target_user_id}_{gi}_{s}".encode()) for s in sp[:3]]
-        row2 = [Button.inline(("✅" if s == stars else "") + f"{s}⭐",
-                f"ipst_{target_user_id}_{gi}_{s}".encode()) for s in sp[3:]]
-        buttons.append(row1)
-        buttons.append(row2)
-        drow = [Button.inline(("✅" if d == days else "") + lbl,
-                f"ipdy_{target_user_id}_{gi}_{d}".encode()) for lbl, d in premium.DAY_PRESETS]
-        buttons.append(drow)
-        buttons.append([Button.inline("👥 Aboneler", f"ipsub_{target_user_id}_{gi}".encode())])
-    buttons.append([Button.inline("🔙 Plugin Detayı", f"ipd_{target_user_id}_{gi}".encode())])
-    try:
-        await event.edit(text, buttons=buttons)
-    except Exception:
-        pass
-
-
-async def _send_premium_reminder(bot, item):
-    """Abonelik bitiş hatırlatması (veya 'durduruldu') DM'i + yenileme butonu."""
-    plugin = item["plugin"]
-    title = item["title"]
-    stars = item["stars"]
-    exp_str = premium.expiry_str(item["expiry"])
-    if item["kind"] == "expired":
-        text = (f"🛑 **{title}** aboneliğin sona erdi, kullanımın **durduruldu**.\n\n"
-                f"Tekrar açmak için **{stars} ⭐** ödeyebilirsin.")
-    else:
-        dl = item["days_left"]
-        when = "yarın" if dl <= 1 else f"**{dl} gün** sonra"
-        text = (f"⏰ **{title}** aboneliğin {when} bitiyor (📅 {exp_str}).\n\n"
-                f"Kesintisiz devam için en geç **{exp_str}** tarihine kadar "
-                f"**{stars} ⭐** ödemelisin.\n"
-                f"Ödenmezse **{exp_str}** itibarıyla kullanım **otomatik durdurulacak**.")
-    try:
-        await bot.send_message(
-            item["uid"], text,
-            buttons=[[Button.inline(f"🔄 Yenile ({stars}⭐)", f"prenew_{plugin}".encode())]])
-        return True
-    except Exception:
-        log.info("premium hatırlatma gönderilemedi uid=%s", item["uid"])
-        return False
-
-
-async def _deactivate_expired(uid, plugin):
-    """Aboneliği biten premium plugini kullanıcıdan kaldır (bitişi zorla)."""
-    try:
-        from userbot.plugins import plugin_manager as _pm
-        ud = await db.get_user(uid)
-        active = list(ud.get("active_plugins", []) if ud else [])
-        if plugin in active:
-            active.remove(plugin)
-            await db.update_user(uid, {"active_plugins": active})
-        try:
-            await _pm.deactivate_plugin(uid, plugin)
-        except Exception:
-            pass
-        log.info("Aboneliği biten plugin kaldırıldı: uid=%s plugin=%s", uid, plugin)
-    except Exception:
-        log.warning("expired plugin kaldırılamadı uid=%s plugin=%s", uid, plugin, exc_info=True)
-
-
-async def _premium_reminder_loop(bot):
-    """Periyodik tarama: yaklaşan/biten abonelikleri hatırlat (6 saatte bir)."""
-    import asyncio
-    await asyncio.sleep(45)
-    while True:
-        try:
-            for item in premium.due_reminders():
-                sent = await _send_premium_reminder(bot, item)
-                if sent:
-                    premium.mark_reminded(item["uid"], item["plugin"], item.get("mark", []))
-                    if item["kind"] == "expired":
-                        await _deactivate_expired(item["uid"], item["plugin"])
-            premium.prune_expired()
-        except Exception:
-            log.warning("premium hatırlatma döngüsü hatası", exc_info=True)
-        await asyncio.sleep(6 * 3600)
-
-
-# ── TÜM KOMUTLAR KATALOĞU (keşfedilebilirlik için) ─────────────────
-ALL_COMMANDS = [
-    ("🏷️ Etiketleme", [
-        (".tag", "Gruptaki herkesi etiketle (butonlu akış)"),
-        (".tagadmin", "Sadece yöneticileri etiketle"),
-        (".tagstop", "Etiketlemeyi durdur"),
-        (".tagstat", "Etiketleme durumunu göster"),
-        (".tagban / .tagunban", "Kişiyi hariç tut / geri al"),
-        (".tagbanlist", "Hariç tutulanları listele"),
-        (".tagekle <ifade>", "Özel etiketleme ifadesi ekle (✏️ Özel kategorisi)"),
-        (".tagliste", "Özel ifadeleri listele"),
-        (".tagsil <no> / .tagtemizle", "Özel ifade sil / tümünü temizle"),
-        (".taghelp", "Etiketleme yardımı"),
-    ]),
-    ("📨 Otomatik Mesaj", [
-        (".otomsg <mesaj>", "HIZLI: butonlu oto mesaj (foto/video/dosya yanıtlayabilirsin)"),
-        (".otomsg ekle <chat> <dk> <tekrar> <mesaj>", "Detaylı görev ekle"),
-        (".otomsgl", "Görevleri listele (butonlu sayfalı)"),
-        (".otomsgs", "Görev durumlarını göster"),
-        (".otomsgstop / .otomsgstart <id>", "Görevi durdur / başlat"),
-        (".otomsgstartall / .otomsgstopall", "Tümünü başlat / durdur"),
-        (".otomsgdel <id>", "Görevi sil"),
-        (".otomsgkopyala <id>", "Görevi başka sohbete kopyala"),
-        (".otomsgduzenle <id> mesaj|aralık|tekrar", "Görevi düzenle"),
-        (".otomsghelp", "Oto mesaj yardımı"),
-    ]),
-    ("📥 YouTube (Premium)", [
-        (".müzik <şarkı/link>", "YouTube'dan MP3 indir"),
-        (".video <video/link>", "YouTube'dan video indir (720p)"),
-        (".ytara <sorgu>", "YouTube'da arama yap"),
-    ]),
-    ("🎨 Çıkartma", [
-        (".stic (yanıtla)", "Resmi/videoyu/GIF'i çıkartmaya çevirir"),
-        (".stic <emoji>", "Çıkartmayı seçtiğin emoji ile oluşturur"),
-        (".sticker", ".stic ile aynısı"),
-    ]),
-    ("🎭 Profil", [
-        (".afk / .unafk", "AFK moduna geç / dön (kalıcı)"),
-        (".clon <yanıt/@/id>", "Birinin profilini klonla"),
-        (".unclon", "Orijinal profile dön"),
-        (".saveme", "Mevcut profilini kaydet"),
-        (".cloninfo", "Kayıtlı profili göster"),
-        (".resetclon", "Klon verilerini sıfırla"),
-    ]),
-    ("🎉 Eğlence", [
-        (".burc <burç>", "Günlük burç yorumu"),
-        (".burch / .burca <burç>", "Haftalık / aylık burç"),
-        (".ses <metin>", "Metni sese çevir (TTS)"),
-        (".sesler", "Mevcut sesleri listele"),
-        (".sesayar <ses>", "Sesi değiştir (örn: kadın)"),
-        (".q", "Mesajı alıntı sticker'ı yap"),
-        (".qs", "Alıntıyı sticker paketine kaydet"),
-        (".qd / .qpaket / .qrenkler", "Sticker sil / paket bilgisi / renkler"),
-    ]),
-    ("🛠️ Araçlar", [
-        (".raw", "Mesajın ham verisini göster"),
-        (".emojiid", "Custom emoji ID'lerini göster"),
-        (".userid", "Kullanıcı bilgisi"),
-        (".id / .ping / .alive", "Sohbet-ID / gecikme / bot durumu"),
-    ]),
-    ("⚙️ Sistem", [
-        (".start", "Butonlu kontrol paneli"),
-        (".plugins", "Plugin listesi"),
-        (".pload / .punload <isim>", "Plugin yükle / kaldır"),
-        (".mystats", "İstatistiklerin"),
-        (".uhelp", "Komut yardımı"),
-    ]),
-]
-
-
-def _cmdcat_buttons(uid):
-    rows, row = [], []
-    for i, (cat, _cmds) in enumerate(ALL_COMMANDS):
-        row.append(Button.inline(cat, f"ip_cmdcat_{uid}_{i}".encode()))
-        if len(row) == 2:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
-    rows.append([Button.inline("🔙 Geri", f"ip_main_{uid}".encode())])
-    return rows
-
-
-def _render_cmd_category(idx):
-    cat, cmds = ALL_COMMANDS[idx]
-    lines = [f"**{cat}**", ""]
-    for cmd, desc in cmds:
-        lines.append(f"`{cmd}`\n  └ {desc}")
-    lines.append("")
-    lines.append("💡 Komutlar `.` ile başlar.")
-    return "\n".join(lines)
-
-
 def register_bot_handlers(bot):
-    """Bot'a inline handler'ları TÜM hesaplar için yalnızca BİR kez kaydet."""
+    """Bot'a inline handler'ları kaydet (bir kez)"""
+    global _bot_handlers_registered
     
-    if not bot:
-        return
-    # Her hesap start.py'yi ayrı modül olarak yüklediğinden modül-global
-    # bayrak ÇİFT KAYDA yol açıyordu (menü kendi kendine ileri-geri gidiyordu).
-    # Bayrağı paylaşılan bot nesnesinde tutmak bunu önler.
-    if getattr(bot, "_inline_start_registered", False):
+    if _bot_handlers_registered or not bot:
         return
     
-    bot._inline_start_registered = True
+    _bot_handlers_registered = True
     
     # ==========================================
     # INLINE QUERY HANDLER
@@ -412,7 +111,7 @@ def register_bot_handlers(bot):
                         Button.inline("📦 Yüklü Pluginler", f"ip_active_{user_id}_0".encode())
                     ])
                 buttons.append([
-                    Button.inline("📚 Tüm Komutlar", f"ip_help_{user_id}".encode()),
+                    Button.inline("❓ Userbot Yardım", f"ip_help_{user_id}".encode()),
                     Button.inline("📢 Plugin Kanalı", f"ip_channel_{user_id}".encode())
                 ])
                 if bot_username:
@@ -432,7 +131,7 @@ def register_bot_handlers(bot):
                     cache_time=0
                 )
         except Exception as e:
-            log.error("Inline query hatası", exc_info=True)
+            print(f"[inline_start] Inline query hatası: {e}")
     
     # ==========================================
     # CALLBACK HANDLERS
@@ -440,349 +139,76 @@ def register_bot_handlers(bot):
     
     @bot.on(events.CallbackQuery(pattern=rb"ip_plugins_(\d+)_?(\d*)"))
     async def ip_plugins_cb(event):
-        """Tüm pluginler — her biri buton (🟢/🔴), sayfalı."""
+        """Tüm pluginler - sayfalı"""
         match = event.pattern_match
         target_user_id = int(match.group(1).decode())
         page = int(match.group(2).decode()) if match.group(2) else 0
-
+        
         if target_user_id != event.sender_id:
             await event.answer("❌ Bu panel size ait değil!", alert=True)
             return
-
+        
         user_data = await db.get_user(event.sender_id)
         active_plugins = user_data.get("active_plugins", []) if user_data else []
         all_plugins = await db.get_all_plugins()
-        accessible = _filter_accessible(all_plugins, event.sender_id)
-
+        
+        accessible = [p for p in all_plugins if not p.get("is_disabled") and 
+                     (p.get("is_public", True) or event.sender_id in p.get("allowed_users", [])) and
+                     event.sender_id not in p.get("restricted_users", [])]
+        
+        # Sayfalama
         per_page = 8
         total = len(accessible)
         total_pages = (total + per_page - 1) // per_page if total > 0 else 1
         page = max(0, min(page, total_pages - 1))
         start = page * per_page
-        page_plugins = accessible[start:start + per_page]
-
+        end = start + per_page
+        page_plugins = accessible[start:end]
+        
         if not accessible:
             text = "📭 **Henüz plugin yok.**"
-            buttons = [[Button.inline("🔙 Geri", f"ip_main_{target_user_id}".encode())]]
         else:
-            loaded = sum(1 for p in accessible if p.get("name") in active_plugins)
-            text = (
-                f"🔌 **Pluginler** — {total} adet · 🟢 {loaded} yüklü\n"
-                f"📄 Sayfa {page + 1}/{total_pages}\n\n"
-                f"Bir plugine dokun → aç/kapat & detay"
-            )
-            buttons = []
-            for i, p in enumerate(page_plugins):
-                gi = start + i
+            text = f"🔌 **Tüm Pluginler** ({total} adet)\n"
+            text += f"📄 Sayfa {page + 1}/{total_pages}\n\n"
+            
+            for p in page_plugins:
                 name = p.get("name", "?")
-                on = name in active_plugins
-                emoji = "🟢" if on else "🔴"
-                star = "⭐" if p.get("default_active") else ""
-                label = f"{emoji} {star}{name}".strip()
-                buttons.append([Button.inline(label[:60], f"ipd_{target_user_id}_{gi}".encode())])
-
-            nav = []
+                status = "🟢" if name in active_plugins else "⚪"
+                default = "⭐" if p.get("default_active") else ""
+                cmds = ", ".join([f"`.{c}`" for c in p.get("commands", [])[:2]])
+                text += f"{status}{default} **{name}**"
+                if cmds:
+                    text += f" → {cmds}"
+                text += "\n"
+            
+            text += f"\n━━━━━━━━━━━━━━━━━━━━\n"
+            text += f"📥 `.pload <isim>` | 📤 `.punload <isim>`"
+        
+        # Butonlar
+        buttons = []
+        
+        # Sayfalama butonları
+        if total_pages > 1:
+            nav_row = []
             if page > 0:
-                nav.append(Button.inline("◀️", f"ip_plugins_{target_user_id}_{page - 1}".encode()))
-            if total_pages > 1:
-                nav.append(Button.inline(f"📄 {page + 1}/{total_pages}", f"ip_plugins_{target_user_id}_{page}".encode()))
+                nav_row.append(Button.inline("◀️ Önceki", f"ip_plugins_{target_user_id}_{page-1}".encode()))
+            nav_row.append(Button.inline(f"📄 {page+1}/{total_pages}", b"noop"))
             if page < total_pages - 1:
-                nav.append(Button.inline("▶️", f"ip_plugins_{target_user_id}_{page + 1}".encode()))
-            if nav:
-                buttons.append(nav)
-
-            buttons.append([
-                Button.inline("📦 Yüklü", f"ip_active_{target_user_id}_0".encode()),
-                Button.inline("🔙 Geri", f"ip_main_{target_user_id}".encode()),
-            ])
-
+                nav_row.append(Button.inline("Sonraki ▶️", f"ip_plugins_{target_user_id}_{page+1}".encode()))
+            buttons.append(nav_row)
+        
+        buttons.append([
+            Button.inline("📦 Yüklü", f"ip_active_{target_user_id}_0".encode()),
+            Button.inline("📢 Kanal", f"ip_channel_{target_user_id}".encode())
+        ])
+        buttons.append([Button.inline("🔙 Geri", f"ip_main_{target_user_id}".encode())])
+        
         try:
             await event.edit(text, buttons=buttons)
-        except Exception:
+        except:
             pass
         await event.answer()
-
-    @bot.on(events.CallbackQuery(pattern=rb"ipd_(\d+)_(\d+)"))
-    async def ip_pdetail_cb(event):
-        """Bir plugine dokununca: detay paneli (özet)."""
-        target_user_id = int(event.pattern_match.group(1).decode())
-        gi = int(event.pattern_match.group(2).decode())
-        if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
-            return
-        await _render_plugin_detail(event, target_user_id, gi, full=False)
-        try:
-            await event.answer()
-        except Exception:
-            pass
-
-    @bot.on(events.CallbackQuery(pattern=rb"ipi_(\d+)_(\d+)"))
-    async def ip_pinfo_cb(event):
-        """Plugin Detayı: tüm açıklama + komutlar."""
-        target_user_id = int(event.pattern_match.group(1).decode())
-        gi = int(event.pattern_match.group(2).decode())
-        if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
-            return
-        await _render_plugin_detail(event, target_user_id, gi, full=True)
-        try:
-            await event.answer()
-        except Exception:
-            pass
-
-    @bot.on(events.CallbackQuery(pattern=rb"ipt_(\d+)_(\d+)"))
-    async def ip_ptoggle_cb(event):
-        """Plugini aç/kapat (yükle/kaldır) ve paneli yenile."""
-        target_user_id = int(event.pattern_match.group(1).decode())
-        gi = int(event.pattern_match.group(2).decode())
-        if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
-            return
-
-        all_plugins = await db.get_all_plugins()
-        accessible = _filter_accessible(all_plugins, event.sender_id)
-        if gi < 0 or gi >= len(accessible):
-            await event.answer("Plugin bulunamadı.", alert=True)
-            return
-        p = accessible[gi]
-        name = p.get("name")
-
-        user_data = await db.get_user(event.sender_id)
-        active = list(user_data.get("active_plugins", []) if user_data else [])
-
-        from userbot.plugins import plugin_manager
-        try:
-            from userbot.smart_manager import smart_session_manager
-            client = smart_session_manager.get_client(event.sender_id)
-        except Exception:
-            client = None
-
-        if name in active:
-            # KAPAT
-            if p.get("default_active"):
-                await event.answer("⭐ Zorunlu plugin, kapatılamaz.", alert=True)
-                return
-            active.remove(name)
-            await db.update_user(event.sender_id, {"active_plugins": active})
-            try:
-                await plugin_manager.deactivate_plugin(event.sender_id, name)
-            except Exception:
-                pass
-            try:
-                await event.answer(f"⛔ {name} kapatıldı")
-            except Exception:
-                pass
-        else:
-            # YÜKLE
-            if p.get("is_disabled"):
-                await event.answer("⛔ Bu plugin devre dışı.", alert=True)
-                return
-            # Premium kontrolü: erişim yoksa Yıldız faturası gönder (yükleme öncesi)
-            try:
-                _reason, _pcfg = premium.access_reason(event.sender_id, name)
-            except Exception:
-                _reason, _pcfg = "ok", {}
-            if _reason == "need_pay":
-                _stars = (_pcfg or {}).get("stars", 100)
-                _days = (_pcfg or {}).get("days", 30)
-                try:
-                    _sent = await premium.send_star_invoice(bot, event.sender_id, name)
-                except Exception:
-                    _sent = False
-                try:
-                    await event.answer(
-                        f"💎 {name} premium ({_stars}⭐/{_days}g) — fatura gönderildi, ödeyince açılır"
-                        if _sent else f"💎 {name} premium — fatura gönderilemedi", alert=True)
-                except Exception:
-                    pass
-                await _render_plugin_detail(event, target_user_id, gi, full=False)
-                return
-            if _reason == "need_grant":
-                try:
-                    await event.answer(f"🔒 {name} özel — yöneticiye başvur", alert=True)
-                except Exception:
-                    pass
-                return
-            active.append(name)
-            await db.update_user(event.sender_id, {"active_plugins": active})
-            ok, msg = True, ""
-            if client is not None:
-                try:
-                    ok, msg = await plugin_manager.activate_plugin(event.sender_id, name, client)
-                except Exception as e:
-                    ok, msg = False, str(e)
-            if not ok:
-                # Yükleme başarısız: DB'de aktif bırakma (yanıltıcı 🟢 önlenir)
-                if name in active:
-                    active.remove(name)
-                    await db.update_user(event.sender_id, {"active_plugins": active})
-            try:
-                await event.answer(f"✅ {name} yüklendi" if ok else f"❌ {str(msg)[:60]}")
-            except Exception:
-                pass
-
-        # Paneli yenile — sahip yeni yükledi ve tip ayarlanmadıysa TİP SOR
-        if (event.sender_id == config.OWNER_ID and name in active
-                and not premium.is_configured(name)):
-            await _render_premium_settings(event, target_user_id, gi)
-        else:
-            await _render_plugin_detail(event, target_user_id, gi, full=False)
-
-    # ==========================================
-    # PREMIUM — Abonelik bitiş hatırlatma (yenileme butonu + döngü başlat)
-    # ==========================================
-    @bot.on(events.CallbackQuery(pattern=rb"prenew_(\w+)"))
-    async def ip_prenew_cb(event):
-        plugin = event.pattern_match.group(1).decode()
-        try:
-            ok = await premium.send_star_invoice(bot, event.sender_id, plugin)
-            await event.answer("📩 Fatura gönderildi!" if ok else "❌ Fatura gönderilemedi.",
-                               alert=not ok)
-        except Exception:
-            await event.answer("❌ Hata oluştu.", alert=True)
-
-    if not getattr(bot, "_premium_reminder_started", False):
-        bot._premium_reminder_started = True
-        try:
-            import asyncio
-            _loop = getattr(bot, "loop", None)
-            if _loop is None:
-                try:
-                    _loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    _loop = asyncio.new_event_loop()
-            _loop.create_task(_premium_reminder_loop(bot))
-            log.info("Premium hatırlatma döngüsü başlatıldı")
-        except Exception:
-            log.warning("Premium hatırlatma döngüsü başlatılamadı", exc_info=True)
-
-    # ==========================================
-    # PREMIUM — Telegram Yıldızı (Stars) ödeme handler'ları
-    # ==========================================
-    @bot.on(events.Raw)
-    async def _premium_stars_handler(update):
-        try:
-            # 1) Ön-onay (precheckout) → her zaman onayla
-            if isinstance(update, types.UpdateBotPrecheckoutQuery):
-                try:
-                    await bot(functions.messages.SetBotPrecheckoutResultsRequest(
-                        query_id=update.query_id, success=True))
-                except Exception:
-                    log.warning("precheckout onaylanamadı", exc_info=True)
-                return
-            # 2) Ödeme geldi → abonelik ver
-            msg = getattr(update, "message", None)
-            action = getattr(msg, "action", None) if msg is not None else None
-            if action is not None and type(action).__name__ == "MessageActionPaymentSentMe":
-                parsed = premium.grant_from_payment(getattr(action, "payload", None))
-                if parsed:
-                    plugin_name, uid, days = parsed
-                    try:
-                        await bot.send_message(
-                            uid,
-                            f"✅ **Ödeme alındı!**\n💎 `{plugin_name}` için **{days} gün** premium aktif. 🎉")
-                    except Exception:
-                        pass
-        except Exception:
-            log.warning("premium ödeme handler hatası", exc_info=True)
-
-    # ==========================================
-    # PREMIUM — Plugin ayar paneli callback'leri (sahip)
-    # ==========================================
-    async def _pset_name(event, gi):
-        """gi index → plugin adı (sahip erişimine göre)."""
-        all_plugins = await db.get_all_plugins()
-        accessible = _filter_accessible(all_plugins, event.sender_id)
-        if 0 <= gi < len(accessible):
-            return accessible[gi].get("name")
-        return None
-
-    @bot.on(events.CallbackQuery(pattern=rb"ipset_(\d+)_(\d+)"))
-    async def ip_pset_cb(event):
-        tu = int(event.pattern_match.group(1).decode())
-        gi = int(event.pattern_match.group(2).decode())
-        if tu != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True); return
-        await _render_premium_settings(event, tu, gi)
-        try:
-            await event.answer()
-        except Exception:
-            pass
-
-    @bot.on(events.CallbackQuery(pattern=rb"ipty_(\d+)_(\d+)_(\w+)"))
-    async def ip_ptype_cb(event):
-        tu = int(event.pattern_match.group(1).decode())
-        gi = int(event.pattern_match.group(2).decode())
-        t = event.pattern_match.group(3).decode()
-        if tu != event.sender_id or event.sender_id != config.OWNER_ID:
-            await event.answer("❌ İzin yok.", alert=True); return
-        name = await _pset_name(event, gi)
-        if name and t in premium.TYPES:
-            premium.set_config(name, ptype=t)
-            try:
-                await event.answer(f"Tip: {premium.TYPE_LABELS.get(t, t)}")
-            except Exception:
-                pass
-        await _render_premium_settings(event, tu, gi)
-
-    @bot.on(events.CallbackQuery(pattern=rb"ipst_(\d+)_(\d+)_(\d+)"))
-    async def ip_pstars_cb(event):
-        tu = int(event.pattern_match.group(1).decode())
-        gi = int(event.pattern_match.group(2).decode())
-        stars = int(event.pattern_match.group(3).decode())
-        if tu != event.sender_id or event.sender_id != config.OWNER_ID:
-            await event.answer("❌ İzin yok.", alert=True); return
-        name = await _pset_name(event, gi)
-        if name:
-            premium.set_config(name, stars=stars)
-            try:
-                await event.answer(f"Fiyat: {stars} ⭐")
-            except Exception:
-                pass
-        await _render_premium_settings(event, tu, gi)
-
-    @bot.on(events.CallbackQuery(pattern=rb"ipdy_(\d+)_(\d+)_(\d+)"))
-    async def ip_pdays_cb(event):
-        tu = int(event.pattern_match.group(1).decode())
-        gi = int(event.pattern_match.group(2).decode())
-        days = int(event.pattern_match.group(3).decode())
-        if tu != event.sender_id or event.sender_id != config.OWNER_ID:
-            await event.answer("❌ İzin yok.", alert=True); return
-        name = await _pset_name(event, gi)
-        if name:
-            premium.set_config(name, days=days)
-            try:
-                await event.answer(f"Süre: {days} gün")
-            except Exception:
-                pass
-        await _render_premium_settings(event, tu, gi)
-
-    @bot.on(events.CallbackQuery(pattern=rb"ipsub_(\d+)_(\d+)"))
-    async def ip_psub_cb(event):
-        tu = int(event.pattern_match.group(1).decode())
-        gi = int(event.pattern_match.group(2).decode())
-        if tu != event.sender_id or event.sender_id != config.OWNER_ID:
-            await event.answer("❌ İzin yok.", alert=True); return
-        name = await _pset_name(event, gi)
-        subs = premium.list_active_subs(name) if name else {}
-        if not subs:
-            text = f"👥 **{name} — Aboneler**\n\nAktif abone yok."
-        else:
-            import time as _t
-            lines = []
-            for uid, exp in sorted(subs.items(), key=lambda x: x[1]):
-                left = max(0, int((int(exp) - _t.time()) // 86400))
-                lines.append(f"• `{uid}` — {left} gün")
-            text = f"👥 **{name} — Aboneler ({len(subs)})**\n\n" + "\n".join(lines[:30])
-        try:
-            await event.edit(text, buttons=[[Button.inline("🔙 Geri", f"ipset_{tu}_{gi}".encode())]])
-        except Exception:
-            pass
-        try:
-            await event.answer()
-        except Exception:
-            pass
-
+    
     @bot.on(events.CallbackQuery(pattern=rb"ip_active_(\d+)_?(\d*)"))
     async def ip_active_cb(event):
         """Yüklü pluginler - sayfalı"""
@@ -835,7 +261,7 @@ def register_bot_handlers(bot):
             nav_row = []
             if page > 0:
                 nav_row.append(Button.inline("◀️ Önceki", f"ip_active_{target_user_id}_{page-1}".encode()))
-            nav_row.append(Button.inline(f"📄 {page+1}/{total_pages}", f"ip_active_{target_user_id}_{page}".encode()))
+            nav_row.append(Button.inline(f"📄 {page+1}/{total_pages}", b"noop"))
             if page < total_pages - 1:
                 nav_row.append(Button.inline("Sonraki ▶️", f"ip_active_{target_user_id}_{page+1}".encode()))
             buttons.append(nav_row)
@@ -848,48 +274,41 @@ def register_bot_handlers(bot):
         
         try:
             await event.edit(text, buttons=buttons)
-        except Exception:
+        except:
             pass
         await event.answer()
     
     @bot.on(events.CallbackQuery(pattern=rb"ip_help_(\d+)"))
     async def ip_help_cb(event):
-        """Tüm Komutlar — kategori menüsü"""
+        """Yardım"""
         target_user_id = int(event.pattern_match.group(1).decode())
         if target_user_id != event.sender_id:
             await event.answer("❌ Bu panel size ait değil!", alert=True)
             return
-
-        text = (
-            "📚 **Tüm Komutlar**\n\n"
-            "Bir kategori seç; komutları ve ne işe yaradıklarını gör.\n"
-            "💡 Tüm komutlar `.` ile başlar."
-        )
-        try:
-            await event.edit(text, buttons=_cmdcat_buttons(target_user_id))
-        except Exception:
-            pass
-        await event.answer()
-
-    @bot.on(events.CallbackQuery(pattern=rb"ip_cmdcat_(\d+)_(\d+)"))
-    async def ip_cmdcat_cb(event):
-        """Bir kategorinin komutlarını göster"""
-        target_user_id = int(event.pattern_match.group(1).decode())
-        idx = int(event.pattern_match.group(2).decode())
-        if target_user_id != event.sender_id:
-            await event.answer("❌ Bu panel size ait değil!", alert=True)
-            return
-        if idx < 0 or idx >= len(ALL_COMMANDS):
-            await event.answer("Kategori bulunamadı.", alert=True)
-            return
-        text = _render_cmd_category(idx)
-        buttons = [[Button.inline("🔙 Kategoriler", f"ip_help_{target_user_id}".encode())]]
+        
+        text = "📚 **Userbot Yardım**\n\n"
+        text += "**🎛️ Panel:**\n"
+        text += "`.start` → Kontrol paneli\n"
+        text += "`.plugins` → Plugin listesi\n"
+        text += "`.mystats` → İstatistikler\n\n"
+        text += "**🔌 Plugin:**\n"
+        text += "`.pload <isim>` → Yükle\n"
+        text += "`.punload <isim>` → Kaldır\n\n"
+        text += "━━━━━━━━━━━━━━━━━━━━\n"
+        text += "💡 Komutlar `.` ile başlar"
+        
+        buttons = [
+            [Button.inline("🔌 Pluginler", f"ip_plugins_{target_user_id}_0".encode()),
+             Button.inline("📦 Yüklü", f"ip_active_{target_user_id}_0".encode())],
+            [Button.inline("🔙 Geri", f"ip_main_{target_user_id}".encode())]
+        ]
+        
         try:
             await event.edit(text, buttons=buttons)
-        except Exception:
+        except:
             pass
         await event.answer()
-
+    
     @bot.on(events.CallbackQuery(pattern=rb"ip_channel_(\d+)"))
     async def ip_channel_cb(event):
         """Plugin kanalı"""
@@ -912,7 +331,7 @@ def register_bot_handlers(bot):
         
         try:
             await event.edit(text, buttons=buttons)
-        except Exception:
+        except:
             pass
         await event.answer()
     
@@ -958,11 +377,11 @@ def register_bot_handlers(bot):
         
         try:
             await event.edit(text, buttons=buttons)
-        except Exception:
+        except:
             pass
         await event.answer()
     
-    log.info("Bot inline handler'ları kaydedildi")
+    print("[inline_start] Bot inline handler'ları kaydedildi")
 
 
 def register_handlers(client, user_id):
@@ -979,7 +398,7 @@ def register_handlers(client, user_id):
         for handler, event in _handlers[user_id]:
             try:
                 client.remove_event_handler(handler, event)
-            except Exception:
+            except:
                 pass
         del _handlers[user_id]
     
@@ -997,7 +416,7 @@ def register_handlers(client, user_id):
         bot_username = get_bot_username()
         try:
             await event.delete()
-        except Exception:
+        except:
             pass
         
         user_data = await db.get_user(user_id)
@@ -1032,7 +451,7 @@ def register_handlers(client, user_id):
             return
         try:
             await event.delete()
-        except Exception:
+        except:
             pass
         
         user_data = await db.get_user(user_id)
@@ -1071,7 +490,7 @@ def register_handlers(client, user_id):
         name = match.group(1)
         try:
             await event.delete()
-        except Exception:
+        except:
             pass
         
         plugin = await db.get_plugin(name)
@@ -1092,22 +511,11 @@ def register_handlers(client, user_id):
         await db.update_user(user_id, {"active_plugins": active})
         
         from userbot.plugins import plugin_manager
-        try:
-            ok, msg = await plugin_manager.activate_plugin(user_id, name, client)
-        except Exception as e:
-            ok, msg = False, str(e)
+        ok, msg = await plugin_manager.activate_plugin(user_id, name, client)
         if ok:
             cmds = ", ".join([f"`.{c}`" for c in plugin.get("commands", [])[:3]])
             await event.respond(f"✅ **{name}** yüklendi!\n🔧 {cmds}")
-            if user_id == config.OWNER_ID and not premium.is_configured(name):
-                await event.respond(
-                    f"💎 `{name}` için tip ayarlanmadı.\n"
-                    "Tipini belirle: `.start` → Pluginler → seç → 💎 Premium Ayarları")
         else:
-            # Yükleme başarısız: DB'de aktif bırakma (yanıltıcı durum önlenir)
-            if name in active:
-                active.remove(name)
-                await db.update_user(user_id, {"active_plugins": active})
             await event.respond(f"❌ {msg}")
     
     async def cmd_punload(event):
@@ -1120,7 +528,7 @@ def register_handlers(client, user_id):
         name = match.group(1)
         try:
             await event.delete()
-        except Exception:
+        except:
             pass
         
         plugin = await db.get_plugin(name)
@@ -1150,7 +558,7 @@ def register_handlers(client, user_id):
             return
         try:
             await event.delete()
-        except Exception:
+        except:
             pass
         
         user_data = await db.get_user(user_id)
@@ -1176,7 +584,7 @@ def register_handlers(client, user_id):
             return
         try:
             await event.delete()
-        except Exception:
+        except:
             pass
         
         text = "📚 **Komutlar**\n\n"
@@ -1206,7 +614,7 @@ def register_handlers(client, user_id):
     _handlers[user_id] = [(cmd_start, h1), (cmd_plugins, h2), (cmd_pload, h3),
                           (cmd_punload, h4), (cmd_mystats, h5), (cmd_uhelp, h6)]
     
-    log.info("Yüklendi: user=%s", user_id)
+    print(f"[inline_start] Yüklendi: user={user_id}")
 
 
 def unregister_handlers(client, user_id):
@@ -1216,7 +624,7 @@ def unregister_handlers(client, user_id):
         for h, e in _handlers[user_id]:
             try:
                 client.remove_event_handler(h, e)
-            except Exception:
+            except:
                 pass
         del _handlers[user_id]
-    log.info("Kaldırıldı: user=%s", user_id)
+    print(f"[inline_start] Kaldırıldı: user={user_id}")

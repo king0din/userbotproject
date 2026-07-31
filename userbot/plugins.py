@@ -9,128 +9,12 @@ import importlib
 import importlib.util
 import subprocess
 import sys
+import tempfile
 import asyncio
-from typing import Dict, List, Tuple, Set
+from typing import Optional, Dict, List, Tuple, Set
 from telethon import TelegramClient
 import config
 from database import database as db
-from utils.logger import get_logger
-
-log = get_logger(__name__)
-
-
-def _extract_command_names(content: str):
-    """Plugin içeriğinden `.komut` adlarını güvenilir şekilde çıkarır.
-
-    Eski regex `pattern=r"^\\.afk$"` gibi yaygın biçimleri HİÇ yakalamıyordu
-    (komut listesi ve çakışma kontrolü boş kalıyordu). Bu sürüm:
-      - register/@r/events.NewMessage pattern string'lerini bulur,
-      - baştaki ^ ve \\. (nokta) önekini temizler,
-      - [kc]lon / (?:ses|tts) gibi alternatif/karakter-sınıflarını açar,
-      - m[uü]zik gibi karakter sınıflarının tüm varyantlarını üretir.
-    Callback (rb"...") pattern'leri komut olmadığından atlanır.
-    """
-    names = set()
-    # outgoing komut pattern'lerini yakala: pattern= "..." veya '...'
-    pat_strings = re.findall(
-        r"""pattern\s*=\s*[rbf]{0,2}(['"])(.*?)\1""",
-        content,
-        flags=re.DOTALL,
-    )
-    for _quote, raw in pat_strings:
-        # Callback pattern'leri (byte/rb) genelde nokta içermez -> komut değil
-        if not raw.startswith("^") and "\\." not in raw and not raw.startswith("."):
-            # ^\. veya ^. ile başlamayan (ör. callback data) -> atla
-            if "." not in raw[:3]:
-                continue
-        # baştaki ^ kaldır
-        s = raw[1:] if raw.startswith("^") else raw
-        # baştaki nokta önekini kaldır (\\. veya .)
-        if s.startswith("\\."):
-            s = s[2:]
-        elif s.startswith("."):
-            s = s[1:]
-        else:
-            # nokta ile başlamayan pattern komut değildir
-            continue
-        # İlk komut tokenini al: sadece somut harfler, [..] karakter sınıfı ve
-        # metin alternatifi (?:a|b) — içinde \s .+ gibi regex metası OLMAYAN.
-        token = ""
-        k = 0
-        while k < len(s):
-            c = s[k]
-            if c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" \
-                    "ğüşıöçĞÜŞİÖÇ":
-                token += c
-                k += 1
-            elif c == "[":
-                j = s.find("]", k)
-                if j == -1:
-                    break
-                inner = s[k:j + 1]
-                # sadece harf içeren karakter sınıfı komuttur ([cç] gibi)
-                if re.fullmatch(r"\[[\wğüşıöçĞÜŞİÖÇ]+\]", inner):
-                    token += inner
-                    k = j + 1
-                else:
-                    break
-            elif s[k:k + 3] == "(?:":
-                j = s.find(")", k)
-                if j == -1:
-                    break
-                inner = s[k + 3:j]
-                # sadece 'a|b|c' gibi düz metin alternatifi komuttur
-                if re.fullmatch(r"[\wğüşıöçĞÜŞİÖÇ|]+", inner):
-                    token += s[k:j + 1]
-                    k = j + 1
-                    # (?:ker)? gibi OPSİYONEL grup -> '?' işaretini de taşı
-                    if k < len(s) and s[k] == "?":
-                        token += "?"
-                        k += 1
-                else:
-                    break
-            else:
-                break
-        if not token:
-            continue
-        # token'ı somut komut varyantlarına aç
-        for variant in _expand_token(token):
-            v = variant.strip()
-            if v and re.fullmatch(r"[\wğüşıöçĞÜŞİÖÇ]+", v):
-                names.add(v)
-    return names
-
-
-def _expand_token(token: str):
-    """`[kc]lon`, `(?:ses|tts)`, `m[uü]zik` gibi tokenleri düz komutlara açar."""
-    results = [""]
-    i = 0
-    while i < len(token):
-        ch = token[i]
-        if ch == "[":
-            j = token.find("]", i)
-            if j == -1:
-                break
-            chars = token[i + 1:j]
-            results = [r + c for r in results for c in chars]
-            i = j + 1
-        elif token[i:i + 3] == "(?:":
-            j = token.find(")", i)
-            if j == -1:
-                break
-            alts = token[i + 3:j].split("|")
-            i = j + 1
-            # (?:ker)? -> opsiyonel: hem "stic" hem "sticker" üret
-            if i < len(token) and token[i] == "?":
-                alts = alts + [""]
-                i += 1
-            results = [r + a for r in results for a in alts]
-        else:
-            results = [r + ch for r in results]
-            i += 1
-    return [r.strip() for r in results if r.strip()]
-
-
 
 class PluginManager:
     """Plugin yönetim sistemi"""
@@ -147,7 +31,7 @@ class PluginManager:
     
     async def preinstall_all_dependencies(self):
         """Tüm pluginlerin bağımlılıklarını önceden kur"""
-        log.info("Bağımlılıklar kontrol ediliyor...")
+        print("[PLUGIN] 📦 Bağımlılıklar kontrol ediliyor...")
         
         all_plugins = await db.get_all_plugins()
         if not all_plugins:
@@ -178,7 +62,7 @@ class PluginManager:
                         if node.module:
                             module_name = node.module.split('.')[0]
                             all_imports.add(module_name)
-            except Exception:
+            except:
                 continue
         
         # Standart kütüphaneler ve zaten kurulu olanları atla
@@ -229,7 +113,7 @@ class PluginManager:
         # Eksik paketleri toplu kur
         if to_install:
             unique_packages = list(set(to_install))
-            log.info("%s paket kuruluyor: %s", len(unique_packages), ', '.join(unique_packages))
+            print(f"[PLUGIN] 📦 {len(unique_packages)} paket kuruluyor: {', '.join(unique_packages)}")
             
             try:
                 result = subprocess.run(
@@ -240,15 +124,15 @@ class PluginManager:
                 )
                 
                 if result.returncode == 0:
-                    log.info("Tüm bağımlılıklar kuruldu")
+                    print(f"[PLUGIN] ✅ Tüm bağımlılıklar kuruldu")
                     for pkg in unique_packages:
                         self._installed_packages.add(pkg)
                 else:
-                    log.warning("Bazı paketler kurulamadı")
+                    print(f"[PLUGIN] ⚠️ Bazı paketler kurulamadı")
             except Exception as e:
-                log.warning("Paket kurulum hatası: %s", e)
+                print(f"[PLUGIN] ⚠️ Paket kurulum hatası: {e}")
         else:
-            log.info("Tüm bağımlılıklar mevcut")
+            print("[PLUGIN] ✅ Tüm bağımlılıklar mevcut")
         
         self._packages_checked = True
     
@@ -272,9 +156,9 @@ class PluginManager:
             sys.modules['asena.events'] = userbot_compat.events
             
             self._compat_installed = True
-            log.info("Uyumluluk katmanı hazır")
+            print("[PLUGIN] ✅ Uyumluluk katmanı hazır")
         except Exception as e:
-            log.warning("Uyumluluk katmanı hatası: %s", e)
+            print(f"[PLUGIN] ⚠️ Uyumluluk katmanı hatası: {e}")
     
     def _patch_plugin_content(self, content: str) -> str:
         """Plugin içeriğindeki eski import'ları düzelt"""
@@ -324,7 +208,7 @@ class PluginManager:
             except ImportError:
                 pass
             
-            log.info("%s kuruluyor...", clean_name)
+            print(f"[PLUGIN] 📦 {clean_name} kuruluyor...")
             
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", package_name, "-q", "--disable-pip-version-check"],
@@ -334,11 +218,11 @@ class PluginManager:
             )
             
             if result.returncode == 0:
-                log.info("%s kuruldu", clean_name)
+                print(f"[PLUGIN] ✅ {clean_name} kuruldu")
                 self._installed_packages.add(clean_name)
                 return True, f"{clean_name} kuruldu"
             else:
-                log.error("%s kurulamadı: %s", clean_name, result.stderr)
+                print(f"[PLUGIN] ❌ {clean_name} kurulamadı: {result.stderr}")
                 return False, result.stderr
                 
         except subprocess.TimeoutExpired:
@@ -446,7 +330,7 @@ class PluginManager:
                 except ImportError:
                     package_name = package_mapping.get(module_name, module_name)
                     
-                    log.warning("'%s' bulunamadı, '%s' kuruluyor...", module_name, package_name)
+                    print(f"[PLUGIN] ⚠️ '{module_name}' bulunamadı, '{package_name}' kuruluyor...")
                     
                     success, msg = self.install_package(package_name)
                     
@@ -483,11 +367,11 @@ class PluginManager:
                 if (tree.body and isinstance(tree.body[0], ast.Expr) and 
                     isinstance(tree.body[0].value, ast.Constant)):
                     info["description"] = tree.body[0].value.value.strip()
-            except Exception:
+            except:
                 pass
             
-            patterns = _extract_command_names(content)
-            info["commands"] = sorted(set(patterns))
+            patterns = re.findall(r"pattern\s*=\s*[rf]?['\"][\^]?\.?(\w+)", content)
+            info["commands"] = list(set(patterns))
             
             for line in content.split('\n')[:30]:
                 line = line.strip()
@@ -505,7 +389,7 @@ class PluginManager:
             return info
             
         except Exception as e:
-            log.error("Bilgi çıkarma hatası", exc_info=True)
+            print(f"[PLUGIN] Bilgi çıkarma hatası: {e}")
             return info
     
     async def register_plugin(self, file_path: str, is_public: bool = True,
@@ -588,19 +472,7 @@ class PluginManager:
         if not plugin.get("is_active", True):
             return False, f"`{plugin_name}` şu anda devre dışı"
         
-        # Premium kapısı: premium plugin ise abonelik/sahip/sudo şartı (TÜM yükleme yolları)
-        _is_premium_plugin = False
-        try:
-            from utils import premium as _prem
-            if _prem.plugin_type(plugin_name) == "premium":
-                _is_premium_plugin = True
-                if not _prem.has_access(user_id, plugin_name):
-                    _pc = _prem.get_config(plugin_name) or {}
-                    return False, ("💎 `%s` premium bir plugin (%s⭐ / %s gün). Kullanmak için abonelik gerekir." % (plugin_name, _pc.get("stars", 100), _pc.get("days", 30)))
-        except Exception:
-            pass
-
-        if not _is_premium_plugin and not plugin.get("is_public", True):
+        if not plugin.get("is_public", True):
             if user_id not in plugin.get("allowed_users", []):
                 return False, f"`{plugin_name}` pluginine erişim yetkiniz yok"
         
@@ -647,7 +519,7 @@ class PluginManager:
                 from userbot_compat import events as compat_events
                 compat_events.set_client(client)
             except Exception as e:
-                log.error("compat_events hatası", exc_info=True)
+                print(f"[PLUGIN] compat_events hatası: {e}")
             
             # Modül için namespace oluştur
             module_name = f"plugin_{plugin_name}_{user_id}"
@@ -676,9 +548,9 @@ class PluginManager:
             if hasattr(module, 'register_handlers') and callable(module.register_handlers):
                 try:
                     module.register_handlers(client, user_id)
-                    log.info("register_handlers çağrıldı: %s", plugin_name)
+                    print(f"[PLUGIN] register_handlers çağrıldı: {plugin_name}")
                 except Exception as e:
-                    log.error("register_handlers hatası", exc_info=True)
+                    print(f"[PLUGIN] register_handlers hatası: {e}")
             
             # Yeni eklenen handler'ları tespit et ve kaydet
             handlers_after = client.list_event_handlers()
@@ -724,7 +596,7 @@ class PluginManager:
                 self._retry_count[retry_key] = self._retry_count.get(retry_key, 0) + 1
                 return await self.activate_plugin(user_id, plugin_name, client)
             
-            log.error("Import hatası: %s", missing_module, exc_info=True)
+            print(f"[PLUGIN] Import hatası: {missing_module}")
             success, msg = self.install_package(missing_module)
             
             if success:
@@ -743,7 +615,7 @@ class PluginManager:
             traceback.print_exc()
             return False, f"❌ Plugin hatası:\n`{str(e)}`"
     
-    async def deactivate_plugin(self, user_id: int, plugin_name: str, reason: str = "disable") -> Tuple[bool, str]:
+    async def deactivate_plugin(self, user_id: int, plugin_name: str) -> Tuple[bool, str]:
         """Kullanıcı için plugin deaktif et"""
         
         handlers_removed = 0
@@ -760,7 +632,7 @@ class PluginManager:
             try:
                 from userbot.smart_manager import smart_session_manager
                 client = smart_session_manager.get_client(user_id)
-            except Exception:
+            except:
                 pass
         
         try:
@@ -769,9 +641,9 @@ class PluginManager:
                 try:
                     module.unregister_handlers(client, user_id)
                     handlers_removed += 1
-                    log.info("unregister_handlers çağrıldı: %s", plugin_name)
+                    print(f"[PLUGIN] unregister_handlers çağrıldı: {plugin_name}")
                 except Exception as e:
-                    log.error("unregister_handlers hatası", exc_info=True)
+                    print(f"[PLUGIN] unregister_handlers hatası: {e}")
             
             # Handler'ları kaldır
             if client:
@@ -804,9 +676,9 @@ class PluginManager:
                         if should_remove:
                             client.remove_event_handler(callback, event)
                             handlers_removed += 1
-                            log.info("Handler kaldırıldı: %s - %s", plugin_name, cb_name)
+                            print(f"[PLUGIN] Handler kaldırıldı: {plugin_name} - {cb_name}")
                     except Exception as e:
-                        log.error("Handler kontrol hatası", exc_info=True)
+                        print(f"[PLUGIN] Handler kontrol hatası: {e}")
                 
                 # Modüldeki tüm fonksiyonları tara
                 if module:
@@ -825,10 +697,10 @@ class PluginManager:
                                     if callback is attr:
                                         client.remove_event_handler(callback, event)
                                         handlers_removed += 1
-                                        log.info("Handler kaldırıldı (ref): %s - %s", plugin_name, attr_name)
-                                except Exception:
+                                        print(f"[PLUGIN] Handler kaldırıldı (ref): {plugin_name} - {attr_name}")
+                                except:
                                     pass
-                        except Exception:
+                        except:
                             pass
             
             # Kayıtlı handler'ları temizle
@@ -839,16 +711,8 @@ class PluginManager:
             if module and hasattr(module, 'unregister') and callable(module.unregister):
                 try:
                     module.unregister()
-                except Exception:
+                except:
                     pass
-
-            # Kullanıcı verilerini temizle (depoda çöp birikmesini önler)
-            if module and hasattr(module, 'cleanup_user_data') and callable(module.cleanup_user_data):
-                try:
-                    module.cleanup_user_data(user_id, reason)
-                    log.info("cleanup_user_data çağrıldı: %s (reason=%s)", plugin_name, reason)
-                except Exception:
-                    log.error("cleanup_user_data hatası: %s", plugin_name, exc_info=True)
             
             # sys.modules'dan kaldır
             module_name = f"plugin_{plugin_name}_{user_id}"
@@ -866,7 +730,7 @@ class PluginManager:
                 active_plugins.remove(plugin_name)
                 await db.update_user(user_id, {"active_plugins": active_plugins})
             
-            log.info("%s deaktif edildi (user=%s), %s handler kaldırıldı", plugin_name, user_id, handlers_removed)
+            print(f"[PLUGIN] {plugin_name} deaktif edildi (user={user_id}), {handlers_removed} handler kaldırıldı")
             return True, f"✅ `{plugin_name}` deaktif edildi"
             
         except Exception as e:
@@ -874,22 +738,6 @@ class PluginManager:
             traceback.print_exc()
             return False, f"Hata: `{str(e)}`"
     
-    async def purge_user_data(self, user_id: int, reason: str = "logout") -> int:
-        """Kullanıcının YÜKLÜ tüm pluginlerindeki verilerini temizler (çıkış/silme).
-        Her plugin kendi cleanup_user_data'sını uygular; kurtarma/yapılandırma reason'a göre korunur."""
-        cleaned = 0
-        modules = dict(self.user_active_plugins.get(user_id, {}))
-        for plugin_name, module in modules.items():
-            if module and hasattr(module, 'cleanup_user_data') and callable(module.cleanup_user_data):
-                try:
-                    module.cleanup_user_data(user_id, reason)
-                    cleaned += 1
-                except Exception:
-                    log.error("purge cleanup hatası: %s", plugin_name, exc_info=True)
-        if cleaned:
-            log.info("purge_user_data: user=%s, %s plugin temizlendi (reason=%s)", user_id, cleaned, reason)
-        return cleaned
-
     async def get_user_plugins(self, user_id: int) -> Dict:
         """Kullanıcının plugin durumunu getir"""
         user = await db.get_user(user_id)
@@ -929,7 +777,7 @@ class PluginManager:
                 success, msg = await self.activate_plugin(user_id, plugin_name, client)
                 if success:
                     return plugin_name
-            except Exception:
+            except:
                 pass
             return None
         
@@ -957,7 +805,7 @@ class PluginManager:
                 success, _ = await self.activate_plugin(user_id, plugin_name, client)
                 if success:
                     activated += 1
-            except Exception:
+            except:
                 pass
         
         return activated
@@ -1007,7 +855,7 @@ class PluginManager:
                         for callback, event in handlers:
                             try:
                                 client.remove_event_handler(callback, event)
-                            except Exception:
+                            except:
                                 pass
                 
                 # sys.modules'dan kaldır
@@ -1020,80 +868,6 @@ class PluginManager:
         # Handler kayıtlarını temizle
         if user_id in self.user_handlers:
             del self.user_handlers[user_id]
-
-    async def sync_folder_plugins(self):
-        """plugins/ klasöründeki, DB'de OLMAYAN pluginleri otomatik kaydet.
-        Dosyayı klasöre atınca panele düşmesi için. Mevcut kayıtlar KORUNUR.
-        Başlıkta '# type:/# stars:/# days:' varsa premium ayarını da uygular."""
-        try:
-            from database import database as _db
-        except Exception:
-            return 0
-        try:
-            existing = {p.get("name") for p in await _db.get_all_plugins()}
-        except Exception:
-            existing = set()
-        try:
-            files = [f for f in os.listdir(config.PLUGINS_DIR) if f.endswith(".py")]
-        except Exception:
-            files = []
-        added = 0
-        for fn in files:
-            name = fn[:-3]
-            if name.startswith("_") or name.startswith("temp_") or name == "__init__":
-                continue
-            if name in existing:
-                continue
-            path = os.path.join(config.PLUGINS_DIR, fn)
-            try:
-                info = self.extract_plugin_info(path)
-                await _db.add_plugin(
-                    name=name, filename=fn,
-                    description=info.get("description", ""),
-                    commands=info.get("commands", []),
-                    is_public=True, allowed_users=[],
-                )
-                self._apply_header_premium(path, name)
-                added += 1
-                log.info("Klasörden plugin kaydedildi: %s", name)
-            except Exception:
-                log.warning("Plugin senkron hatası: %s", name, exc_info=True)
-        if added:
-            log.info("%d yeni plugin klasörden senkronlandı", added)
-        return added
-
-    def _apply_header_premium(self, path, name):
-        """Plugin başlığındaki '# type:/# stars:/# days:' satırlarını premium
-        config'e uygular (yalnızca daha önce ayarlanmamışsa; panel ayarları korunur)."""
-        try:
-            from utils import premium as _prem
-        except Exception:
-            return
-        try:
-            if _prem.is_configured(name):
-                return
-            ptype = None
-            stars = None
-            days = None
-            with open(path, "r", encoding="utf-8") as f:
-                head = f.read().split("\n")[:25]
-            for line in head:
-                s = line.strip().lower()
-                if s.startswith("# type:"):
-                    v = line.split(":", 1)[1].strip().lower()
-                    if v in ("genel", "ozel", "özel", "premium"):
-                        ptype = "ozel" if v == "özel" else v
-                elif s.startswith("# stars:") or s.startswith("# yıldız:"):
-                    d = "".join(c for c in line.split(":", 1)[1] if c.isdigit())
-                    stars = int(d) if d else None
-                elif s.startswith("# days:") or s.startswith("# gün:"):
-                    d = "".join(c for c in line.split(":", 1)[1] if c.isdigit())
-                    days = int(d) if d else None
-            if ptype:
-                _prem.set_config(name, ptype=ptype, stars=stars, days=days)
-                log.info("Plugin başlığından premium ayarı uygulandı: %s (%s)", name, ptype)
-        except Exception:
-            log.debug("header premium uygulanamadı: %s", name, exc_info=True)
 
 
 # Global instance

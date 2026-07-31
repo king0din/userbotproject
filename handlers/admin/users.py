@@ -8,6 +8,13 @@
 # KingTG UserBot Service - Admin Handlers
 # ============================================
 
+import os
+import sys
+import asyncio
+import subprocess
+import time
+import psutil
+from datetime import datetime
 from telethon import events, Button
 import config
 from database import database as db
@@ -16,7 +23,7 @@ from userbot.plugins import plugin_manager
 
 # Eski uyumluluk için alias
 userbot_manager = smart_session_manager
-from utils import back_button
+from utils import send_log, get_readable_time, back_button
 from utils.bot_api import bot_api, btn, ButtonBuilder
 
 USERS_PER_PAGE = 10
@@ -76,7 +83,7 @@ def register(bot):
             tg_username = tg_user.username
             tg_first_name = tg_user.first_name or ""
             tg_last_name = tg_user.last_name or ""
-        except Exception:
+        except:
             tg_username = user_data.get("username")
             tg_first_name = user_data.get("first_name", "")
             tg_last_name = ""
@@ -138,7 +145,7 @@ def register(bot):
         await event.answer(f"✅ {user_id} banlandı!")
         try:
             await event.edit(f"✅ `{user_id}` banlandı.", buttons=[[Button.inline("🔙 Geri", b"users_list_0")]])
-        except Exception:
+        except:
             pass
     
 
@@ -152,7 +159,7 @@ def register(bot):
         await event.answer(f"✅ {user_id} banı kaldırıldı!")
         try:
             await event.edit(f"✅ `{user_id}` banı kaldırıldı.", buttons=[[Button.inline("🔙 Geri", b"users_list_0")]])
-        except Exception:
+        except:
             pass
     
 
@@ -166,7 +173,7 @@ def register(bot):
         await event.answer(f"✅ {user_id} sudo yapıldı!")
         try:
             await event.edit(f"✅ `{user_id}` sudo yapıldı.", buttons=[[Button.inline("🔙 Geri", b"users_list_0")]])
-        except Exception:
+        except:
             pass
     
 
@@ -180,7 +187,7 @@ def register(bot):
         await event.answer(f"✅ {user_id} sudo kaldırıldı!")
         try:
             await event.edit(f"✅ `{user_id}` sudo kaldırıldı.", buttons=[[Button.inline("🔙 Geri", b"users_list_0")]])
-        except Exception:
+        except:
             pass
     
 
@@ -196,11 +203,11 @@ def register(bot):
         await event.answer(f"✅ {user_id} çıkış yaptırıldı!")
         try:
             await bot.send_message(user_id, "⚠️ **Oturumunuz admin tarafından sonlandırıldı.**")
-        except Exception:
+        except:
             pass
         try:
             await event.edit(f"✅ `{user_id}` çıkış yaptırıldı.", buttons=[[Button.inline("🔙 Geri", b"users_list_0")]])
-        except Exception:
+        except:
             pass
     
 
