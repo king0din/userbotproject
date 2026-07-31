@@ -19,7 +19,6 @@ Bu komutla girilen burcuaylık olarak yorumlayın (yorumlar aylık değişir)
 örnek: .burca ikizler
 """
 
-from telethon import events
 from userbot.events import register
 import aiohttp
 

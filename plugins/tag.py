@@ -1,29 +1,20 @@
 """
-gruplarınızda toplu veya tekli etiketler atmanızı sağlar.
+Gruplarda toplu veya tekli etiketleme yapmanızı sağlar (buton panelli).
 
-🔧 Komutlar: .tagstop, .taghelp, .tagadmin, .tagstat, .tag, .tagban, .tagunban, .tagbanlistremove, .tagbanlist
-🚨 Tür: #grup_yönetim 
+🔧 Komutlar: .tag, .tagadmin, .tagstop, .tagstat, .tagban, .tagunban, .tagbanlist, .tagbanlistremove, .tagekle, .tagliste, .tagsil, .tagtemizle, .taghelp
+🚨 Tür: #grup_yönetim
 
-
-Komular hakında:
-.tag  yanıtladığınız mesajı veya girdiğiniz mesajı tüm üyeleri 2.5 saniye aralıklar ile etiketler
-örnek:
-.tag bir mesajı yanıtlayarak yada yanına örneğin günaydın yazarak atarsanız btün üyeleri bütün üyelere etiket atar.
-not:
-diyelim teker teker değilde 5'er kişi etiketleyerek tag atmak istiyorsunuz ozaman komutun yanına min 1 max 10 olacak şekilde belirtin.
-örnek:
-.tag 5 bir mesajı yanıtlayarak yada yanına mesajı yazarak gönderin.
-.tag <kişi sayısı>  <mesajınız> - Grup halinde gönder.
-.tagadmin bir mesajı yanıtlayarak yada yanına mesajı yazarark - Sadece adminleri etiketler.
-örnek:
-.tagadmin 5 günaydın sayın grup adminleri. Adminlar 5'er gruplar halinde etiket atar.
-.tagstat - etiketleme işlemi yapılırken mevcut işelm durumunu gösterir.
-.tagstop - Etiketlemeyi durdurur.
-.taghelp - herhangi bir sohbette yazınca komutun yardım mesajını gösterir
-.tagban <id/@username> - Kullanıcıyı etiketlemeden engelle
-.tagunban <id/@username> - Kullanıcının engelini kaldır
-.tagbanlistremove - Tüm engelleri temizle
-.tagbanlist - Engellenen kullanıcıları listele
+Nasıl çalışır:
+.tag  → Buton paneli açılır. Kişi sayısını (1-10), aralığı (saniye) ve
+        (mesajsız kullanırsan) rastgele söz kategorisini butonlardan seçersin.
+        Mesajını yazarsan ya da bir mesajı yanıtlarsan o mesajla etiketlenir.
+        Mesaja `{mention}` koyarsan etiket tam oraya gelir.
+.tagadmin → Aynı panel; yalnızca grup adminlerini etiketler.
+.tagstop  → Aktif etiketlemeyi durdurur.
+.tagstat  → Etiketleme durumunu gösterir.
+.tagban / .tagunban / .tagbanlist / .tagbanlistremove → Engelleme sistemi.
+.tagekle / .tagliste / .tagsil / .tagtemizle → Özel söz yönetimi.
+.taghelp  → Detaylı yardım.
 """
 
 import asyncio
@@ -46,51 +37,14 @@ from telethon.errors import (
     FloodWaitError
 )
 from telethon import events
-from userbot import CMD_HELP, bot
+from userbot import CMD_HELP, bot  # noqa: F401 (eski plugin uyumluluğu)
 from userbot.events import register as r
 from userbot.cmdhelp import CmdHelp 
-
-# Global değişkenler
-tag_active = False
-tag_data = {
-    "mode": "all",
-    "message": "",
-    "message_entities": None,
-    "group_size": 1,
-    "started_by": None,
-    "chat_id": None,
-    "current_task": None,
-    "tagged_count": 0,
-    "total_count": 0,
-    "skipped_count": 0,
-    "is_reply": False
-}
 
 # Engelleme sistemi
 blocked_users = set()
 loaded_user_id = None  # Cache için - gereksiz yüklemeleri önler
 BLOCKED_FILE = os.path.join(os.path.dirname(__file__), "tag_blocked.json")
-
-
-def load_blocked_users():
-    """Engellenen kullanıcıları JSON dosyasından yükle"""
-    global blocked_users
-    try:
-        if os.path.exists(BLOCKED_FILE):
-            with open(BLOCKED_FILE, 'r') as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    blocked_users = set()
-                    for user_id_list in data.values():
-                        blocked_users.update(user_id_list)
-                elif isinstance(data, list):
-                    blocked_users = set(data)
-                else:
-                    blocked_users = set()
-        else:
-            blocked_users = set()
-    except Exception:
-        blocked_users = set()
 
 
 async def save_blocked_users(client):
@@ -881,17 +835,6 @@ def _register_tag_bot_handlers(bot):
 
     from telethon import events
     import re as _re
-    import utils.i18n as _i18n
-
-    async def _tr(owner, text, buttons=None):
-        """Panel metnini + butonlarını sahibin diline çevirir."""
-        lang = _i18n.get_user_lang_cached(owner)
-        if lang and lang != "tr":
-            if text:
-                text = await _i18n.translate(text, lang)
-            if buttons:
-                buttons = await _i18n.translate_telethon_buttons(buttons, lang)
-        return text, buttons
 
     @bot.on(events.InlineQuery())
     async def _tag_inline(event):
@@ -903,13 +846,11 @@ def _register_tag_bot_handlers(bot):
         pend = bot._tag_pending.get(owner)
         has_msg = bool(pend and pend.get("has_msg"))
         try:
-            _tt, _tb = await _tr(owner, _panel_text_step1(has_msg),
-                                 _step1_buttons(owner, has_msg))
             result = event.builder.article(
                 title="🏷️ Etiketleme Paneli",
                 description="Seçim yapmak için dokunun",
-                text=_tt,
-                buttons=_tb,
+                text=_panel_text_step1(has_msg),
+                buttons=_step1_buttons(owner, has_msg),
             )
             await event.answer([result], cache_time=0)
         except Exception:
@@ -929,8 +870,7 @@ def _register_tag_bot_handlers(bot):
             return
         pend["group_size"] = max(1, min(10, n))
         try:
-            _tt, _tb = await _tr(owner, _panel_text_interval(), _interval_buttons(owner))
-            await event.edit(_tt, buttons=_tb)
+            await event.edit(_panel_text_interval(), buttons=_interval_buttons(owner))
         except Exception:
             pass
 
@@ -952,8 +892,7 @@ def _register_tag_bot_handlers(bot):
         pend["category"] = key
         # Grup boyutunu kullanıcı seçsin (sözlü modda da: 1 önerilir)
         try:
-            _tt, _tb = await _tr(owner, _panel_text_groupsize(), _group_size_buttons(owner))
-            await event.edit(_tt, buttons=_tb)
+            await event.edit(_panel_text_groupsize(), buttons=_group_size_buttons(owner))
         except Exception:
             pass
 
@@ -993,12 +932,12 @@ def _register_tag_bot_handlers(bot):
         else:
             src = "girdiğiniz mesajla"
         try:
-            _tt, _ = await _tr(owner,
+            await event.edit(
                 f"✅ **Etiketleme başladı!**\n\n"
                 f"Tüm {mode_txt}, {gsize}'erli gruplar halinde, {interval:g} sn arayla "
                 f"{src} etiketliyorum.\n\n"
-                f"⏹️ Durdurmak için: `.tagstop`")
-            await event.edit(_tt)
+                f"⏹️ Durdurmak için: `.tagstop`"
+            )
         except Exception:
             pass
 
@@ -1289,26 +1228,18 @@ async def run_tag_job(owner_id, chat_id, mode, group_size, interval,
         pass
 
 
-@r(outgoing=True, pattern="^.tag(?: |$)(.*)")
+@r(outgoing=True, pattern=r"^\.tag(?: |$)(.*)")
 async def tag_all(q):
     """Tüm üyeleri etiketler"""
-    
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
         return
-    
-    await load_my_blocked_users(q.client)
-    
-    if tag_active:
-        try:
-            await q.edit("❌ **Zaten bir etiketleme işlemi devam ediyor!**\nKapatmak için: `.tagstop`")
-        except Exception:
-            pass
-        return
-    
+
     if q.fwd_from:
         return
-    
+
+    await load_my_blocked_users(q.client)
+
     group_size, message_text, message_entities, is_reply = parse_tag_command(q)
     
     reply_msg = await q.get_reply_message()
@@ -1322,13 +1253,7 @@ async def tag_all(q):
         message_text = "📢"
     
     chat = await q.get_input_chat()
-    
-    try:
-        pass
-    except Exception as e:
-        await q.edit(f"❌ **İzin kontrolü hatası:** `{str(e)}`")
-        return
-    
+
     try:
         test_participant = await q.client.get_participants(chat, limit=1)
         if not test_participant:
@@ -1356,26 +1281,18 @@ async def tag_all(q):
     await _show_tag_panel(q, "all", message_text, message_entities, has_msg)
 
 
-@r(outgoing=True, pattern="^.tagadmin(?: |$)(.*)")
+@r(outgoing=True, pattern=r"^\.tagadmin(?: |$)(.*)")
 async def tag_admins(q):
     """Sadece adminleri etiketler"""
-    
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
         return
-    
-    await load_my_blocked_users(q.client)
-    
-    if tag_active:
-        try:
-            await q.edit("❌ **Zaten bir etiketleme işlemi devam ediyor!**\nKapatmak için: `.tagstop`")
-        except Exception:
-            pass
-        return
-    
+
     if q.fwd_from:
         return
-    
+
+    await load_my_blocked_users(q.client)
+
     group_size, message_text, message_entities, is_reply = parse_tag_command(q)
     
     reply_msg = await q.get_reply_message()
@@ -1409,211 +1326,9 @@ async def tag_admins(q):
     await _show_tag_panel(q, "admin", message_text, message_entities, has_msg)
 
 
-async def tag_process(q, chat, mode, status_msg, group_size=1):
-    """Etiketleme işlemini gerçekleştir - Gerçek mention bildirimi ile"""
-    
-    userbot_id = (await q.client.get_me()).id
-    
-    filter_type = cp if mode == "admin" else None
-    
-    try:
-        participants = []
-        
-        try:
-            async for user in q.client.iter_participants(chat, filter=filter_type):
-                if not tag_active:
-                    break
-                
-                if user.bot or user.deleted:
-                    tag_data["skipped_count"] += 1
-                    continue
-                
-                if user.id == userbot_id:
-                    tag_data["skipped_count"] += 1
-                    continue
-                
-                if user.id in blocked_users:
-                    tag_data["skipped_count"] += 1
-                    continue
-                
-                participants.append(user)
-                
-                if len(participants) >= 5000:
-                    break
-        
-        except ChatAdminRequiredError:
-            try:
-                await status_msg.edit("❌ **Katılımcı listesini almak için admin olmalısınız!**\n\n"
-                                    "⚠️ *Grup gizli olabilir veya üye listesini görme izniniz yok.*")
-            except Exception:
-                pass
-            tag_active = False
-            return
-        except ChannelPrivateError:
-            try:
-                await status_msg.edit("❌ **Bu gruba erişimim yok!**")
-            except Exception:
-                pass
-            tag_active = False
-            return
-        except FloodWaitError as e:
-            try:
-                await status_msg.edit(f"⏳ **FloodWait: {e.seconds} saniye bekleyin!**\n"
-                                    "İşlem durduruldu.")
-            except Exception:
-                pass
-            tag_active = False
-            return
-        except Exception as e:
-            try:
-                await status_msg.edit(f"❌ **Katılımcı alınamadı:** `{str(e)}`")
-            except Exception:
-                pass
-            tag_active = False
-            return
-        
-        tag_data["total_count"] = len(participants)
-        
-        if not participants:
-            try:
-                await status_msg.edit("❌ **Etiketlenecek kimse bulunamadı!**")
-            except Exception:
-                pass
-            tag_active = False
-            return
-        
-        if len(participants) > 1000:
-            try:
-                await status_msg.edit(f"⚠️ **Çok fazla katılımcı:** {len(participants)}\n"
-                                    "İşlem uzun sürebilir.")
-                await asyncio.sleep(2)
-            except Exception:
-                pass
-        
-        try:
-            await status_msg.edit(f"⏳ **Etiketleme başlıyor...**\n"
-                                 f"👥 Toplam: {len(participants)} kişi\n"
-                                 f"📦 **Grup Boyutu:** {group_size}\n"
-                                 f"⏱️ **Bekleme:** 2.5s")
-        except Exception:
-            pass
-        
-        for i in range(0, len(participants), group_size):
-            if not tag_active:
-                break
-            
-            group = participants[i:i + group_size]
-            if not group:
-                continue
-            
-            try:
-                original_message = tag_data['message']
-                original_entities = tag_data.get("message_entities")
-                
-                message_utf16_len = telegram_text_length(original_message)
-                separator = "\n\n"
-                separator_len = 2
-                
-                mention_start_offset = message_utf16_len + separator_len
-                
-                # DÜZELTME: async fonksiyon - InputMessageEntityMentionName kullanır
-                mention_text, mention_entities, successful_users = await build_mention_text_and_entities(
-                    q.client, group, mention_start_offset
-                )
-                
-                full_message = f"{original_message}{separator}{mention_text}"
-                
-                all_entities = []
-                
-                if original_entities:
-                    all_entities.extend(copy.deepcopy(original_entities))
-                
-                all_entities.extend(mention_entities)
-                
-                if len(full_message) <= 4096:
-                    await q.client.send_message(
-                        q.chat_id,
-                        full_message,
-                        formatting_entities=all_entities if all_entities else None,
-                        silent=True
-                    )
-                    tag_data["tagged_count"] += len(successful_users)
-                else:
-                    max_tags_per_msg = 3 if group_size > 3 else group_size
-                    for j in range(0, len(group), max_tags_per_msg):
-                        sub_group = group[j:j + max_tags_per_msg]
-                        
-                        sub_mention_text, sub_mention_entities, sub_successful = await build_mention_text_and_entities(
-                            q.client, sub_group, mention_start_offset
-                        )
-                        sub_message = f"{original_message}{separator}{sub_mention_text}"
-                        
-                        sub_all_entities = []
-                        if original_entities:
-                            sub_all_entities.extend(copy.deepcopy(original_entities))
-                        sub_all_entities.extend(sub_mention_entities)
-                        
-                        await q.client.send_message(
-                            q.chat_id,
-                            sub_message,
-                            formatting_entities=sub_all_entities if sub_all_entities else None,
-                            silent=True
-                        )
-                        tag_data["tagged_count"] += len(sub_successful)
-                
-                if i % max(1, len(participants) // 10) == 0 or i + group_size >= len(participants):
-                    percentage = min(100, (i + group_size) * 100 // len(participants))
-                    
-                    try:
-                        await status_msg.edit(f"⏳ **Etiketleniyor...**\n\n"
-                                             f"📊 %{percentage} tamamlandı\n"
-                                             f"✅ **Etiketlenen:** {tag_data['tagged_count']}/{len(participants)}\n"
-                                             f"📦 **Grup:** {group_size} kişi\n"
-                                             f"⏱️ **Bekleme:** 2.5s")
-                    except Exception:
-                        pass
-                
-                await asyncio.sleep(2.5)
-                
-            except FloodWaitError as e:
-                try:
-                    await status_msg.edit(f"⏳ **FloodWait: {e.seconds} saniye bekleniyor...**\n"
-                                         "İşlem duraklatıldı.")
-                except Exception:
-                    pass
-                await asyncio.sleep(e.seconds)
-                continue
-            except Exception as e:
-                tag_data["skipped_count"] += len(group)
-                continue
-        
-        if tag_active:
-            try:
-                await status_msg.edit(f"✅ **Etiketleme Tamamlandı!**\n\n"
-                                     f"📊 **Sonuçlar:**\n"
-                                     f"✅ Etiketlenen: {tag_data['tagged_count']}\n"
-                                     f"❌ Atlanan: {tag_data['skipped_count']}\n"
-                                     f"👥 Toplam: {len(participants)}\n"
-                                     f"📦 Grup Boyutu: {group_size}\n"
-                                     f"⏱️ Bekleme: 2.5s")
-            except Exception:
-                pass
-    
-    except Exception as e:
-        try:
-            await status_msg.edit(f"❌ **Hata oluştu:** `{str(e)}`")
-        except Exception:
-            pass
-    
-    finally:
-        tag_active = False
-        tag_data["current_task"] = None
-
-
-@r(outgoing=True, pattern="^.tagstop$")
+@r(outgoing=True, pattern=r"^\.tagstop$")
 async def tag_stop(q):
     """Etiketlemeyi durdurur"""
-
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
         return
@@ -1623,25 +1338,15 @@ async def tag_stop(q):
     if bot is not None and hasattr(bot, "_tag_jobs"):
         job = bot._tag_jobs.get(userbot_id)
 
-    active = bool(job and job.get("active")) or tag_active
-    if not active:
+    if not (job and job.get("active")):
         try:
             await q.edit("❌ **Şu anda aktif bir etiketleme yok!**")
         except Exception:
             pass
         return
 
-    # Yeni buton akışı işini durdur (döngü son mesajdan sonra nazikçe biter)
-    if job:
-        job["active"] = False
-
-    # Eski akış (varsa)
-    tag_active = False
-    if tag_data.get("current_task"):
-        try:
-            tag_data["current_task"].cancel()
-        except Exception:
-            pass
+    # Buton akışı işini durdur (döngü son mesajdan sonra nazikçe biter)
+    job["active"] = False
 
     try:
         await q.edit("⏹️ **Etiketleme durduruluyor...**\n"
@@ -1650,10 +1355,9 @@ async def tag_stop(q):
         pass
 
 
-@r(outgoing=True, pattern="^.tagstat$")
+@r(outgoing=True, pattern=r"^\.tagstat$")
 async def tag_status(q):
     """Etiketleme durumunu gösterir"""
-
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
         return
@@ -1668,12 +1372,6 @@ async def tag_status(q):
         total = job.get("total", 0)
         status_text = ("🟢 **ETİKETLEME AKTİF**\n\n"
                        f"✅ **Etiketlenen:** {tagged}/{total}\n\n"
-                       "⏹️ Durdurmak için: `.tagstop`")
-    elif tag_active:
-        mode_text = "👥 Tüm Üyeler" if tag_data.get("mode") == "all" else "👑 Sadece Adminler"
-        status_text = ("🟢 **ETİKETLEME AKTİF**\n\n"
-                       f"👤 **Mod:** {mode_text}\n"
-                       f"✅ **Etiketlenen:** {tag_data.get('tagged_count', 0)}\n\n"
                        "⏹️ Durdurmak için: `.tagstop`")
     else:
         await load_my_blocked_users(q.client)
@@ -1693,9 +1391,10 @@ async def tag_status(q):
         pass
 
 
-@r(outgoing=True, pattern="^.tagban(?: |$)(.*)")
+@r(outgoing=True, pattern=r"^\.tagban(?: |$)(.*)")
 async def block_user(q):
     """Kullanıcıyı etiketlemeden engelle"""
+    global blocked_users
     
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
@@ -1768,9 +1467,10 @@ async def block_user(q):
                 f"Engeli kaldırmak için: `.tagunban {user_id}`")
 
 
-@r(outgoing=True, pattern="^.tagunban(?: |$)(.*)")
+@r(outgoing=True, pattern=r"^\.tagunban(?: |$)(.*)")
 async def unblock_user(q):
     """Kullanıcının engelini kaldır"""
+    global blocked_users
     
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
@@ -1838,9 +1538,10 @@ async def unblock_user(q):
                 f"Bu kullanıcı artık etiketlenebilir.")
 
 
-@r(outgoing=True, pattern="^.tagbanlistremove$")
+@r(outgoing=True, pattern=r"^\.tagbanlistremove$")
 async def clear_blocks(q):
     """Tüm engelleri temizle"""
+    global blocked_users
     
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
@@ -1860,9 +1561,10 @@ async def clear_blocks(q):
                 f"🗑️ **Temizlenen:** {count} kullanıcı")
 
 
-@r(outgoing=True, pattern="^.tagbanlist$")
+@r(outgoing=True, pattern=r"^\.tagbanlist$")
 async def list_blocks(q):
     """Engellenen kullanıcıları listele"""
+    global blocked_users
     
     userbot_id = (await q.client.get_me()).id
     if q.sender_id != userbot_id:
@@ -1894,7 +1596,7 @@ async def list_blocks(q):
     await q.edit(msg)
 
 
-@r(outgoing=True, pattern="^.taghelp$")
+@r(outgoing=True, pattern=r"^\.taghelp$")
 async def tag_help(q):
     """Yardım mesajı gösterir"""
     userbot_id = (await q.client.get_me()).id
@@ -1946,6 +1648,25 @@ Bir mesajı yanıtlayıp `.tag` yaz → o mesaj kullanılır (premium emoji koru
     
     try:
         await q.edit(help_text)
+    except Exception:
+        pass
+
+
+def cleanup_user_data(user_id, reason="disable"):
+    """Plugin kapatıldığında/çıkışta bu kullanıcının aktif etiketleme işini durdur.
+    (Askıda kalan görev + bekleyen panel state temizlenir; bot handler'ları
+    paylaşıldığı için kaldırılmaz.)"""
+    try:
+        bot = _get_bot()
+        if bot is None:
+            return
+        if hasattr(bot, "_tag_jobs"):
+            job = bot._tag_jobs.get(user_id)
+            if job:
+                job["active"] = False
+            bot._tag_jobs.pop(user_id, None)
+        if hasattr(bot, "_tag_pending"):
+            bot._tag_pending.pop(user_id, None)
     except Exception:
         pass
 

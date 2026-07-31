@@ -19,6 +19,119 @@ from utils.logger import get_logger
 log = get_logger(__name__)
 
 
+def _extract_command_names(content: str):
+    """Plugin içeriğinden `.komut` adlarını güvenilir şekilde çıkarır.
+
+    Eski regex `pattern=r"^\\.afk$"` gibi yaygın biçimleri HİÇ yakalamıyordu
+    (komut listesi ve çakışma kontrolü boş kalıyordu). Bu sürüm:
+      - register/@r/events.NewMessage pattern string'lerini bulur,
+      - baştaki ^ ve \\. (nokta) önekini temizler,
+      - [kc]lon / (?:ses|tts) gibi alternatif/karakter-sınıflarını açar,
+      - m[uü]zik gibi karakter sınıflarının tüm varyantlarını üretir.
+    Callback (rb"...") pattern'leri komut olmadığından atlanır.
+    """
+    names = set()
+    # outgoing komut pattern'lerini yakala: pattern= "..." veya '...'
+    pat_strings = re.findall(
+        r"""pattern\s*=\s*[rbf]{0,2}(['"])(.*?)\1""",
+        content,
+        flags=re.DOTALL,
+    )
+    for _quote, raw in pat_strings:
+        # Callback pattern'leri (byte/rb) genelde nokta içermez -> komut değil
+        if not raw.startswith("^") and "\\." not in raw and not raw.startswith("."):
+            # ^\. veya ^. ile başlamayan (ör. callback data) -> atla
+            if "." not in raw[:3]:
+                continue
+        # baştaki ^ kaldır
+        s = raw[1:] if raw.startswith("^") else raw
+        # baştaki nokta önekini kaldır (\\. veya .)
+        if s.startswith("\\."):
+            s = s[2:]
+        elif s.startswith("."):
+            s = s[1:]
+        else:
+            # nokta ile başlamayan pattern komut değildir
+            continue
+        # İlk komut tokenini al: sadece somut harfler, [..] karakter sınıfı ve
+        # metin alternatifi (?:a|b) — içinde \s .+ gibi regex metası OLMAYAN.
+        token = ""
+        k = 0
+        while k < len(s):
+            c = s[k]
+            if c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" \
+                    "ğüşıöçĞÜŞİÖÇ":
+                token += c
+                k += 1
+            elif c == "[":
+                j = s.find("]", k)
+                if j == -1:
+                    break
+                inner = s[k:j + 1]
+                # sadece harf içeren karakter sınıfı komuttur ([cç] gibi)
+                if re.fullmatch(r"\[[\wğüşıöçĞÜŞİÖÇ]+\]", inner):
+                    token += inner
+                    k = j + 1
+                else:
+                    break
+            elif s[k:k + 3] == "(?:":
+                j = s.find(")", k)
+                if j == -1:
+                    break
+                inner = s[k + 3:j]
+                # sadece 'a|b|c' gibi düz metin alternatifi komuttur
+                if re.fullmatch(r"[\wğüşıöçĞÜŞİÖÇ|]+", inner):
+                    token += s[k:j + 1]
+                    k = j + 1
+                    # (?:ker)? gibi OPSİYONEL grup -> '?' işaretini de taşı
+                    if k < len(s) and s[k] == "?":
+                        token += "?"
+                        k += 1
+                else:
+                    break
+            else:
+                break
+        if not token:
+            continue
+        # token'ı somut komut varyantlarına aç
+        for variant in _expand_token(token):
+            v = variant.strip()
+            if v and re.fullmatch(r"[\wğüşıöçĞÜŞİÖÇ]+", v):
+                names.add(v)
+    return names
+
+
+def _expand_token(token: str):
+    """`[kc]lon`, `(?:ses|tts)`, `m[uü]zik` gibi tokenleri düz komutlara açar."""
+    results = [""]
+    i = 0
+    while i < len(token):
+        ch = token[i]
+        if ch == "[":
+            j = token.find("]", i)
+            if j == -1:
+                break
+            chars = token[i + 1:j]
+            results = [r + c for r in results for c in chars]
+            i = j + 1
+        elif token[i:i + 3] == "(?:":
+            j = token.find(")", i)
+            if j == -1:
+                break
+            alts = token[i + 3:j].split("|")
+            i = j + 1
+            # (?:ker)? -> opsiyonel: hem "stic" hem "sticker" üret
+            if i < len(token) and token[i] == "?":
+                alts = alts + [""]
+                i += 1
+            results = [r + a for r in results for a in alts]
+        else:
+            results = [r + ch for r in results]
+            i += 1
+    return [r.strip() for r in results if r.strip()]
+
+
+
 class PluginManager:
     """Plugin yönetim sistemi"""
     
@@ -31,11 +144,6 @@ class PluginManager:
         self._compat_installed = False
         self._installed_packages: Set[str] = set()  # Kurulu paket cache
         self._packages_checked = False
-        # B1 düzeltmesi: eski stil (@register) pluginler global `_client`
-        # okuduğu için, iki kullanıcı aynı anda plugin aktive ederse
-        # handler yanlış hesaba bağlanabilir. Bu kilit, `set_client -> exec ->
-        # register` kritik bölgesini kullanıcılar arasında atomik tutar.
-        self._activation_lock = asyncio.Lock()
     
     async def preinstall_all_dependencies(self):
         """Tüm pluginlerin bağımlılıklarını önceden kur"""
@@ -378,15 +486,8 @@ class PluginManager:
             except Exception:
                 pass
             
-            # Komutları pattern string'lerinden çıkar (kaçışlı '\.' ve '(?: )' grupları dahil)
-            cmds = []
-            for _pm in re.finditer(r"pattern\s*=\s*[rfb]{0,2}(['\"])(.*?)\1", content, re.DOTALL):
-                _body = _pm.group(2)
-                for _cm in re.finditer(r"\\?\.\(?\??:?(\w+)", _body):
-                    _w = _cm.group(1)
-                    if _w and _w not in cmds:
-                        cmds.append(_w)
-            info["commands"] = cmds
+            patterns = _extract_command_names(content)
+            info["commands"] = sorted(set(patterns))
             
             for line in content.split('\n')[:30]:
                 line = line.strip()
@@ -541,57 +642,47 @@ class PluginManager:
         
         # Plugin'i yükle - exec kullanarak
         try:
-            # B1: global `_client` yarış durumunu önlemek için, compat kurulumu
-            # ve handler kaydını (senkron kritik bölge) kilit altında yap.
-            async with self._activation_lock:
-                # YARIŞ KORUMASI: "zaten aktif" kontrolü kilit DIŞINDA yapıldığı için,
-                # iki eşzamanlı aktivasyon (paralel yükleme) kilidi beklerken ikisi de
-                # geçebilir; kilit içinde TEKRAR kontrol et → aksi halde plugin ikinci
-                # kez exec edilip handler'lar ÇİFT kaydolur (komutlar iki kez tetiklenir).
-                if plugin_name in self.user_active_plugins.get(user_id, {}):
-                    return True, f"`{plugin_name}` zaten aktif"
-
-                # userbot_compat'ı hazırla
+            # userbot_compat'ı hazırla
+            try:
+                from userbot_compat import events as compat_events
+                compat_events.set_client(client)
+            except Exception as e:
+                log.error("compat_events hatası", exc_info=True)
+            
+            # Modül için namespace oluştur
+            module_name = f"plugin_{plugin_name}_{user_id}"
+            
+            # Yeni modül oluştur
+            import types
+            module = types.ModuleType(module_name)
+            module.__file__ = file_path
+            module.__name__ = module_name
+            module.client = client
+            
+            # Modülü sys.modules'a ekle
+            sys.modules[module_name] = module
+            
+            # Mevcut handler sayısını kaydet (önceki durum)
+            handlers_before = len(client.list_event_handlers())
+            
+            # Kodu çalıştır
+            exec(compile(patched_content, file_path, 'exec'), module.__dict__)
+            
+            # Register fonksiyonu varsa çağır (eski stil)
+            if hasattr(module, 'register') and callable(module.register):
+                module.register(client)
+            
+            # register_handlers fonksiyonu varsa çağır (yeni stil)
+            if hasattr(module, 'register_handlers') and callable(module.register_handlers):
                 try:
-                    from userbot_compat import events as compat_events
-                    compat_events.set_client(client)
-                except Exception:
-                    log.error("compat_events hatası", exc_info=True)
-
-                # Modül için namespace oluştur
-                module_name = f"plugin_{plugin_name}_{user_id}"
-
-                # Yeni modül oluştur
-                import types
-                module = types.ModuleType(module_name)
-                module.__file__ = file_path
-                module.__name__ = module_name
-                module.client = client
-
-                # Modülü sys.modules'a ekle
-                sys.modules[module_name] = module
-
-                # Mevcut handler sayısını kaydet (önceki durum)
-                handlers_before = len(client.list_event_handlers())
-
-                # Kodu çalıştır
-                exec(compile(patched_content, file_path, 'exec'), module.__dict__)
-
-                # Register fonksiyonu varsa çağır (eski stil)
-                if hasattr(module, 'register') and callable(module.register):
-                    module.register(client)
-
-                # register_handlers fonksiyonu varsa çağır (yeni stil)
-                if hasattr(module, 'register_handlers') and callable(module.register_handlers):
-                    try:
-                        module.register_handlers(client, user_id)
-                        log.info("register_handlers çağrıldı: %s", plugin_name)
-                    except Exception:
-                        log.error("register_handlers hatası", exc_info=True)
-
-                # Yeni eklenen handler'ları tespit et ve kaydet
-                handlers_after = client.list_event_handlers()
-                new_handlers = handlers_after[handlers_before:]
+                    module.register_handlers(client, user_id)
+                    log.info("register_handlers çağrıldı: %s", plugin_name)
+                except Exception as e:
+                    log.error("register_handlers hatası", exc_info=True)
+            
+            # Yeni eklenen handler'ları tespit et ve kaydet
+            handlers_after = client.list_event_handlers()
+            new_handlers = handlers_after[handlers_before:]
             
             # Handler'ları kullanıcı ve plugin bazında sakla
             if user_id not in self.user_handlers:
@@ -951,19 +1042,9 @@ class PluginManager:
             name = fn[:-3]
             if name.startswith("_") or name.startswith("temp_") or name == "__init__":
                 continue
-            path = os.path.join(config.PLUGINS_DIR, fn)
             if name in existing:
-                # Var olan plugin: komut/açıklama metadatasını dosyadan TAZELE
-                # (is_public/premium/izin gibi admin ayarlarına dokunmaz)
-                try:
-                    _info = self.extract_plugin_info(path)
-                    await _db.update_plugin(name, {
-                        "commands": _info.get("commands", []),
-                        "description": _info.get("description", ""),
-                    })
-                except Exception:
-                    pass
                 continue
+            path = os.path.join(config.PLUGINS_DIR, fn)
             try:
                 info = self.extract_plugin_info(path)
                 await _db.add_plugin(

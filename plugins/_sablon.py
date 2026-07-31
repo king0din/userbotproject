@@ -10,7 +10,6 @@
 # version: 1.0.0
 # ============================================================
 
-from telethon import events
 from userbot.events import register
 
 

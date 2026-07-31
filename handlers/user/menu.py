@@ -9,11 +9,13 @@
 # ============================================
 
 from telethon import events, Button
+import config
 from database import database as db
 from userbot.smart_manager import smart_session_manager
+from userbot.plugins import plugin_manager
 from utils import (
     check_ban, check_private_mode, check_maintenance, 
-    register_user
+    register_user, send_log, is_valid_phone, back_button
 )
 from utils.bot_api import bot_api, btn, ButtonBuilder
 
@@ -22,7 +24,9 @@ userbot_manager = smart_session_manager
 
 from ._common import (
     user_states, build_main_menu,
-    build_plugins_page, build_my_plugins_page,
+    STATE_WAITING_PHONE, STATE_WAITING_CODE, STATE_WAITING_2FA,
+    STATE_WAITING_SESSION_TELETHON, STATE_WAITING_SESSION_PYROGRAM,
+    PLUGINS_PER_PAGE,
 )
 
 
@@ -36,37 +40,14 @@ def register(bot):
     async def start_handler(event):
         if event.sender_id in user_states:
             del user_states[event.sender_id]
-        # Yarım kalmış admin "ID gönder" akışını da temizle
-        try:
-            from handlers.admin._state import admin_input_state
-            admin_input_state.pop(event.sender_id, None)
-        except Exception:
-            pass
-
-        # Otomatik dil tespiti (çeviri için): kayıtlı dil varsa onu, yoksa
-        # kullanıcının Telegram diline göre başlangıç dili ayarla.
-        try:
-            import utils.i18n as _i18n
-            _snd = await event.get_sender()
-            _ud = await db.get_user(event.sender_id)
-            _saved = (_ud or {}).get("lang")
-            if _saved:
-                _i18n.set_user_lang(event.sender_id, _saved)
-            else:
-                _dl = _i18n.default_lang_from_tg(getattr(_snd, "lang_code", None))
-                _i18n.set_user_lang(event.sender_id, _dl)
-                if _dl != "tr":
-                    await db.update_user(event.sender_id, {"lang": _dl})
-        except Exception:
-            pass
-
+        
         # Deep link parametresi kontrol et
         param = event.pattern_match.group(1)
-
+        
         if param:
-            # Deep link ile geldiyse ilgili BUTONLU sayfaya yönlendir
-            # (sayfalar _common.py'daki ortak oluşturuculardan gelir)
+            # Deep link ile geldiyse ilgili sayfaya yönlendir
             if param == "panel":
+                # Ana menüyü göster
                 user = await event.get_sender()
                 text, rows = await build_main_menu(event.sender_id, user.first_name)
                 await bot_api.send_message(
@@ -75,24 +56,103 @@ def register(bot):
                     reply_markup=btn.inline_keyboard(rows)
                 )
                 return
-
-            elif param in ("plugins", "my_plugins"):
+            
+            elif param == "plugins":
+                # Plugin sayfasına yönlendir
                 user_data = await db.get_user(event.sender_id)
-                if not user_data or not user_data.get("is_logged_in"):
-                    await event.respond("❌ Önce giriş yapmalısınız.",
-                                        buttons=[[Button.inline("🔐 Giriş Yap", b"login_menu")]])
-                    return
-                if param == "plugins":
-                    text, rows = await build_plugins_page(event.sender_id, 0)
+                if user_data and user_data.get("is_logged_in"):
+                    # Fake event oluştur ve plugins_menu_handler'ı çağır
+                    await event.respond("⏳ Plugin listesi yükleniyor...")
+                    # Direkt olarak plugins menüsünü göster
+                    all_plugins = await db.get_all_plugins()
+                    active_plugins = user_data.get("active_plugins", [])
+                    
+                    accessible_plugins = []
+                    for p in all_plugins:
+                        if p.get("is_disabled", False):
+                            continue
+                        if p.get("is_public", True) or event.sender_id in p.get("allowed_users", []):
+                            if event.sender_id not in p.get("restricted_users", []):
+                                accessible_plugins.append(p)
+                    
+                    if not accessible_plugins:
+                        text = "📭 **Henüz plugin yok.**"
+                        await event.respond(text, buttons=[[Button.inline("🏠 Ana Menü", b"main_menu")]])
+                        return
+                    
+                    text = f"🔌 **Plugin Listesi** (Toplam: {len(accessible_plugins)})\n\n"
+                    
+                    for p in accessible_plugins[:10]:
+                        name = p['name']
+                        is_active = name in active_plugins
+                        is_default = p.get("default_active", False)
+                        status = "🟢" if is_active else "⚪"
+                        default_icon = "⭐" if is_default else ""
+                        
+                        cmds = p.get("commands", [])[:2]
+                        cmd_text = ", ".join([f"`.{c}`" for c in cmds])
+                        
+                        text += f"{status}{default_icon} **{name}**\n"
+                        text += f"   └ {cmd_text}\n"
+                        text += f"   └ Yükle: `/pactive {name}`\n\n"
+                    
+                    if len(accessible_plugins) > 10:
+                        text += f"... ve {len(accessible_plugins) - 10} plugin daha\n\n"
+                    
+                    text += f"━━━━━━━━━━━━━━━━━━━━\n"
+                    text += f"🟢 Aktif | ⚪ Pasif | ⭐ Zorunlu\n"
+                    text += f"✅ Aktif: **{len(active_plugins)}** plugin"
+                    
+                    buttons = [
+                        [Button.inline("📦 Pluginlerim", b"my_plugins_0")],
+                        [Button.inline("🏠 Ana Menü", b"main_menu")]
+                    ]
+                    await event.respond(text, buttons=buttons)
                 else:
-                    text, rows = await build_my_plugins_page(event.sender_id, 0)
-                await bot_api.send_message(
-                    chat_id=event.sender_id,
-                    text=text,
-                    reply_markup=btn.inline_keyboard(rows)
-                )
+                    await event.respond("❌ Önce giriş yapmalısınız.", buttons=[[Button.inline("🔐 Giriş Yap", b"login_menu")]])
                 return
-
+            
+            elif param == "my_plugins":
+                # Aktif pluginler sayfasına yönlendir
+                user_data = await db.get_user(event.sender_id)
+                if user_data and user_data.get("is_logged_in"):
+                    active_plugins = user_data.get("active_plugins", [])
+                    
+                    if not active_plugins:
+                        text = "📭 **Aktif plugin yok.**\n\nPlugin yüklemek için:\n`/pactive <isim>`"
+                        await event.respond(text, buttons=[
+                            [Button.inline("🔌 Plugin Listesi", b"plugins_page_0")],
+                            [Button.inline("🏠 Ana Menü", b"main_menu")]
+                        ])
+                        return
+                    
+                    text = f"📦 **Aktif Plugin'leriniz** ({len(active_plugins)} adet)\n\n"
+                    
+                    for name in active_plugins[:10]:
+                        plugin = await db.get_plugin(name)
+                        if plugin:
+                            cmds = ", ".join([f"`.{c}`" for c in plugin.get("commands", [])])
+                            is_default = plugin.get("default_active", False)
+                            default_icon = "⭐" if is_default else ""
+                            text += f"✅{default_icon} **{name}**\n"
+                            text += f"   └ {cmds}\n"
+                            if not is_default:
+                                text += f"   └ Kaldır: `/pinactive {name}`\n\n"
+                            else:
+                                text += f"   └ _(Zorunlu plugin)_\n\n"
+                    
+                    if len(active_plugins) > 10:
+                        text += f"... ve {len(active_plugins) - 10} plugin daha"
+                    
+                    buttons = [
+                        [Button.inline("🔌 Tüm Plugin'ler", b"plugins_page_0")],
+                        [Button.inline("🏠 Ana Menü", b"main_menu")]
+                    ]
+                    await event.respond(text, buttons=buttons)
+                else:
+                    await event.respond("❌ Önce giriş yapmalısınız.", buttons=[[Button.inline("🔐 Giriş Yap", b"login_menu")]])
+                return
+        
         # Normal /start
         user = await event.get_sender()
         text, rows = await build_main_menu(event.sender_id, user.first_name)
@@ -152,59 +212,6 @@ def register(bot):
     async def close_handler(event):
         await event.delete()
     
-
-    @bot.on(events.CallbackQuery(data=b"lang_menu"))
-    async def lang_menu_handler(event):
-        """Dil seçim menüsü — dil adları kendi dilinde (çeviri KAPALI)."""
-        import utils.i18n as _i18n
-        cur = _i18n.get_user_lang_cached(event.sender_id)
-        langs = _i18n.all_langs()
-        text = ("🌐 **Dil / Language**\n\n"
-                f"Şu an / Current: **{langs.get(cur, cur)}**\n\n"
-                "Bir dil seç / Choose your language:")
-        rows, row = [], []
-        for code, name in langs.items():
-            mark = "✅ " if code == cur else ""
-            row.append(btn.callback(mark + name, f"setlang_{code}"))
-            if len(row) == 2:
-                rows.append(row); row = []
-        if row:
-            rows.append(row)
-        rows.append([btn.callback(" Ana Menü / Home", "main_menu",
-                                  style=ButtonBuilder.STYLE_DANGER,
-                                  icon_custom_emoji_id=5832654562510511307)])
-        # translate=False → dil adları olduğu gibi kalsın (herkes kendi dilini bulsun)
-        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id,
-                                        text=text, reply_markup=btn.inline_keyboard(rows),
-                                        translate=False)
-        await event.answer()
-
-    @bot.on(events.CallbackQuery(pattern=rb"setlang_([a-zA-Z]{2,5})"))
-    async def setlang_handler(event):
-        import utils.i18n as _i18n
-        code = event.data.decode().split("_", 1)[1]
-        _i18n.set_user_lang(event.sender_id, code)
-        _nl = _i18n.norm_lang(code)
-        try:
-            await db.update_user(event.sender_id, {"lang": _nl})
-        except Exception:
-            pass
-        # Yeni dili ARKA PLANDA ön-çevir (bot + plugin metinleri hızlı olsun)
-        if _nl != "tr":
-            try:
-                import asyncio as _a
-                _a.create_task(_i18n.prewarm(_i18n.get_prewarm_strings(), langs=[_nl]))
-            except Exception:
-                pass
-        try:
-            await event.answer("✅ " + _i18n.all_langs().get(_i18n.norm_lang(code), code))
-        except Exception:
-            pass
-        # Ana menüyü YENİ dilde göster (bot_api otomatik çevirir)
-        user = await event.get_sender()
-        text, rows = await build_main_menu(event.sender_id, user.first_name)
-        await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id,
-                                        text=text, reply_markup=btn.inline_keyboard(rows))
 
     @bot.on(events.CallbackQuery(data=b"noop"))
     async def noop_handler(event):

@@ -14,14 +14,17 @@ import asyncio
 import subprocess
 import time
 import psutil
+from datetime import datetime
 from telethon import events, Button
 import config
 from database import database as db
 from userbot.smart_manager import smart_session_manager
+from userbot.plugins import plugin_manager
 
 # Eski uyumluluk için alias
 userbot_manager = smart_session_manager
-from utils import get_readable_time, back_button
+from utils import send_log, get_readable_time, back_button
+from utils.bot_api import bot_api, btn, ButtonBuilder
 
 start_time = time.time()
 
@@ -283,4 +286,9 @@ def register(bot):
         await msg.edit(f"✅ **Tamamlandı!**\n📤 Gönderildi: `{sent}`\n❌ Başarısız: `{failed}`")
     
 
-    # NOT: Post oluşturma sistemi handlers/admin/post.py içindedir.
+    # ==========================================
+    # POST OLUŞTURMA SİSTEMİ
+    # ==========================================
+    
+    # Post state yönetimi
+    post_states = {}

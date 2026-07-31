@@ -59,42 +59,6 @@ def md_to_html(text: str) -> str:
     return text
 
 
-async def _tr_out(text, reply_markup, chat_id):
-    """Metni + TÜM buton metinlerini TEK batch çağrısıyla alıcının diline çevirir."""
-    try:
-        import copy
-        import utils.i18n as _i18n
-        uid = None
-        if isinstance(chat_id, int):
-            uid = chat_id
-        elif isinstance(chat_id, str) and chat_id.lstrip("-").isdigit():
-            uid = int(chat_id)
-        if uid is None:
-            return text, reply_markup
-        lang = _i18n.get_user_lang_cached(uid)
-        if not lang or lang == "tr":
-            return text, reply_markup
-        mk = copy.deepcopy(reply_markup) if reply_markup else None
-        btns = []
-        if mk and isinstance(mk, dict):
-            for row in mk.get("inline_keyboard", []):
-                for b in row:
-                    if isinstance(b, dict) and b.get("text"):
-                        btns.append(b)
-        collect = ([text] if text else []) + [b["text"] for b in btns]
-        if not collect:
-            return text, mk if mk is not None else reply_markup
-        tr = await _i18n.translate_many(collect, lang)
-        idx = 0
-        if text:
-            text = tr[idx]; idx += 1
-        for b in btns:
-            b["text"] = tr[idx]; idx += 1
-        return text, (mk if mk is not None else reply_markup)
-    except Exception:
-        return text, reply_markup
-
-
 class BotAPI:
     """Bot API HTTP wrapper for colored buttons and premium emoji"""
     
@@ -136,18 +100,10 @@ class BotAPI:
                 if result.get('ok'):
                     return result.get('result')
                 desc = result.get('description') or ''
-                dl = desc.lower()
-                # "message is not modified" → içerik ZATEN aynı; ZARARSIZ.
-                # Stilleri SOYMA (yoksa buton düz'e düşer), sessizce geç.
-                if 'not modified' in dl:
-                    log.debug("editMessageText: içerik değişmedi (zararsız, atlandı)")
-                    return None
-                # SADECE gerçek stil/premium-emoji reddinde stilleri atıp sade gönder
-                if (not _stripped) and data and data.get('reply_markup') and (
-                        'button style' in dl or 'custom_emoji' in dl or 'custom emoji' in dl
-                        or 'button_type' in dl or ('button' in dl and 'invalid' in dl)):
-                    log.warning("⚠️ Buton stili/premium-emoji REDDEDİLDİ (%s) → sade butona düşülüyor. "
-                                "SEBEP: %s", method, desc)
+                # Telegram stilli/emoji butonu reddederse → stilleri atıp sade butonla bir kez daha dene
+                if (not _stripped) and data and data.get('reply_markup') and \
+                        'button' in desc.lower() and \
+                        ('style' in desc.lower() or 'parse' in desc.lower()):
                     self._strip_button_styles(data['reply_markup'])
                     return await self._request(method, data, _retry=False, _stripped=True)
                 log.warning("%s error: %s", method, desc)
@@ -171,25 +127,25 @@ class BotAPI:
         text: str,
         parse_mode: str = "HTML",
         reply_markup: Dict = None,
-        disable_web_page_preview: bool = True,
-        translate: bool = True
+        disable_web_page_preview: bool = True
     ) -> Optional[Dict]:
-        """Mesaj gönder (alıcının diline otomatik çevirir; translate=False ile ham)."""
-        if translate:
-            text, reply_markup = await _tr_out(text, reply_markup, chat_id)
+        """Mesaj gönder"""
         # Markdown'ı HTML'e çevir
         if parse_mode == "HTML":
             text = md_to_html(text)
-
+        
         data = {
             "chat_id": chat_id,
             "text": text,
             "disable_web_page_preview": disable_web_page_preview
         }
+        
         if parse_mode:
             data["parse_mode"] = parse_mode
+        
         if reply_markup:
             data["reply_markup"] = reply_markup
+        
         return await self._request("sendMessage", data)
     
     async def edit_message_text(
@@ -199,12 +155,9 @@ class BotAPI:
         text: str,
         parse_mode: str = "HTML",
         reply_markup: Dict = None,
-        disable_web_page_preview: bool = True,
-        translate: bool = True
+        disable_web_page_preview: bool = True
     ) -> Optional[Dict]:
-        """Mesajı düzenle (alıcının diline otomatik çevirir; translate=False ile ham)."""
-        if translate:
-            text, reply_markup = await _tr_out(text, reply_markup, chat_id)
+        """Mesajı düzenle"""
         # Markdown'ı HTML'e çevir
         if parse_mode == "HTML":
             text = md_to_html(text)
@@ -416,7 +369,7 @@ class ButtonBuilder:
     STYLE_PRIMARY = "primary"    # Mavi
     STYLE_SUCCESS = "success"    # Yeşil
     STYLE_DANGER = "danger"      # Kırmızı
-    STYLE_SECONDARY = "primary"  # Bot API "secondary" desteklemiyor → geçerli "primary"e eşlendi (renkli kalsın)
+    STYLE_SECONDARY = "secondary"  # Gri/Beyaz
     
     # Premium emoji ID'leri
     EMOJI_LOGIN = 5233408828313192030      # Giriş

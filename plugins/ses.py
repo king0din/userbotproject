@@ -35,7 +35,7 @@ Not: Türkçe için ülke kodu girmenize gerek yok sadece cinsiyet yazmanız yet
 Örnek: .sesayar erkek
 """
 
-from telethon import events
+
 from userbot.events import register
 import os
 import tempfile
@@ -47,9 +47,6 @@ log = get_logger(__name__)
 
 # Varsayılan ses (Türkçe erkek)
 DEFAULT_VOICE = "tr-TR-AhmetNeural"
-
-# Mevcut ses ayarı
-current_voice = DEFAULT_VOICE
 
 
 # ── SES TERCİHİ KALICILIĞI (restart'ta seçtiğin ses kaybolmasın) ──
@@ -233,11 +230,10 @@ async def get_text_from_file(client, message):
 
 @register(outgoing=True, pattern=r'^\.(?:ses|tts)(?:\s+(.+))?$')
 async def tts_cmd(event):
-    global current_voice
+    # Her kullanıcının kendi sesini KULLAN (global paylaşım = yarış hatası).
+    # Kullanıcının kayıtlı sesi yoksa varsayılan ses kullanılır.
     me = await event.client.get_me()
-    _saved = _load_voice(me.id)
-    if _saved:
-        current_voice = _saved
+    voice = _load_voice(me.id) or DEFAULT_VOICE
 
     text = event.pattern_match.group(1)
 
@@ -289,7 +285,7 @@ async def tts_cmd(event):
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
                 tmp_path = tmp.name
 
-            communicate = edge_tts.Communicate(text, current_voice)
+            communicate = edge_tts.Communicate(text, voice)
             await communicate.save(tmp_path)
 
             await event.edit("📤 **Gönderiliyor...**")
@@ -329,7 +325,6 @@ async def tts_cmd(event):
     )
 
     temp_files = []
-    final_path = None
 
     try:
         # Her chunk'ı işle
@@ -342,7 +337,7 @@ async def tts_cmd(event):
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
                 chunk_path = tmp.name
 
-            await text_to_speech_chunk(chunk, current_voice, chunk_path)
+            await text_to_speech_chunk(chunk, voice, chunk_path)
             temp_files.append(chunk_path)
 
         # Dosyaları birleştir
@@ -407,52 +402,46 @@ async def tts_cmd(event):
                 os.unlink(tmp_file)
             except Exception as _e:
                 log.debug(f"geçici dosya silinemedi: {_e}")
-        if final_path:
-            try:
-                os.unlink(final_path)
-            except Exception as _e:
-                log.debug(f"final dosya silinemedi: {_e}")
+        try:
+            os.unlink(final_path)
+        except Exception as _e:
+            log.debug(f"final dosya silinemedi: {_e}")
 
 @register(outgoing=True, pattern=r'^\.sesler$')
 async def list_voices(event):
-    global current_voice
     me = await event.client.get_me()
-    _saved = _load_voice(me.id)
-    if _saved:
-        current_voice = _saved
+    voice = _load_voice(me.id) or DEFAULT_VOICE
     text = "🎙️ **Mevcut Sesler**\n\n"
 
     text += "**🇹🇷 Türkçe:**\n"
     for name, code in TURKISH_VOICES.items():
-        marker = " ✓" if code == current_voice else ""
+        marker = " ✓" if code == voice else ""
         text += f"• `{name}` - {code}{marker}\n"
 
     text += "\n**🌍 Diğer Diller:**\n"
     for name, code in OTHER_VOICES.items():
-        marker = " ✓" if code == current_voice else ""
+        marker = " ✓" if code == voice else ""
         text += f"• `{name}` - {code}{marker}\n"
 
-    text += f"\n**Şu anki ses:** `{current_voice}`"
+    text += f"\n**Şu anki ses:** `{voice}`"
     text += "\n\n💡 Değiştirmek için: `.sesayar <isim>`"
 
     await event.edit(text)
 
 @register(outgoing=True, pattern=r'^\.sesayar\s+(\S+)$')
 async def set_voice(event):
-    global current_voice
-
     voice_input = event.pattern_match.group(1).lower()
 
     if voice_input in ALL_VOICES:
-        current_voice = ALL_VOICES[voice_input]
+        new_voice = ALL_VOICES[voice_input]
     elif voice_input.count("-") >= 2:
         # Direkt ses kodu girilmiş olabilir (örn: tr-TR-AhmetNeural)
-        current_voice = voice_input
+        new_voice = voice_input
     else:
         await event.edit(f"❌ Ses bulunamadı: `{voice_input}`\n\n💡 Mevcut sesler için: `.sesler`")
         return
 
-    # Başarılı: kalıcı kaydet + bildir
+    # Başarılı: kalıcı kaydet + bildir (kullanıcı bazlı, global değil)
     me = await event.client.get_me()
-    _save_voice(me.id, current_voice)
-    await event.edit(f"✅ Ses değiştirildi: `{current_voice}` (kalıcı)")
+    _save_voice(me.id, new_voice)
+    await event.edit(f"✅ Ses değiştirildi: `{new_voice}` (kalıcı)")
