@@ -60,6 +60,110 @@ async def get_system_stats():
     return stats
 
 
+def _yerel_degisiklikler(repo, dal=None):
+    """pull'u GERÇEKTEN engelleyecek dosyaları döndür.
+
+    Bir dosya ancak hem (a) sunucuda yerel olarak değiştirilmişse hem de
+    (b) gelen commit'lerde değişmişse merge'i engeller. Sadece yerelde
+    değişmiş (uzakta dokunulmamış) dosyalar pull'u engellemez — onlar için
+    kullanıcıyı boşuna durdurmayız.
+    """
+    yerel = set()
+    try:
+        for d in repo.index.diff(None):          # working tree değişiklikleri
+            if d.a_path:
+                yerel.add(d.a_path)
+        for d in repo.index.diff("HEAD"):        # stage'lenmiş değişiklikler
+            if d.a_path:
+                yerel.add(d.a_path)
+    except Exception:
+        pass
+    if not yerel:
+        return []
+    if dal:
+        try:
+            ham = repo.git.diff("--name-only", "HEAD..origin/%s" % dal)
+            gelen = {s.strip() for s in ham.splitlines() if s.strip()}
+            if gelen:
+                return sorted(yerel & gelen)
+        except Exception:
+            pass
+    return sorted(yerel)
+
+
+def _degisiklik_metni(degisen, commit_sayisi):
+    """Hangi dosyaların çakıştığını AÇIKÇA göster (git'in kestiği kısım budur)."""
+    metin = (f"⚠️ **Güncelleme durduruldu**\n\n"
+             f"`{commit_sayisi}` yeni güncelleme var, ancak sunucuda "
+             f"**değiştirilmiş `{len(degisen)}` dosya** var. "
+             f"Devam edilirse bu değişiklikler silinirdi, o yüzden durdum.\n\n"
+             f"**Değişen dosyalar:**\n")
+    for d in degisen[:15]:
+        metin += f"• `{d}`\n"
+    if len(degisen) > 15:
+        metin += f"• _...ve {len(degisen) - 15} dosya daha_\n"
+    metin += ("\n💾 **Sakla ve güncelle** → değişikliklerin `git stash`'e alınır, "
+              "güncelleme sonrası geri uygulanır.\n"
+              "🗑 **Değişiklikleri sil** → yerel değişiklikler **kalıcı silinir**, "
+              "repo'daki hâline dönülür.")
+    return metin
+
+
+def _git_hata_metni(e):
+    """Git hatasını KESMEDEN göster (dosya listesi stderr'in devamındadır)."""
+    try:
+        import git
+        if isinstance(e, git.exc.GitCommandError):
+            stderr = (getattr(e, "stderr", "") or "").strip()
+            stdout = (getattr(e, "stdout", "") or "").strip()
+            ayrinti = (stderr + "\n" + stdout).strip() or str(e)
+            ayrinti = ayrinti.replace("stderr:", "").strip()
+            if len(ayrinti) > 900:
+                ayrinti = ayrinti[:900] + "\n...(kısaltıldı)"
+            ipucu = ""
+            if "would be overwritten by merge" in ayrinti or "local changes" in ayrinti:
+                ipucu = ("\n\n💡 Sunucudaki dosyalar değiştirilmiş. Panelden tekrar "
+                         "**🔄 Güncelle**'ye bas — bu sefer sana saklama/silme "
+                         "seçeneği sunulacak.")
+            elif "Could not resolve host" in ayrinti or "unable to access" in ayrinti:
+                ipucu = "\n\n💡 Sunucunun internet/GitHub erişimini kontrol et."
+            elif "Authentication failed" in ayrinti or "Permission denied" in ayrinti:
+                ipucu = "\n\n💡 Git kimlik bilgileri (token/SSH anahtarı) geçersiz."
+            return f"❌ **Güncelleme hatası**\n\n```\n{ayrinti}\n```{ipucu}"
+    except Exception:
+        pass
+    return f"❌ Hata: `{str(e)[:400]}`"
+
+
+async def _yeniden_baslat(event):
+    await event.edit("✅ **Güncellendi!** Yeniden başlatılıyor...")
+    with open(".restart_info", "w") as f:
+        f.write(f"{event.chat_id}|{event.message_id}")
+    await asyncio.sleep(1)
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+async def _guncellemeyi_uygula(event, repo, origin, dal, commit_sayisi, restart=True):
+    """pull + bağımlılıklar (+ istenirse yeniden başlat)."""
+    if commit_sayisi:
+        await event.edit(f"⬇️ **{commit_sayisi} güncelleme indiriliyor...**")
+    else:
+        await event.edit("⬇️ **Güncelleme indiriliyor...**")
+    origin.pull(dal)
+    if os.path.exists("requirements.txt"):
+        await event.edit("📦 **Bağımlılıklar kuruluyor...**")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install",
+                                   "-r", "requirements.txt", "-q"])
+        except subprocess.CalledProcessError as pe:
+            # Bağımlılık hatası güncellemeyi geçersiz kılmasın, ama haber ver
+            await event.edit("⚠️ **Kod güncellendi ama bağımlılıklar kurulamadı.**\n"
+                             f"`{str(pe)[:200]}`\n\nYeniden başlatılıyor...")
+            await asyncio.sleep(2)
+    if restart:
+        await _yeniden_baslat(event)
+
+
 def register(bot):
 
     @bot.on(events.CallbackQuery(data=b"stats"))
@@ -191,20 +295,89 @@ def register(bot):
             current_branch = repo.active_branch.name
             commits = list(repo.iter_commits(f'{current_branch}..origin/{current_branch}'))
             if not commits:
-                await event.edit(f"✅ **Güncel!** v{config.__version__}", buttons=[back_button("settings_menu")])
+                await event.edit(f"✅ **Güncel!** v{config.__version__}",
+                                 buttons=[back_button("settings_menu")])
                 return
-            await event.edit(f"⬇️ **{len(commits)} güncelleme indiriliyor...**")
-            origin.pull(current_branch)
-            if os.path.exists("requirements.txt"):
-                await event.edit("📦 **Bağımlılıklar kuruluyor...**")
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"])
-            await event.edit("✅ **Güncellendi!** Yeniden başlatılıyor...")
-            with open(".restart_info", "w") as f:
-                f.write(f"{event.chat_id}|{event.message_id}")
-            await asyncio.sleep(1)
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+
+            # --- YEREL DEĞİŞİKLİK KONTROLÜ (pull'u patlatmadan ÖNCE) ---
+            degisen = _yerel_degisiklikler(repo, current_branch)
+            if degisen:
+                await event.edit(_degisiklik_metni(degisen, len(commits)),
+                                 buttons=[
+                                     [Button.inline("💾 Sakla ve güncelle", b"update_stash")],
+                                     [Button.inline("🗑 Değişiklikleri sil ve güncelle",
+                                                    b"update_force")],
+                                     back_button("settings_menu"),
+                                 ])
+                return
+
+            await _guncellemeyi_uygula(event, repo, origin, current_branch, len(commits))
         except Exception as e:
-            await event.edit(f"❌ Hata: `{e}`", buttons=[back_button("settings_menu")])
+            await event.edit(_git_hata_metni(e), buttons=[back_button("settings_menu")])
+
+
+    @bot.on(events.CallbackQuery(data=b"update_stash"))
+    async def update_stash_handler(event):
+        """Yerel değişiklikleri stash'e al, güncelle, geri uygulamayı dene."""
+        if event.sender_id != config.OWNER_ID:
+            await event.answer(config.MESSAGES["owner_only"], alert=True)
+            return
+        await event.edit("💾 **Yerel değişiklikler saklanıyor...**")
+        try:
+            import git
+            repo = git.Repo(".")
+            origin = repo.remotes.origin
+            dal = repo.active_branch.name
+            repo.git.stash("push", "-u", "-m", "kingtg-auto-update")
+            origin.fetch()
+            adet = len(list(repo.iter_commits(f'{dal}..origin/{dal}')))
+            geri_hata = None
+            try:
+                await _guncellemeyi_uygula(event, repo, origin, dal, adet, restart=False)
+                try:
+                    repo.git.stash("pop")
+                except Exception as pe:
+                    geri_hata = str(pe)
+            except Exception:
+                # Güncelleme patlarsa değişiklikleri geri koy
+                try:
+                    repo.git.stash("pop")
+                except Exception:
+                    pass
+                raise
+            if geri_hata:
+                await event.edit(
+                    "⚠️ **Güncelleme tamam ama yerel değişiklikler geri uygulanamadı.**\n\n"
+                    "Değişikliklerin **kaybolmadı**, `git stash` içinde duruyor.\n"
+                    "Sunucuda çakışmayı çözmek için:\n"
+                    "`git stash pop`\n\n"
+                    f"Hata: `{str(geri_hata)[:200]}`",
+                    buttons=[back_button("settings_menu")])
+                return
+            await _yeniden_baslat(event)
+        except Exception as e:
+            await event.edit(_git_hata_metni(e), buttons=[back_button("settings_menu")])
+
+
+    @bot.on(events.CallbackQuery(data=b"update_force"))
+    async def update_force_handler(event):
+        """Yerel değişiklikleri SİLİP güncelle (yıkıcı - açık onayla çalışır)."""
+        if event.sender_id != config.OWNER_ID:
+            await event.answer(config.MESSAGES["owner_only"], alert=True)
+            return
+        await event.edit("🗑 **Yerel değişiklikler siliniyor...**")
+        try:
+            import git
+            repo = git.Repo(".")
+            origin = repo.remotes.origin
+            dal = repo.active_branch.name
+            repo.git.reset("--hard", "HEAD")
+            origin.fetch()
+            adet = len(list(repo.iter_commits(f'{dal}..origin/{dal}')))
+            await _guncellemeyi_uygula(event, repo, origin, dal, adet)
+        except Exception as e:
+            await event.edit(_git_hata_metni(e), buttons=[back_button("settings_menu")])
+
     
 
     @bot.on(events.CallbackQuery(data=b"restart_bot"))
