@@ -25,7 +25,6 @@ userbot_manager = smart_session_manager
 from ._common import (
     user_states, build_main_menu,
     STATE_WAITING_PHONE, STATE_WAITING_CODE, STATE_WAITING_2FA,
-    STATE_WAITING_SESSION_TELETHON, STATE_WAITING_SESSION_PYROGRAM,
     PLUGINS_PER_PAGE,
 )
 

@@ -343,7 +343,10 @@ async def music_download(event):
     target = query.strip() if is_url else "ytsearch1:%s" % _sanitize(query)
 
     await event.edit("`🎵 İndiriliyor...`")
-    dl_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "yt_music")
+    # Operatörün KENDİ id'sine göre klasör: iki kişi aynı anda .müzik yaparsa
+    # indirilenler karışmaz (yanlış şarkı yanlış kişiye gitmez).
+    _owner = (await event.client.get_me()).id
+    dl_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "yt_music_%d" % _owner)
     os.makedirs(dl_dir, exist_ok=True)
     _clean_dir(dl_dir)
     try:
@@ -401,7 +404,9 @@ async def video_download(event):
     target = query.strip() if is_url else "ytsearch1:%s" % _sanitize(query)
 
     await event.edit("`🎬 İndiriliyor...`")
-    dl_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "yt_video")
+    # Operatörün KENDİ id'sine göre klasör: eşzamanlı .video indirmede karışmaz.
+    _owner = (await event.client.get_me()).id
+    dl_dir = os.path.join(TEMP_DOWNLOAD_DIRECTORY, "yt_video_%d" % _owner)
     os.makedirs(dl_dir, exist_ok=True)
     _clean_dir(dl_dir)
     try:

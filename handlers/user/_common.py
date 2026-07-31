@@ -27,8 +27,7 @@ user_states = {}
 STATE_WAITING_PHONE = "waiting_phone"
 STATE_WAITING_CODE = "waiting_code"
 STATE_WAITING_2FA = "waiting_2fa"
-STATE_WAITING_SESSION_TELETHON = "waiting_session_telethon"
-STATE_WAITING_SESSION_PYROGRAM = "waiting_session_pyrogram"
+# NOT: Session-string (Telethon/Pyrogram) girişi kaldırıldı — yalnızca telefon girişi.
 
 PLUGINS_PER_PAGE = 8
 
@@ -104,6 +103,235 @@ async def build_main_menu(user_id, user_first_name):
         ])
     
     return text, rows
+
+
+# ==========================================
+# PLUGIN SAYFALARI (ortak butonlu oluşturucular)
+# plugins_user.py ve menu.py (deep link) aynı butonlu
+# sayfaları kullanır — kopya kod yok.
+# ==========================================
+
+async def accessible_plugins(user_id):
+    """Kullanıcının görebileceği plugin listesi"""
+    all_plugins = await db.get_all_plugins()
+    out = []
+    for p in all_plugins:
+        if p.get("is_disabled", False):
+            continue
+        if p.get("is_public", True) or user_id in p.get("allowed_users", []):
+            if user_id not in p.get("restricted_users", []):
+                out.append(p)
+    return out
+
+
+async def build_plugins_page(user_id, page):
+    """Tüm pluginler sayfası: her plugin tek-dokunuş aç/kapat butonu"""
+    user_data = await db.get_user(user_id)
+    active_plugins = user_data.get("active_plugins", []) if user_data else []
+    accessible = await accessible_plugins(user_id)
+
+    if not accessible:
+        text = "📭 **Henüz plugin eklenmemiş.**\n\nPlugin duyuruları için kanalı takip edin."
+        rows = [
+            [btn.url(config.BUTTONS.get("plugin_channel", "📢 Kanal"),
+                     f"https://t.me/{config.PLUGIN_CHANNEL}", style=ButtonBuilder.STYLE_PRIMARY)],
+            [btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER,
+                          icon_custom_emoji_id=5832654562510511307)],
+        ]
+        return text, rows
+
+    total_pages = (len(accessible) + PLUGINS_PER_PAGE - 1) // PLUGINS_PER_PAGE
+    page = max(0, min(page, total_pages - 1))
+    start_idx = page * PLUGINS_PER_PAGE
+    page_plugins = accessible[start_idx:start_idx + PLUGINS_PER_PAGE]
+
+    text = f"🔌 **Plugin Listesi** (Sayfa {page + 1}/{total_pages})\n\n"
+    text += "Bir plugin'e **dokun** → anında açılır/kapanır.\n"
+    text += "Detay için **ℹ️ Detay Modu**nu aç, plugin'e dokun.\n\n"
+    text += f"🟢 Yüklü · ⚪ Yüklü değil · ⭐ Zorunlu\n"
+    text += f"📊 Toplam **{len(accessible)}** · ✅ Aktif **{len(active_plugins)}**"
+
+    rows = []
+    row_buf = []
+    for p in page_plugins:
+        name = p["name"]
+        is_active = name in active_plugins
+        is_default = p.get("default_active", False)
+        icon = "🟢" if is_active else "⚪"
+        star = "⭐" if is_default else ""
+        label = f"{icon}{star} {name}"
+        style = ButtonBuilder.STYLE_SUCCESS if is_active else ButtonBuilder.STYLE_SECONDARY
+        row_buf.append(btn.callback(label, f"pt_{page}_{name}", style=style))
+        if len(row_buf) == 2:
+            rows.append(row_buf)
+            row_buf = []
+    if row_buf:
+        rows.append(row_buf)
+
+    nav = []
+    if page > 0:
+        nav.append(btn.callback(" Önceki", f"plugins_page_{page - 1}",
+                                icon_custom_emoji_id=5834632747137638263))
+    if page < total_pages - 1:
+        nav.append(btn.callback(" Sonraki", f"plugins_page_{page + 1}",
+                                icon_custom_emoji_id=5834933416323193844))
+    if nav:
+        rows.append(nav)
+
+    rows.append([
+        btn.callback(" ⚡ Tümünü Aç", "pall_on", style=ButtonBuilder.STYLE_SUCCESS),
+        btn.callback(" ⏹ Tümünü Kapat", "pall_off", style=ButtonBuilder.STYLE_DANGER),
+    ])
+    rows.append([
+        btn.callback(" ⭐ Varsayılanları Yükle", "pdefaults", style=ButtonBuilder.STYLE_PRIMARY),
+        btn.callback(" ℹ️ Detay Modu", f"pim_{page}", style=ButtonBuilder.STYLE_SECONDARY),
+    ])
+    rows.append([btn.callback(" Pluginlerim", "my_plugins_0", style=ButtonBuilder.STYLE_PRIMARY,
+                              icon_custom_emoji_id=5832711694165483426)])
+    rows.append([btn.url(f" {config.PLUGIN_CHANNEL}", f"https://t.me/{config.PLUGIN_CHANNEL}",
+                         style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832328832190784454)])
+    rows.append([btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER,
+                              icon_custom_emoji_id=5832654562510511307)])
+    return text, rows
+
+
+async def build_info_mode_page(user_id, page):
+    """Detay modu: plugin'e dokun → aç/kapa yerine bilgi kartı göster"""
+    accessible = await accessible_plugins(user_id)
+    if not accessible:
+        return await build_plugins_page(user_id, page)
+
+    user_data = await db.get_user(user_id)
+    active_plugins = user_data.get("active_plugins", []) if user_data else []
+
+    total_pages = (len(accessible) + PLUGINS_PER_PAGE - 1) // PLUGINS_PER_PAGE
+    page = max(0, min(page, total_pages - 1))
+    page_plugins = accessible[page * PLUGINS_PER_PAGE:(page + 1) * PLUGINS_PER_PAGE]
+
+    text = f"ℹ️ **Detay Modu** (Sayfa {page + 1}/{total_pages})\n\n"
+    text += "Bir plugin'e **dokun** → komutları ve açıklaması gösterilir.\n"
+    text += "Aç/kapat için **Listeye Dön**."
+
+    rows = []
+    row_buf = []
+    for p in page_plugins:
+        name = p["name"]
+        icon = "🟢" if name in active_plugins else "⚪"
+        row_buf.append(btn.callback(f"{icon} {name}", f"pi_{page}_{name}",
+                                    style=ButtonBuilder.STYLE_SECONDARY))
+        if len(row_buf) == 2:
+            rows.append(row_buf)
+            row_buf = []
+    if row_buf:
+        rows.append(row_buf)
+
+    nav = []
+    if page > 0:
+        nav.append(btn.callback(" Önceki", f"pim_{page - 1}",
+                                icon_custom_emoji_id=5834632747137638263))
+    if page < total_pages - 1:
+        nav.append(btn.callback(" Sonraki", f"pim_{page + 1}",
+                                icon_custom_emoji_id=5834933416323193844))
+    if nav:
+        rows.append(nav)
+    rows.append([btn.callback(" 🔌 Listeye Dön", f"plugins_page_{page}", style=ButtonBuilder.STYLE_PRIMARY)])
+    rows.append([btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER,
+                              icon_custom_emoji_id=5832654562510511307)])
+    return text, rows
+
+
+async def build_plugin_info(user_id, page, name):
+    """Tek plugin bilgi kartı (butonlu /pinfo karşılığı)"""
+    plugin = await db.get_plugin(name)
+    if not plugin:
+        return None, None
+    user_data = await db.get_user(user_id)
+    active_plugins = user_data.get("active_plugins", []) if user_data else []
+    is_active = name in active_plugins
+    is_default = plugin.get("default_active", False)
+
+    text = f"🔌 **Plugin: `{name}`**\n\n"
+    text += f"📝 **Açıklama:** {plugin.get('description') or 'Açıklama yok'}\n"
+    text += f"🔓 **Erişim:** {'Genel' if plugin.get('is_public', True) else 'Özel'}\n"
+    text += f"📊 **Durum:** {'🟢 Yüklü' if is_active else '⚪ Yüklü değil'}"
+    if is_default:
+        text += " · ⭐ Zorunlu"
+    text += "\n\n"
+    commands = plugin.get("commands", [])
+    if commands:
+        text += f"🔧 **Komutlar ({len(commands)}):**\n"
+        for cmd in commands:
+            text += f"  • `.{cmd}`\n"
+    else:
+        text += "🔧 **Komutlar:** Yok\n"
+
+    rows = []
+    if is_active and not is_default:
+        rows.append([btn.callback(f" ⚪ Kapat: {name}", f"pi{page}_off_{name}",
+                                  style=ButtonBuilder.STYLE_DANGER)])
+    elif not is_active:
+        rows.append([btn.callback(f" 🟢 Yükle: {name}", f"pi{page}_on_{name}",
+                                  style=ButtonBuilder.STYLE_SUCCESS)])
+    rows.append([btn.callback(" Geri", f"pim_{page}", style=ButtonBuilder.STYLE_SECONDARY)])
+    rows.append([btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER,
+                              icon_custom_emoji_id=5832654562510511307)])
+    return text, rows
+
+
+async def build_my_plugins_page(user_id, page):
+    """Aktif pluginler sayfası: dokun → kaldır"""
+    user_data = await db.get_user(user_id)
+    active_plugins = user_data.get("active_plugins", []) if user_data else []
+
+    if not active_plugins:
+        text = config.MESSAGES["no_active_plugins"]
+        text += "\n\n💡 Plugin listesinden bir plugin'e dokunarak yükleyebilirsin."
+        rows = [
+            [btn.callback(" Plugin Listesi", "plugins_page_0", style=ButtonBuilder.STYLE_PRIMARY,
+                          icon_custom_emoji_id=5830184853236097449)],
+            [btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER,
+                          icon_custom_emoji_id=5832654562510511307)],
+        ]
+        return text, rows
+
+    total_pages = (len(active_plugins) + PLUGINS_PER_PAGE - 1) // PLUGINS_PER_PAGE
+    page = max(0, min(page, total_pages - 1))
+    start_idx = page * PLUGINS_PER_PAGE
+    page_names = active_plugins[start_idx:start_idx + PLUGINS_PER_PAGE]
+
+    text = f"📦 **Aktif Plugin'leriniz** (Sayfa {page + 1}/{total_pages})\n\n"
+    text += "Kaldırmak için plugin'e **dokun**.\n\n"
+    text += f"**Toplam:** {len(active_plugins)} aktif plugin"
+
+    rows = []
+    row_buf = []
+    for name in page_names:
+        plugin = await db.get_plugin(name)
+        is_default = plugin.get("default_active", False) if plugin else False
+        star = "⭐" if is_default else ""
+        row_buf.append(btn.callback(f"🟢{star} {name}", f"pm_{page}_{name}",
+                                    style=ButtonBuilder.STYLE_SUCCESS))
+        if len(row_buf) == 2:
+            rows.append(row_buf)
+            row_buf = []
+    if row_buf:
+        rows.append(row_buf)
+
+    nav = []
+    if page > 0:
+        nav.append(btn.callback(" Önceki", f"my_plugins_{page - 1}",
+                                icon_custom_emoji_id=5834632747137638263))
+    if page < total_pages - 1:
+        nav.append(btn.callback(" Sonraki", f"my_plugins_{page + 1}",
+                                icon_custom_emoji_id=5834933416323193844))
+    if nav:
+        rows.append(nav)
+    rows.append([btn.callback(" Tüm Plugin'ler", "plugins_page_0", style=ButtonBuilder.STYLE_PRIMARY,
+                              icon_custom_emoji_id=5830184853236097449)])
+    rows.append([btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER,
+                              icon_custom_emoji_id=5832654562510511307)])
+    return text, rows
+
 
 # ==========================================
 # /start KOMUTU (Bot API - Renkli Butonlar)

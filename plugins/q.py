@@ -71,7 +71,21 @@ from utils.logger import get_logger
 log = get_logger(__name__)
 
 
-QUOTLY_API = "https://bot.lyo.su/quote/generate"
+# Quotly API — birden fazla endpoint (biri ölürse diğerine geç).
+# NOT: Eski tek endpoint (bot.lyo.su) 526/Cloudflare hatası veriyordu; artık
+# çalışan aynanalar sırayla denenir. İlk geçerli görsel dönen kullanılır.
+QUOTLY_APIS = [
+    "https://quote.yuri.ly/generate",
+    "https://bot.lyo.su/quote/generate",
+]
+
+# Medya (fotoğraf/gif/sticker) içeren mesajları da Quotly gibi baloncuğa gömmek
+# için geçici bir dosya barındırıcısı gerekir: Quotly API medyayı yalnızca
+# ERİŞİLEBİLİR bir http URL'den çeker (base64/data-uri render OLMAZ).
+# 1 saatlik otomatik silinen geçici host kullanılır — bot token'ı ASLA
+# üçüncü tarafa gönderilmez (Bot API getFile yöntemi token'ı sızdırırdı).
+LITTERBOX_API = "https://litterbox.catbox.moe/resources/internals/api.php"
+
 PACK_OWNER = "TG: @KingUser_bot"
 
 COLORS = {
@@ -314,24 +328,86 @@ async def get_user_info(client, user):
         pass
     
     user_data["name"] = name.strip() or "User"
-    
+
     # Profil fotoğrafı
     avatar_url = await get_avatar_url(client, user)
     if avatar_url:
         user_data["photo"] = {"url": avatar_url}
-    
-    # Emoji status ekle (varsa)
+
+    # Premium emoji status (ismin yanındaki ifade) — Quotly API bunu
+    # `from.emoji_status` alanında DÜZ document_id STRING olarak bekler.
+    # (Eski kod dict {custom_emoji_id, url} veriyordu; API bunu yok sayıyordu,
+    #  bu yüzden premium ifade hiç görünmüyordu. Artık düzgün render olur.)
     if emoji_status_id:
-        emoji_url = await get_emoji_status_url(client, emoji_status_id)
-        if emoji_url:
-            # Quotly API'de emoji status için özel alan
-            # Not: API dokümantasyonuna göre "emoji_status" veya "custom_emoji" alanı kullanılabilir
-            user_data["emoji_status"] = {
-                "custom_emoji_id": emoji_status_id,
-                "url": emoji_url
-            }
-    
+        user_data["emoji_status"] = str(emoji_status_id)
+
     return user_data
+
+
+async def _extract_media_image(client, msg):
+    """Mesajdaki medyayı Quotly baloncuğuna gömülebilecek bir GÖRSELE indir.
+    Yalnızca statik görsele çevrilebilen medyalar: foto, statik sticker,
+    video/gif için küçük önizleme karesi. Döndürür: bytes | None."""
+    try:
+        if msg.photo:
+            return await msg.download_media(bytes)
+        if msg.sticker:
+            mime = (getattr(msg.file, "mime_type", "") or "")
+            if "webp" in mime:
+                return await msg.download_media(bytes)
+            # animasyonlu (tgs)/video sticker → küçük önizleme
+            return await msg.download_media(bytes, thumb=-1)
+        if msg.video or msg.gif or msg.document:
+            # video/gif/döküman → varsa statik önizleme karesi
+            data = await msg.download_media(bytes, thumb=-1)
+            if data:
+                return data
+            mime = (getattr(msg.file, "mime_type", "") or "")
+            if mime.startswith("image/"):
+                return await msg.download_media(bytes)
+    except Exception:
+        log.warning("Medya görseli çıkarılamadı", exc_info=True)
+    return None
+
+
+async def _upload_temp_image(image_bytes):
+    """Görseli 1 saatlik otomatik silinen geçici host'a yükle, public URL döndür.
+    Quotly API medyayı SADECE erişilebilir http URL'den çeker (base64 render olmaz),
+    bu yüzden geçici host şart. Bot token'ı hiçbir üçüncü tarafa gönderilmez."""
+    for attempt in range(3):  # litterbox ara sıra geçici hata verir → tekrar dene
+        try:
+            fd = aiohttp.FormData()
+            fd.add_field("reqtype", "fileupload")
+            fd.add_field("time", "1h")
+            fd.add_field("fileToUpload", image_bytes, filename="q.jpg",
+                         content_type="image/jpeg")
+            async with aiohttp.ClientSession() as s:
+                async with s.post(LITTERBOX_API, data=fd,
+                                  timeout=aiohttp.ClientTimeout(total=30)) as r:
+                    txt = (await r.text()).strip()
+                    if r.status == 200 and txt.startswith("http"):
+                        return txt
+        except Exception:
+            log.warning("Geçici medya yüklemesi başarısız (deneme %d)", attempt + 1, exc_info=True)
+        await asyncio.sleep(1.5)
+    return None
+
+
+async def _attach_media(client, msg, message_data):
+    """Mesajda foto/gif/sticker/video varsa Quotly baloncuğuna göm (best-effort).
+    Başarısız olursa sessizce metin-only quote'a düşer."""
+    try:
+        if not getattr(msg, "media", None):
+            return
+        img = await _extract_media_image(client, msg)
+        if not img:
+            return
+        url = await _upload_temp_image(img)
+        if url:
+            message_data["media"] = {"url": url}
+            message_data["mediaType"] = "photo"
+    except Exception:
+        log.debug("Medya eklenemedi, metin-only devam", exc_info=True)
 
 
 async def build_message_data(client, msg, include_reply_info=True):
@@ -373,7 +449,10 @@ async def build_message_data(client, msg, include_reply_info=True):
             ent_dict = entity_to_dict(ent)
             if ent_dict:
                 message_data["entities"].append(ent_dict)
-    
+
+    # Medya (foto/gif/sticker/video) — Quotly gibi baloncuğa göm
+    await _attach_media(client, msg, message_data)
+
     # Reply mesajı
     if include_reply_info and msg.reply_to_msg_id:
         try:
@@ -424,7 +503,8 @@ async def build_message_data(client, msg, include_reply_info=True):
 
 
 async def generate_quote(messages_data, bg_color="#1b1429", fmt="webp"):
-    """Quotly API'den quote oluştur"""
+    """Quotly API'den quote oluştur. Endpoint'ler sırayla denenir; ilk geçerli
+    görsel dönen kullanılır. Dönen değer: (image_bytes | None, hata_metni | None)."""
     payload = {
         "type": "quote",
         "format": fmt,
@@ -435,24 +515,33 @@ async def generate_quote(messages_data, bg_color="#1b1429", fmt="webp"):
         "emojiBrand": "apple",
         "messages": messages_data
     }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(QUOTLY_API, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
+
+    last_err = "bilinmeyen hata"
+    for api in QUOTLY_APIS:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(api, json=payload,
+                                        timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status != 200:
+                        last_err = f"{api.split('/')[2]} → HTTP {resp.status}"
+                        log.warning("Quotly endpoint hatası: %s", last_err)
+                        continue
+                    data = await resp.json(content_type=None)
+                    image_b64 = None
                     if data.get("ok") and data.get("result"):
                         image_b64 = data["result"].get("image")
-                        if image_b64:
-                            return base64.b64decode(image_b64)
                     elif data.get("image"):
-                        return base64.b64decode(data["image"])
-                    elif data.get("result", {}).get("image"):
-                        return base64.b64decode(data["result"]["image"])
-    except Exception as e:
-        log.error("Quotly hatası", exc_info=True)
-    
-    return None
+                        image_b64 = data["image"]
+                    elif isinstance(data.get("result"), dict):
+                        image_b64 = data["result"].get("image")
+                    if image_b64:
+                        return base64.b64decode(image_b64), None
+                    last_err = f"{api.split('/')[2]} → geçersiz yanıt"
+        except Exception as e:
+            last_err = f"{api.split('/')[2]} → {type(e).__name__}"
+            log.error("Quotly hatası (%s)", api, exc_info=True)
+
+    return None, last_err
 
 
 def resize_sticker(image_data, make_transparent=True):
@@ -753,10 +842,10 @@ async def quote_cmd(event):
                     break
 
         fmt = "png" if save else "webp"
-        image_data = await generate_quote(messages_data, bg_color, fmt)
+        image_data, gerr = await generate_quote(messages_data, bg_color, fmt)
 
         if not image_data:
-            return await event.edit("❌ **API hatası!**")
+            return await event.edit(f"❌ **Quote oluşturulamadı:** `{gerr}`")
 
         if save:
             image_data = resize_sticker(image_data, make_transparent=True)
@@ -878,10 +967,10 @@ async def quote_save_cmd(event):
                     if collected >= count - 1:
                         break
 
-            image_data = await generate_quote(messages_data, bg_color, "png")
+            image_data, gerr = await generate_quote(messages_data, bg_color, "png")
 
             if not image_data:
-                return await event.edit("❌ **API hatası!**")
+                return await event.edit(f"❌ **Quote oluşturulamadı:** `{gerr}`")
 
             image_data = resize_sticker(image_data, make_transparent=True)
 
