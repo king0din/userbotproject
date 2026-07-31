@@ -111,6 +111,16 @@ async def build_main_menu(user_id, user_first_name):
 # sayfaları kullanır — kopya kod yok.
 # ==========================================
 
+# Premium emoji ID'leri (renkli butonların yanındaki ifadeler).
+# Projenin başka yerlerinde (pset.py, main menü) kullanılan paletle uyumlu.
+# İstersen tek tek değiştirebilirsin — sadece ID'yi güncelle.
+EMOJI_AKTIF = 5832249761842864793      # yüklü plugin  → "Aktif Et" emojisi (yeşil)
+EMOJI_PASIF = 5830001655701052988      # yüklü değil   → "Devre Dışı" emojisi
+EMOJI_TUMU_AC = 5832490468990000458    # tümünü aç     → "Hepsini Genel" (yeşil)
+EMOJI_TUMU_KAPAT = 5832636278834733177  # tümünü kapat  → "Hepsini Özel" (kırmızı)
+EMOJI_VARSAYILAN = 5832308667319328140  # varsayılanlar → "Varsayılan Aktif" (yıldız)
+EMOJI_DETAY = 5832628878606082111       # detay modu    → "Yardım/Bilgi" emojisi
+
 async def accessible_plugins(user_id):
     """Kullanıcının görebileceği plugin listesi"""
     all_plugins = await db.get_all_plugins()
@@ -157,11 +167,13 @@ async def build_plugins_page(user_id, page):
         name = p["name"]
         is_active = name in active_plugins
         is_default = p.get("default_active", False)
-        icon = "🟢" if is_active else "⚪"
         star = "⭐" if is_default else ""
-        label = f"{icon}{star} {name}"
+        # Renk durumu gösterir: yeşil = yüklü, gri = yüklü değil.
+        # Premium emoji: yüklüyken yeşil onay, değilken plugin ikonu.
         style = ButtonBuilder.STYLE_SUCCESS if is_active else ButtonBuilder.STYLE_SECONDARY
-        row_buf.append(btn.callback(label, f"pt_{page}_{name}", style=style))
+        emoji = EMOJI_AKTIF if is_active else EMOJI_PASIF
+        row_buf.append(btn.callback(f"{star} {name}".strip(), f"pt_{page}_{name}",
+                                    style=style, icon_custom_emoji_id=emoji))
         if len(row_buf) == 2:
             rows.append(row_buf)
             row_buf = []
@@ -179,12 +191,16 @@ async def build_plugins_page(user_id, page):
         rows.append(nav)
 
     rows.append([
-        btn.callback(" ⚡ Tümünü Aç", "pall_on", style=ButtonBuilder.STYLE_SUCCESS),
-        btn.callback(" ⏹ Tümünü Kapat", "pall_off", style=ButtonBuilder.STYLE_DANGER),
+        btn.callback(" Tümünü Aç", "pall_on", style=ButtonBuilder.STYLE_SUCCESS,
+                     icon_custom_emoji_id=EMOJI_TUMU_AC),
+        btn.callback(" Tümünü Kapat", "pall_off", style=ButtonBuilder.STYLE_DANGER,
+                     icon_custom_emoji_id=EMOJI_TUMU_KAPAT),
     ])
     rows.append([
-        btn.callback(" ⭐ Varsayılanları Yükle", "pdefaults", style=ButtonBuilder.STYLE_PRIMARY),
-        btn.callback(" ℹ️ Detay Modu", f"pim_{page}", style=ButtonBuilder.STYLE_SECONDARY),
+        btn.callback(" Varsayılanları Yükle", "pdefaults", style=ButtonBuilder.STYLE_PRIMARY,
+                     icon_custom_emoji_id=EMOJI_VARSAYILAN),
+        btn.callback(" Detay Modu", f"pim_{page}", style=ButtonBuilder.STYLE_SECONDARY,
+                     icon_custom_emoji_id=EMOJI_DETAY),
     ])
     rows.append([btn.callback(" Pluginlerim", "my_plugins_0", style=ButtonBuilder.STYLE_PRIMARY,
                               icon_custom_emoji_id=5832711694165483426)])
@@ -216,9 +232,11 @@ async def build_info_mode_page(user_id, page):
     row_buf = []
     for p in page_plugins:
         name = p["name"]
-        icon = "🟢" if name in active_plugins else "⚪"
-        row_buf.append(btn.callback(f"{icon} {name}", f"pi_{page}_{name}",
-                                    style=ButtonBuilder.STYLE_SECONDARY))
+        is_active = name in active_plugins
+        style = ButtonBuilder.STYLE_SUCCESS if is_active else ButtonBuilder.STYLE_SECONDARY
+        emoji = EMOJI_AKTIF if is_active else EMOJI_PASIF
+        row_buf.append(btn.callback(f" {name}", f"pi_{page}_{name}",
+                                    style=style, icon_custom_emoji_id=emoji))
         if len(row_buf) == 2:
             rows.append(row_buf)
             row_buf = []
@@ -309,8 +327,9 @@ async def build_my_plugins_page(user_id, page):
         plugin = await db.get_plugin(name)
         is_default = plugin.get("default_active", False) if plugin else False
         star = "⭐" if is_default else ""
-        row_buf.append(btn.callback(f"🟢{star} {name}", f"pm_{page}_{name}",
-                                    style=ButtonBuilder.STYLE_SUCCESS))
+        row_buf.append(btn.callback(f"{star} {name}".strip(), f"pm_{page}_{name}",
+                                    style=ButtonBuilder.STYLE_SUCCESS,
+                                    icon_custom_emoji_id=EMOJI_AKTIF))
         if len(row_buf) == 2:
             rows.append(row_buf)
             row_buf = []
