@@ -251,9 +251,16 @@ async def load_my_tasks(client):
 
 
 async def save_my_tasks(client):
-    """Kendi hesabıma ait görevleri kaydet."""
+    """Kendi hesabıma ait görevleri kaydet.
+
+    GÜVENLİK: tasks_data BAŞKA bir hesap için yüklenmişse (ör. yanlışlıkla servis
+    botu ile load edildiyse) kaydetme — aksi hâlde kullanıcının görevleri boş
+    sözlükle EZİLİR ve diskten silinir."""
     me = await client.get_me()
     my_id = str(me.id)
+    if _loaded_user_id is not None and _loaded_user_id != my_id:
+        # Yanlış hesabın verisi bellekte → üzerine yazma, önce doğrusunu yükle
+        return
     raw = _load_tasks_raw()
     raw[my_id] = tasks_data
     _save_tasks_raw(raw)
@@ -1181,11 +1188,25 @@ def _om_remove_media(path):
 
 
 async def _om_send(client, target, media_path, message):
-    """Görev mesajını gönderir: medya varsa caption ile dosya, yoksa düz metin."""
+    """Görev mesajını gönderir: medya varsa caption ile dosya, yoksa düz metin.
+
+    ÖNEMLİ — ÇEVİRİ YOK: Kullanıcının kendi yazdığı otomatik mesaj, sahibin dili
+    değiştirilse bile AYNEN gönderilir. i18n hook'u client.send_message/send_file
+    üzerine ÖRNEK (instance) seviyesinde kurulduğu için, burada SINIF metodunu
+    doğrudan çağırarak hook atlanır."""
+    _cls = type(client)
     if media_path and os.path.exists(media_path):
-        await client.send_file(target, media_path, caption=(message or None))
+        _sf = getattr(_cls, "send_file", None)
+        if _sf is not None:
+            await _sf(client, target, media_path, caption=(message or None))
+        else:
+            await client.send_file(target, media_path, caption=(message or None))
     else:
-        await client.send_message(target, message)
+        _sm = getattr(_cls, "send_message", None)
+        if _sm is not None:
+            await _sm(client, target, message)
+        else:
+            await client.send_message(target, message)
 
 
 async def _om_begin_flow(q, me, message):
@@ -1775,6 +1796,19 @@ async def _on_start(client):
         pass
 
 
+def register_handlers(client, user_id):
+    """Plugin manager, aktivasyonda (ve bot yeniden başlatıldığında) bunu DOĞRU
+    userbot client'ı + user_id ile çağırır. Kayıtlı 'running' görevleri kaldığı
+    yerden otomatik başlatır — güvenilir restore yolu (global _client'a bağımlı değil)."""
+    try:
+        loop = getattr(client, "loop", None)
+        if loop is None:
+            loop = asyncio.get_event_loop()
+        loop.create_task(_on_start(client))
+    except Exception:
+        pass
+
+
 # Bu plugin örneğine bağlı USERBOT client'ını YÜK ANINDA yakala (bot değil!).
 # (Her hesap için plugin ayrı exec edildiğinden, set_client ile bağlanan
 #  doğru userbot client'ı bu noktada get_client() ile alınır.)
@@ -1784,9 +1818,15 @@ try:
 except Exception:
     _omsg_my_client = None
 
+# YEDEK YOL: yalnızca GERÇEK userbot client'ı yakalanabildiyse çalıştır.
+# Servis botu (bot) ile ASLA çağırma — o durumda tasks_data yanlış hesap için
+# yüklenip kullanıcının görevlerinin silinmesine yol açıyordu.
+# Asıl güvenilir yol yukarıdaki register_handlers(client, user_id).
 try:
-    _omsg_loop = getattr(_omsg_my_client, "loop", None) or bot.loop
-    _omsg_loop.create_task(_on_start(_omsg_my_client if _omsg_my_client is not None else bot))
+    if _omsg_my_client is not None:
+        _omsg_loop = getattr(_omsg_my_client, "loop", None)
+        if _omsg_loop is not None:
+            _omsg_loop.create_task(_on_start(_omsg_my_client))
 except Exception:
     pass
 
