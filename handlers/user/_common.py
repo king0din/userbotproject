@@ -32,22 +32,6 @@ EMOJI_TUMU_KAPAT = 5832636278834733177  # tümünü kapat  → "Hepsini Özel" (
 EMOJI_DETAY = 5832628878606082111       # detay modu    → "Yardım/Bilgi"
 
 
-def _plugin_btn(name, is_active, is_default, page, prefix):
-    """Plugin aç/kapat butonu.
-    Bot PREMIUM ise → premium emoji ikonu (metinde yuvarlak yok).
-    Bot premium DEĞİL ise → eski yuvarlak 🟢/⚪ emoji (metinde), ikon yok."""
-    star = "⭐" if is_default else ""
-    if getattr(config, "BOT_IS_PREMIUM", False):
-        icon = EMOJI_AKTIF if is_active else EMOJI_PASIF
-        label = f"{star} {name}".strip()
-    else:
-        icon = None
-        circle = "🟢" if is_active else "⚪"
-        label = f"{circle}{star} {name}"
-    style = ButtonBuilder.STYLE_SUCCESS if is_active else ButtonBuilder.STYLE_SECONDARY
-    return btn.callback(label, f"{prefix}_{page}_{name}", style=style, icon_custom_emoji_id=icon)
-
-
 # ==========================================
 # PLUGIN SAYFALARI (ortak oluşturucular)
 # plugins_user.py ve menu.py (deep link) aynı
@@ -100,7 +84,13 @@ async def build_plugins_page(user_id, page):
         name = p["name"]
         is_active = name in active_plugins
         is_default = p.get("default_active", False)
-        row_buf.append(_plugin_btn(name, is_active, is_default, page, "pt"))
+        star = "⭐" if is_default else ""
+        # Renk durumu gösterir: yeşil = yüklü, gri = yüklü değil.
+        # Premium emoji: yüklüyken yeşil onay, değilken plugin ikonu.
+        style = ButtonBuilder.STYLE_SUCCESS if is_active else ButtonBuilder.STYLE_PRIMARY
+        emoji = EMOJI_AKTIF if is_active else EMOJI_PASIF
+        row_buf.append(btn.callback(f"{star} {name}".strip(), f"pt_{page}_{name}",
+                                    style=style, icon_custom_emoji_id=emoji))
         if len(row_buf) == 2:
             rows.append(row_buf)
             row_buf = []
@@ -111,11 +101,9 @@ async def build_plugins_page(user_id, page):
     nav = []
     if page > 0:
         nav.append(btn.callback(" Önceki", f"plugins_page_{page - 1}",
-                                style=ButtonBuilder.STYLE_SECONDARY,
                                 icon_custom_emoji_id=5834632747137638263))
     if page < total_pages - 1:
         nav.append(btn.callback(" Sonraki", f"plugins_page_{page + 1}",
-                                style=ButtonBuilder.STYLE_SECONDARY,
                                 icon_custom_emoji_id=5834933416323193844))
     if nav:
         rows.append(nav)
@@ -127,11 +115,11 @@ async def build_plugins_page(user_id, page):
                      icon_custom_emoji_id=EMOJI_TUMU_KAPAT),
     ])
     rows.append([
-        btn.callback(" Detay Modu", f"pim_{page}", style=ButtonBuilder.STYLE_SECONDARY,
+        btn.callback(" Detay Modu", f"pim_{page}", style=ButtonBuilder.STYLE_PRIMARY,
                      icon_custom_emoji_id=EMOJI_DETAY),
     ])
     rows.append([btn.callback(" Pluginlerim", "my_plugins_0", style=ButtonBuilder.STYLE_PRIMARY,
-                              icon_custom_emoji_id=5830184853236097449)])
+                              icon_custom_emoji_id=5832711694165483426)])
     rows.append([btn.url(f" {config.PLUGIN_CHANNEL}", f"https://t.me/{config.PLUGIN_CHANNEL}",
                          style=ButtonBuilder.STYLE_PRIMARY, icon_custom_emoji_id=5832328832190784454)])
     rows.append([btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER,
@@ -161,8 +149,10 @@ async def build_info_mode_page(user_id, page):
     for p in page_plugins:
         name = p["name"]
         is_active = name in active_plugins
-        is_default = p.get("default_active", False)
-        row_buf.append(_plugin_btn(name, is_active, is_default, page, "pi"))
+        style = ButtonBuilder.STYLE_SUCCESS if is_active else ButtonBuilder.STYLE_PRIMARY
+        emoji = EMOJI_AKTIF if is_active else EMOJI_PASIF
+        row_buf.append(btn.callback(f" {name}", f"pi_{page}_{name}",
+                                    style=style, icon_custom_emoji_id=emoji))
         if len(row_buf) == 2:
             rows.append(row_buf)
             row_buf = []
@@ -172,17 +162,13 @@ async def build_info_mode_page(user_id, page):
     nav = []
     if page > 0:
         nav.append(btn.callback(" Önceki", f"pim_{page - 1}",
-                                style=ButtonBuilder.STYLE_SECONDARY,
                                 icon_custom_emoji_id=5834632747137638263))
     if page < total_pages - 1:
         nav.append(btn.callback(" Sonraki", f"pim_{page + 1}",
-                                style=ButtonBuilder.STYLE_SECONDARY,
                                 icon_custom_emoji_id=5834933416323193844))
     if nav:
         rows.append(nav)
-    rows.append([btn.callback(" Listeye Dön", f"plugins_page_{page}",
-                              style=ButtonBuilder.STYLE_PRIMARY,
-                              icon_custom_emoji_id=5830184853236097449)])
+    rows.append([btn.callback(" 🔌 Listeye Dön", f"plugins_page_{page}", style=ButtonBuilder.STYLE_PRIMARY)])
     rows.append([btn.callback(" Ana Menü", "main_menu", style=ButtonBuilder.STYLE_DANGER,
                               icon_custom_emoji_id=5832654562510511307)])
     return text, rows
