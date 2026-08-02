@@ -394,23 +394,44 @@ async def _upload_temp_image(image_bytes):
 
 
 async def _attach_media(client, msg, message_data):
-    """Mesajda foto/gif/sticker/video varsa Quotly baloncuğuna göm (best-effort).
-    Başarısız olursa sessizce metin-only quote'a düşer."""
+    """Mesajda foto/gif/sticker/video varsa Quotly baloncuğuna göm.
+    DURUM döndürür (kullanıcıyı bilgilendirmek için):
+      None          → mesajda medya yok
+      "ok"          → medya baloncuğa gömüldü
+      "unsupported" → medya görsele çevrilemedi (ör. ses/dosya)
+      "upload"      → geçici host'a yüklenemedi (ağ/servis hatası)
+      "error"       → beklenmeyen hata
+    """
     try:
         if not getattr(msg, "media", None):
-            return
+            return None
         img = await _extract_media_image(client, msg)
         if not img:
-            return
+            return "unsupported"
         url = await _upload_temp_image(img)
-        if url:
-            message_data["media"] = {"url": url}
-            message_data["mediaType"] = "photo"
+        if not url:
+            return "upload"
+        message_data["media"] = {"url": url}
+        message_data["mediaType"] = "photo"
+        return "ok"
     except Exception:
         log.debug("Medya eklenemedi, metin-only devam", exc_info=True)
+        return "error"
 
 
-async def build_message_data(client, msg, include_reply_info=True):
+def _media_warn_text(statuses):
+    """Toplanan medya durumlarından kullanıcıya gösterilecek kısa uyarı üretir."""
+    bad = [s for s in statuses if s and s != "ok"]
+    if not bad:
+        return ""
+    if any(s == "upload" for s in bad):
+        return "\n\n⚠️ Medya yüklenemedi (geçici servis hatası), çıkartma **yazı olarak** yapıldı."
+    if any(s == "unsupported" for s in bad):
+        return "\n\n⚠️ Bu medya türü çıkartmaya gömülemiyor (ses/dosya vb.), **yazı olarak** yapıldı."
+    return "\n\n⚠️ Medya eklenemedi, çıkartma **yazı olarak** yapıldı."
+
+
+async def build_message_data(client, msg, include_reply_info=True, media_status=None):
     """Mesajı API formatına çevir"""
     sender = await msg.get_sender()
     
@@ -451,7 +472,9 @@ async def build_message_data(client, msg, include_reply_info=True):
                 message_data["entities"].append(ent_dict)
 
     # Medya (foto/gif/sticker/video) — Quotly gibi baloncuğa göm
-    await _attach_media(client, msg, message_data)
+    _st = await _attach_media(client, msg, message_data)
+    if media_status is not None and _st is not None:
+        media_status.append(_st)
 
     # Reply mesajı
     if include_reply_info and msg.reply_to_msg_id:
@@ -824,17 +847,23 @@ async def quote_cmd(event):
     path = None
     try:
         messages_data = []
+        media_status = []
 
-        main_msg_data = await build_message_data(event.client, reply, include_reply_info=include_reply)
+        main_msg_data = await build_message_data(event.client, reply,
+                                                 include_reply_info=include_reply,
+                                                 media_status=media_status)
         messages_data.append(main_msg_data)
 
         if count > 1:
             collected = 0
             async for msg in event.client.iter_messages(event.chat_id, min_id=reply.id, limit=50, reverse=True):
-                if msg.id == reply.id or not msg.text:
+                # Medya-only mesajlar da alınır (eskiden `not msg.text` ile atlanıyordu)
+                if msg.id == reply.id or (not msg.text and not getattr(msg, "media", None)):
                     continue
 
-                msg_data = await build_message_data(event.client, msg, include_reply_info=include_reply)
+                msg_data = await build_message_data(event.client, msg,
+                                                    include_reply_info=include_reply,
+                                                    media_status=media_status)
                 messages_data.append(msg_data)
                 collected += 1
 
@@ -877,13 +906,19 @@ async def quote_cmd(event):
             os.unlink(path)
 
             link = f"https://t.me/addstickers/{pack}"
+            _w = _media_warn_text(media_status)
             if ok:
-                await event.edit(f"✅ **{msg}!**\n📦 [Paket]({link})")
+                await event.edit(f"✅ **{msg}!**\n📦 [Paket]({link}){_w}")
             else:
-                await event.edit(f"❌ {msg}")
+                await event.edit(f"❌ {msg}{_w}")
         else:
             await event.client.send_file(event.chat_id, path, reply_to=reply.id)
-            await event.delete()
+            _w = _media_warn_text(media_status)
+            if _w:
+                # Medya gömülemedi → kullanıcıyı bilgilendir (mesajı silme)
+                await event.edit(_w.strip())
+            else:
+                await event.delete()
             os.unlink(path)
 
     except Exception as e:
@@ -952,16 +987,22 @@ async def quote_save_cmd(event):
 
         else:
             messages_data = []
+            media_status = []
 
-            main_msg_data = await build_message_data(event.client, reply, include_reply_info=include_reply)
+            main_msg_data = await build_message_data(event.client, reply,
+                                                     include_reply_info=include_reply,
+                                                     media_status=media_status)
             messages_data.append(main_msg_data)
 
             if count > 1:
                 collected = 0
                 async for msg in event.client.iter_messages(event.chat_id, min_id=reply.id, limit=50, reverse=True):
-                    if msg.id == reply.id or not msg.text:
+                    # Medya-only mesajlar da alınır
+                    if msg.id == reply.id or (not msg.text and not getattr(msg, "media", None)):
                         continue
-                    msg_data = await build_message_data(event.client, msg, include_reply_info=include_reply)
+                    msg_data = await build_message_data(event.client, msg,
+                                                        include_reply_info=include_reply,
+                                                        media_status=media_status)
                     messages_data.append(msg_data)
                     collected += 1
                     if collected >= count - 1:
@@ -1000,10 +1041,11 @@ async def quote_save_cmd(event):
             os.unlink(path)
 
             link = f"https://t.me/addstickers/{pack}"
+            _w = _media_warn_text(media_status)
             if ok:
-                await event.edit(f"✅ **{msg}!**\n📦 [Paket]({link})")
+                await event.edit(f"✅ **{msg}!**\n📦 [Paket]({link}){_w}")
             else:
-                await event.edit(f"❌ {msg}")
+                await event.edit(f"❌ {msg}{_w}")
 
     except Exception as e:
         import traceback
