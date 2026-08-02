@@ -219,8 +219,12 @@ class SmartSessionManager:
             await client.connect()
             
             if not await client.is_user_authorized():
-                log.info("Kullanıcı yetkili değil: user=%s", user_id)
+                # Oturum ÖLÜ (kullanıcı çıkış yapmış / oturumu iptal etmiş).
+                # Pasife alınır; böylece her açılışta bu ölü oturumlara tekrar
+                # bağlanmaya çalışılmaz (açılışı yavaşlatan asıl sebep buydu).
+                log.info("Oturum geçersiz (çıkış yapılmış) → pasife alındı: user=%s", user_id)
                 await client.disconnect()
+                await self._handle_invalid_session(user_id, notify=False)
                 return None
 
             # Plugin çıktılarını (send/edit/respond) sahibin diline çevir
@@ -256,8 +260,10 @@ class SmartSessionManager:
         
         log.info("Client kapatıldı: user=%s", user_id)
     
-    async def _handle_invalid_session(self, user_id: int):
-        """Geçersiz session'ı işle"""
+    async def _handle_invalid_session(self, user_id: int, notify: bool = True):
+        """Geçersiz session'ı işle.
+        notify=False → kullanıcıya DM atma (açılışta ölü oturumları temizlerken
+        onlarca kişiye gereksiz bildirim gitmesini önler)."""
         # Cache'den sil
         if user_id in self.session_cache:
             del self.session_cache[user_id]
@@ -269,8 +275,8 @@ class SmartSessionManager:
         # DB güncelle
         await db.update_user(user_id, {"is_logged_in": False})
         
-        # Callback çağır
-        if self.on_session_terminated_callback:
+        # Callback çağır (yalnızca bildirim isteniyorsa)
+        if notify and self.on_session_terminated_callback:
             try:
                 await self.on_session_terminated_callback(user_id)
             except Exception:
@@ -986,7 +992,8 @@ class SmartSessionManager:
                     restored += 1
                     return True
                 else:
-                    log.error("Client oluşturulamadı: user=%s", user_id)
+                    # Ölü/geçersiz oturum: yukarıda pasife alındı → hata değil
+                    log.debug("Client oluşturulamadı (oturum geçersiz): user=%s", user_id)
                     return False
             else:
                 # Plugin'i yok, sadece cache'de tut

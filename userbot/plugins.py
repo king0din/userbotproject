@@ -143,6 +143,10 @@ class PluginManager:
         self._retry_count: Dict[str, int] = {}
         self._compat_installed = False
         self._installed_packages: Set[str] = set()  # Kurulu paket cache
+        # Kurulsa bile import EDİLEMEYEN modüller (ör. Python 3.13'te pydub→audioop).
+        # Bunlar bir kez denenip kara listeye alınır; aksi halde HER kullanıcı için
+        # tekrar tekrar pip çalıştırılıp açılış dakikalarca uzuyordu.
+        self._import_failed: Set[str] = set()
         self._packages_checked = False
         # B1 düzeltmesi: eski stil (@register) pluginler global `_client`
         # okuduğu için, iki kullanıcı aynı anda plugin aktive ederse handler
@@ -445,21 +449,36 @@ class PluginManager:
             for module_name in imports:
                 if module_name in skip_modules:
                     continue
-                
+                # Bu oturumda zaten doğrulandı / zaten denenip olmadı → atla
+                if module_name in self._installed_packages or module_name in self._import_failed:
+                    continue
+
                 try:
                     importlib.import_module(module_name)
+                    self._installed_packages.add(module_name)
+                    continue
                 except ImportError:
-                    package_name = package_mapping.get(module_name, module_name)
-                    
-                    log.warning("'%s' bulunamadı, '%s' kuruluyor...", module_name, package_name)
-                    
-                    success, msg = self.install_package(package_name)
-                    
-                    if success:
-                        installed.append(package_name)
-                        importlib.invalidate_caches()
-                    else:
-                        failed.append(f"{package_name}: {msg}")
+                    pass
+
+                package_name = package_mapping.get(module_name, module_name)
+                log.warning("'%s' bulunamadı, '%s' kuruluyor...", module_name, package_name)
+                success, msg = self.install_package(package_name)
+
+                if success:
+                    installed.append(package_name)
+                    importlib.invalidate_caches()
+                    # Kurulum başarılı ama gerçekten import edilebiliyor mu?
+                    try:
+                        importlib.import_module(module_name)
+                        self._installed_packages.add(module_name)
+                    except Exception as _ie:
+                        # Kurulu ama kullanılamıyor → bir daha DENEME (açılışı kilitliyordu)
+                        self._import_failed.add(module_name)
+                        log.warning("'%s' kuruldu ama import edilemiyor (%s) — "
+                                    "bu oturumda tekrar denenmeyecek", module_name, _ie)
+                else:
+                    failed.append(f"{package_name}: {msg}")
+                    self._import_failed.add(module_name)
             
             return len(failed) == 0, installed, failed
             
