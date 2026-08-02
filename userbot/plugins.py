@@ -144,6 +144,11 @@ class PluginManager:
         self._compat_installed = False
         self._installed_packages: Set[str] = set()  # Kurulu paket cache
         self._packages_checked = False
+        # B1 düzeltmesi: eski stil (@register) pluginler global `_client`
+        # okuduğu için, iki kullanıcı aynı anda plugin aktive ederse handler
+        # yanlış hesaba bağlanabilir. Bu kilit `set_client -> exec -> register`
+        # kritik bölgesini kullanıcılar arasında atomik tutar.
+        self._activation_lock = asyncio.Lock()
     
     async def preinstall_all_dependencies(self):
         """Tüm pluginlerin bağımlılıklarını önceden kur"""
@@ -642,47 +647,57 @@ class PluginManager:
         
         # Plugin'i yükle - exec kullanarak
         try:
-            # userbot_compat'ı hazırla
-            try:
-                from userbot_compat import events as compat_events
-                compat_events.set_client(client)
-            except Exception as e:
-                log.error("compat_events hatası", exc_info=True)
-            
-            # Modül için namespace oluştur
-            module_name = f"plugin_{plugin_name}_{user_id}"
-            
-            # Yeni modül oluştur
-            import types
-            module = types.ModuleType(module_name)
-            module.__file__ = file_path
-            module.__name__ = module_name
-            module.client = client
-            
-            # Modülü sys.modules'a ekle
-            sys.modules[module_name] = module
-            
-            # Mevcut handler sayısını kaydet (önceki durum)
-            handlers_before = len(client.list_event_handlers())
-            
-            # Kodu çalıştır
-            exec(compile(patched_content, file_path, 'exec'), module.__dict__)
-            
-            # Register fonksiyonu varsa çağır (eski stil)
-            if hasattr(module, 'register') and callable(module.register):
-                module.register(client)
-            
-            # register_handlers fonksiyonu varsa çağır (yeni stil)
-            if hasattr(module, 'register_handlers') and callable(module.register_handlers):
+            # B1: global `_client` yarışını önlemek için compat kurulumu ve
+            # handler kaydını (senkron kritik bölge) kilit altında yap.
+            async with self._activation_lock:
+                # YARIŞ KORUMASI: "zaten aktif" kontrolü kilit DIŞINDA yapıldığı için
+                # iki eşzamanlı aktivasyon (paralel yükleme) ikisi de geçebilir;
+                # kilit içinde TEKRAR kontrol et → aksi halde plugin ikinci kez exec
+                # edilip handler'lar ÇİFT kaydolur (komutlar iki kez tetiklenir).
+                if plugin_name in self.user_active_plugins.get(user_id, {}):
+                    return True, f"`{plugin_name}` zaten aktif"
+
+                # userbot_compat'ı hazırla
                 try:
-                    module.register_handlers(client, user_id)
-                    log.info("register_handlers çağrıldı: %s", plugin_name)
-                except Exception as e:
-                    log.error("register_handlers hatası", exc_info=True)
-            
-            # Yeni eklenen handler'ları tespit et ve kaydet
-            handlers_after = client.list_event_handlers()
-            new_handlers = handlers_after[handlers_before:]
+                    from userbot_compat import events as compat_events
+                    compat_events.set_client(client)
+                except Exception:
+                    log.error("compat_events hatası", exc_info=True)
+
+                # Modül için namespace oluştur
+                module_name = f"plugin_{plugin_name}_{user_id}"
+
+                # Yeni modül oluştur
+                import types
+                module = types.ModuleType(module_name)
+                module.__file__ = file_path
+                module.__name__ = module_name
+                module.client = client
+
+                # Modülü sys.modules'a ekle
+                sys.modules[module_name] = module
+
+                # Mevcut handler sayısını kaydet (önceki durum)
+                handlers_before = len(client.list_event_handlers())
+
+                # Kodu çalıştır
+                exec(compile(patched_content, file_path, 'exec'), module.__dict__)
+
+                # Register fonksiyonu varsa çağır (eski stil)
+                if hasattr(module, 'register') and callable(module.register):
+                    module.register(client)
+
+                # register_handlers fonksiyonu varsa çağır (yeni stil)
+                if hasattr(module, 'register_handlers') and callable(module.register_handlers):
+                    try:
+                        module.register_handlers(client, user_id)
+                        log.info("register_handlers çağrıldı: %s", plugin_name)
+                    except Exception:
+                        log.error("register_handlers hatası", exc_info=True)
+
+                # Yeni eklenen handler'ları tespit et ve kaydet
+                handlers_after = client.list_event_handlers()
+                new_handlers = handlers_after[handlers_before:]
             
             # Handler'ları kullanıcı ve plugin bazında sakla
             if user_id not in self.user_handlers:

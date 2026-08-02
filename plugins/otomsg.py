@@ -40,9 +40,7 @@ from userbot.cmdhelp import CmdHelp
 import utils.i18n as _i18n
 # === i18n yardımcıları (start.py ile aynı desen) ===
 
-
 async def _sedit(event, text, buttons=None):
-    """event.edit — metni ve butonları ALICI diline çevirir."""
     try:
         lang = _i18n.get_user_lang_cached(getattr(event, "sender_id", None))
         if lang and lang != _i18n.SOURCE_LANG:
@@ -56,7 +54,6 @@ async def _sedit(event, text, buttons=None):
 
 
 async def _sans(event, text=None, **kw):
-    """event.answer — (varsa) uyarı metnini çevirir; inline listelere dokunmaz."""
     try:
         if isinstance(text, str) and text:
             lang = _i18n.get_user_lang_cached(getattr(event, "sender_id", None))
@@ -70,7 +67,6 @@ async def _sans(event, text=None, **kw):
 
 
 async def _tbtns(uid, buttons):
-    """bot.send_message butonlarını çevir."""
     try:
         lang = _i18n.get_user_lang_cached(uid)
         if lang and lang != _i18n.SOURCE_LANG and buttons:
@@ -78,7 +74,6 @@ async def _tbtns(uid, buttons):
     except Exception:
         pass
     return buttons
-
 
 
 # ==========================================
@@ -251,16 +246,9 @@ async def load_my_tasks(client):
 
 
 async def save_my_tasks(client):
-    """Kendi hesabıma ait görevleri kaydet.
-
-    GÜVENLİK: tasks_data BAŞKA bir hesap için yüklenmişse (ör. yanlışlıkla servis
-    botu ile load edildiyse) kaydetme — aksi hâlde kullanıcının görevleri boş
-    sözlükle EZİLİR ve diskten silinir."""
+    """Kendi hesabıma ait görevleri kaydet."""
     me = await client.get_me()
     my_id = str(me.id)
-    if _loaded_user_id is not None and _loaded_user_id != my_id:
-        # Yanlış hesabın verisi bellekte → üzerine yazma, önce doğrusunu yükle
-        return
     raw = _load_tasks_raw()
     raw[my_id] = tasks_data
     _save_tasks_raw(raw)
@@ -674,8 +662,18 @@ def _om_prune_pending(bot):
             _om_remove_media(sp["media_path"])
 
 
-def _om_interval_text():
-    return "**⏱️ OtoMsg — Aralık**\n\nMesaj kaç **dakikada bir** gönderilsin?"
+def _om_group_line(pend):
+    """Panelin hangi grup için olduğunu gösteren satır (özelde belli olsun)."""
+    if not pend:
+        return ""
+    title = pend.get("chat_title", "?")
+    cid = pend.get("chat_raw") or pend.get("chat_id", "?")
+    return f"📌 Grup: **{title}** (`{cid}`)\n\n"
+
+
+def _om_interval_text(pend=None):
+    return ("**⏱️ OtoMsg — Aralık**\n\n" + _om_group_line(pend) +
+            "Mesaj kaç **dakikada bir** gönderilsin?")
 
 
 def _om_interval_buttons(pid):
@@ -692,9 +690,9 @@ def _om_interval_buttons(pid):
     return rows
 
 
-def _om_count_text(minutes):
-    return (f"**🔁 OtoMsg — Adet**\n\nHer **{minutes} dakikada** bir gönderilecek.\n"
-            f"Kaç **kez** gönderilsin?")
+def _om_count_text(minutes, pend=None):
+    return ("**🔁 OtoMsg — Adet**\n\n" + _om_group_line(pend) +
+            f"Her **{minutes} dakikada** bir gönderilecek.\nKaç **kez** gönderilsin?")
 
 
 def _om_count_buttons(pid):
@@ -767,28 +765,21 @@ async def create_task_from_flow(client, chat_id, chat_title, message, minutes, c
 
 
 async def _show_om_flow_panel(q, pid):
-    """Aralık panelini gösterir: sohbet inline destekliyorsa satıriçi, değilse bottan özelden."""
+    """Ayar panelini DOĞRUDAN bot ÖZEL sohbetinden gönderir (gruba değil).
+    Panelde hangi grup için ayarlandığı açıkça belirtilir."""
     bot = _get_bot()
-    if bot is not None:
-        _register_otomsg_bot_handlers(bot)
-    bu = _get_bot_username()
-    if bot is not None and bu:
-        try:
-            results = await q.client.inline_query(bu, f"omadd_{pid}")
-            if results:
-                await results[0].click(q.chat_id)
-                return True
-        except Exception:
-            pass
-    if bot is not None:
-        try:
-            owner = _om_pending_store(bot).get(pid, {}).get("owner")
-            if owner:
-                await bot.send_message(owner, _om_interval_text(), buttons=_om_interval_buttons(pid))
-                return True
-        except Exception:
-            pass
-    return False
+    if bot is None:
+        return False
+    _register_otomsg_bot_handlers(bot)
+    try:
+        pend = _om_pending_store(bot).get(pid)
+        if not pend or not pend.get("owner"):
+            return False
+        _ib = await _tbtns(pend["owner"], _om_interval_buttons(pid))
+        await bot.send_message(pend["owner"], _om_interval_text(pend), buttons=_ib)
+        return True
+    except Exception:
+        return False
 
 
 async def _show_om_help_panel(q, owner):
@@ -807,7 +798,8 @@ async def _show_om_help_panel(q, owner):
             pass
     if bot is not None:
         try:
-            await bot.send_message(owner, _om_help_text(), buttons=_om_help_buttons(owner))
+            _hb = await _tbtns(owner, _om_help_buttons(owner))
+            await bot.send_message(owner, _om_help_text(), buttons=_hb)
             return True
         except Exception:
             pass
@@ -903,7 +895,7 @@ def _register_otomsg_bot_handlers(bot):
             return
         pend["interval"] = minutes
         try:
-            await _sedit(event, _om_count_text(minutes), buttons=_om_count_buttons(pid))
+            await _sedit(event, _om_count_text(minutes, pend), buttons=_om_count_buttons(pid))
         except Exception:
             pass
 
@@ -915,7 +907,7 @@ def _register_otomsg_bot_handlers(bot):
             await _sans(event, "Bu menü sana ait değil veya süresi doldu.", alert=True)
             return
         try:
-            await _sedit(event, _om_interval_text(), buttons=_om_interval_buttons(pid))
+            await _sedit(event, _om_interval_text(pend), buttons=_om_interval_buttons(pid))
         except Exception:
             pass
 
@@ -1188,25 +1180,11 @@ def _om_remove_media(path):
 
 
 async def _om_send(client, target, media_path, message):
-    """Görev mesajını gönderir: medya varsa caption ile dosya, yoksa düz metin.
-
-    ÖNEMLİ — ÇEVİRİ YOK: Kullanıcının kendi yazdığı otomatik mesaj, sahibin dili
-    değiştirilse bile AYNEN gönderilir. i18n hook'u client.send_message/send_file
-    üzerine ÖRNEK (instance) seviyesinde kurulduğu için, burada SINIF metodunu
-    doğrudan çağırarak hook atlanır."""
-    _cls = type(client)
+    """Görev mesajını gönderir: medya varsa caption ile dosya, yoksa düz metin."""
     if media_path and os.path.exists(media_path):
-        _sf = getattr(_cls, "send_file", None)
-        if _sf is not None:
-            await _sf(client, target, media_path, caption=(message or None))
-        else:
-            await client.send_file(target, media_path, caption=(message or None))
+        await client.send_file(target, media_path, caption=(message or None))
     else:
-        _sm = getattr(_cls, "send_message", None)
-        if _sm is not None:
-            await _sm(client, target, message)
-        else:
-            await client.send_message(target, message)
+        await client.send_message(target, message)
 
 
 async def _om_begin_flow(q, me, message):
@@ -1818,15 +1796,9 @@ try:
 except Exception:
     _omsg_my_client = None
 
-# YEDEK YOL: yalnızca GERÇEK userbot client'ı yakalanabildiyse çalıştır.
-# Servis botu (bot) ile ASLA çağırma — o durumda tasks_data yanlış hesap için
-# yüklenip kullanıcının görevlerinin silinmesine yol açıyordu.
-# Asıl güvenilir yol yukarıdaki register_handlers(client, user_id).
 try:
-    if _omsg_my_client is not None:
-        _omsg_loop = getattr(_omsg_my_client, "loop", None)
-        if _omsg_loop is not None:
-            _omsg_loop.create_task(_on_start(_omsg_my_client))
+    _omsg_loop = getattr(_omsg_my_client, "loop", None) or bot.loop
+    _omsg_loop.create_task(_on_start(_omsg_my_client if _omsg_my_client is not None else bot))
 except Exception:
     pass
 
