@@ -370,17 +370,44 @@ async def _extract_media_image(client, msg):
     return None
 
 
+def _normalize_to_png(image_bytes):
+    """Görseli PNG'ye çevirir (şeffaflık korunur).
+    ÖNEMLİ: Sticker'lar WEBP, bazı önizlemeler başka formatta gelir; eskiden hepsi
+    `q.jpg` + image/jpeg olarak yükleniyordu → uzantı/içerik uyuşmazlığı yüzünden
+    Quotly medyayı render EDEMİYOR, sessizce yazı-only quote çıkıyordu.
+    Döndürür: (bytes, filename, content_type)."""
+    try:
+        img = Image.open(BytesIO(image_bytes))
+        if img.mode not in ("RGBA", "RGB"):
+            img = img.convert("RGBA")
+        out = BytesIO()
+        img.save(out, format="PNG", optimize=True)
+        return out.getvalue(), "q.png", "image/png"
+    except Exception:
+        log.debug("PNG'ye çevrilemedi, ham veri yüklenecek", exc_info=True)
+    # Çevrilemezse: sihirli baytlardan gerçek türü tespit et (yine de doğru uzantı)
+    b = image_bytes[:12]
+    if b.startswith(b"\x89PNG"):
+        return image_bytes, "q.png", "image/png"
+    if b.startswith(b"GIF8"):
+        return image_bytes, "q.gif", "image/gif"
+    if b[:4] == b"RIFF" and b[8:12] == b"WEBP":
+        return image_bytes, "q.webp", "image/webp"
+    return image_bytes, "q.jpg", "image/jpeg"
+
+
 async def _upload_temp_image(image_bytes):
     """Görseli 1 saatlik otomatik silinen geçici host'a yükle, public URL döndür.
     Quotly API medyayı SADECE erişilebilir http URL'den çeker (base64 render olmaz),
     bu yüzden geçici host şart. Bot token'ı hiçbir üçüncü tarafa gönderilmez."""
+    image_bytes, _fname, _ctype = _normalize_to_png(image_bytes)
     for attempt in range(3):  # litterbox ara sıra geçici hata verir → tekrar dene
         try:
             fd = aiohttp.FormData()
             fd.add_field("reqtype", "fileupload")
             fd.add_field("time", "1h")
-            fd.add_field("fileToUpload", image_bytes, filename="q.jpg",
-                         content_type="image/jpeg")
+            fd.add_field("fileToUpload", image_bytes, filename=_fname,
+                         content_type=_ctype)
             async with aiohttp.ClientSession() as s:
                 async with s.post(LITTERBOX_API, data=fd,
                                   timeout=aiohttp.ClientTimeout(total=30)) as r:
