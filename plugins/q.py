@@ -319,13 +319,25 @@ async def get_user_info(client, user):
         if hasattr(full_user.full_user, 'premium') and full_user.full_user.premium:
             user_data["is_premium"] = True
         
-        # Emoji status - premium kullanıcıların profil yanındaki emoji
-        if hasattr(full_user.full_user, 'emoji_status') and full_user.full_user.emoji_status:
-            emoji_status = full_user.full_user.emoji_status
-            if hasattr(emoji_status, 'document_id'):
-                emoji_status_id = str(emoji_status.document_id)
+        # Emoji status (durum ifadesi) — DİKKAT: Telegram'da bu alan `User`
+        # nesnesindedir, `UserFull`da YOKTUR. Eski kod UserFull'dan okuduğu için
+        # durum ifadesi HİÇ görünmüyordu. Önce güncel User kaydından oku.
+        for _u in (getattr(full_user, "users", None) or []):
+            _es = getattr(_u, "emoji_status", None)
+            if _es is not None and getattr(_es, "document_id", None):
+                emoji_status_id = str(_es.document_id)
+                break
     except Exception:
         pass
+
+    # Yedek: elimizdeki User nesnesi (full istek başarısız olsa da çalışır)
+    if not emoji_status_id:
+        try:
+            _es = getattr(user, "emoji_status", None)
+            if _es is not None and getattr(_es, "document_id", None):
+                emoji_status_id = str(_es.document_id)
+        except Exception:
+            pass
     
     user_data["name"] = name.strip() or "User"
 
@@ -420,6 +432,50 @@ async def _upload_temp_image(image_bytes):
     return None
 
 
+def _decode_waveform(data, max_samples=100):
+    """Telegram'ın 5-bit paketlenmiş ses dalga formunu sayı listesine çevirir.
+    Quotly `voice: {waveform: [...]}` bekler → sesli mesaj, ses dalgası
+    görünümünde (orijinal bottaki gibi) çizilir."""
+    if not data:
+        return []
+    out = []
+    total = (len(data) * 8) // 5
+    for i in range(total):
+        bit = i * 5
+        bi, sh = bit // 8, bit % 8
+        v = data[bi] >> sh
+        if sh > 3 and bi + 1 < len(data):
+            v |= data[bi + 1] << (8 - sh)
+        out.append(v & 0x1F)
+    # Çok uzunsa seyrelt (istek boyutunu küçük tut)
+    if max_samples and len(out) > max_samples:
+        step = len(out) / max_samples
+        out = [out[int(i * step)] for i in range(max_samples)]
+    return out
+
+
+def _voice_waveform(msg):
+    """Mesaj sesli mesaj/ses ise dalga formunu döndürür, değilse None."""
+    try:
+        from telethon.tl.types import DocumentAttributeAudio
+        doc = getattr(msg, "document", None)
+        if doc is None:
+            return None
+        for attr in (getattr(doc, "attributes", None) or []):
+            if isinstance(attr, DocumentAttributeAudio):
+                wf = _decode_waveform(getattr(attr, "waveform", None))
+                if wf:
+                    return wf
+                # Dalga formu yoksa süreye göre düz bir dalga üret (yine de ses görünsün)
+                dur = int(getattr(attr, "duration", 0) or 0)
+                if getattr(attr, "voice", False) or dur:
+                    n = max(20, min(60, dur * 3 or 30))
+                    return [((i * 7) % 24) + 4 for i in range(n)]
+    except Exception:
+        log.debug("Dalga formu okunamadı", exc_info=True)
+    return None
+
+
 async def _attach_media(client, msg, message_data):
     """Mesajda foto/gif/sticker/video varsa Quotly baloncuğuna göm.
     DURUM döndürür (kullanıcıyı bilgilendirmek için):
@@ -432,6 +488,13 @@ async def _attach_media(client, msg, message_data):
     try:
         if not getattr(msg, "media", None):
             return None
+
+        # Sesli mesaj / ses dosyası → dalga formu olarak çiz (görsel yüklemeye gerek yok)
+        wf = _voice_waveform(msg)
+        if wf:
+            message_data["voice"] = {"waveform": wf}
+            return "ok"
+
         img = await _extract_media_image(client, msg)
         if not img:
             return "unsupported"
@@ -439,7 +502,8 @@ async def _attach_media(client, msg, message_data):
         if not url:
             return "upload"
         message_data["media"] = {"url": url}
-        message_data["mediaType"] = "photo"
+        # API şeması: sticker'lar için mediaType="sticker", diğerleri görsel
+        message_data["mediaType"] = "sticker" if getattr(msg, "sticker", None) else "photo"
         return "ok"
     except Exception:
         log.debug("Medya eklenemedi, metin-only devam", exc_info=True)
