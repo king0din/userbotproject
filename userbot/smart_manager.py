@@ -935,6 +935,13 @@ class SmartSessionManager:
         users = await db.get_logged_in_users()
         restored = 0
         cached = 0
+
+        # Toplu mod: plugin meta verisi tek sorguda alınır (kullanıcı başına
+        # ayrı DB turu atılmaz) → açılış belirgin şekilde hızlanır.
+        try:
+            await self.plugin_manager.begin_bulk_load()
+        except Exception:
+            log.warning("Toplu yükleme modu açılamadı", exc_info=True)
         
         async def restore_single_user(user):
             """Tek kullanıcıyı restore et"""
@@ -1002,7 +1009,14 @@ class SmartSessionManager:
         
         # Paralel olarak restore et
         tasks = [restore_single_user(user) for user in users]
-        await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            # Toplu modu kapat → sonraki değişiklikler anında geçerli olsun
+            try:
+                self.plugin_manager.end_bulk_load()
+            except Exception:
+                pass
         
         log.info("%s kullanıcı aktif (plugin'li)", restored)
         log.info("%s kullanıcı cache'de (on-demand)", cached)

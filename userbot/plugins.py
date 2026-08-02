@@ -147,6 +147,16 @@ class PluginManager:
         # Bunlar bir kez denenip kara listeye alınır; aksi halde HER kullanıcı için
         # tekrar tekrar pip çalıştırılıp açılış dakikalarca uzuyordu.
         self._import_failed: Set[str] = set()
+        # Plugin DOSYASI başına derleme cache'i {yol: (mtime, patched, code, deps_ok)}
+        # Eskiden her KULLANICI için dosya yeniden okunup regex'le yamalanıyor,
+        # ast.parse + compile ediliyordu (40 kullanıcı × 7 plugin ≈ 280 kez).
+        # Artık dosya değişmedikçe bu iş dosya başına 1 kez yapılır.
+        self._code_cache: Dict[str, tuple] = {}
+        # Açılışta toplu yükleme modu: plugin meta verisi Mongo'dan TEK sorguda
+        # alınır. Eskiden her (kullanıcı, plugin) için ayrı sorgu gidiyordu
+        # (40×7 ≈ 280 tur) — uzak veritabanında açılışın büyük kısmı buydu.
+        self._bulk_meta: Dict[str, dict] = {}
+        self._bulk_mode = False
         self._packages_checked = False
         # B1 düzeltmesi: eski stil (@register) pluginler global `_client`
         # okuduğu için, iki kullanıcı aynı anda plugin aktive ederse handler
@@ -355,6 +365,61 @@ class PluginManager:
         except Exception as e:
             return False, str(e)
     
+    async def begin_bulk_load(self):
+        """Açılış/toplu yükleme başlangıcı: plugin meta verisini bir kez çek."""
+        try:
+            rows = await db.get_all_plugins()
+            self._bulk_meta = {p.get("name"): p for p in (rows or []) if p.get("name")}
+            self._bulk_mode = True
+            log.info("Toplu yükleme: %s plugin meta verisi önbelleğe alındı", len(self._bulk_meta))
+        except Exception:
+            self._bulk_meta = {}
+            self._bulk_mode = False
+            log.warning("Toplu meta önbelleği alınamadı", exc_info=True)
+
+    def end_bulk_load(self):
+        """Toplu yükleme bitti: önbelleği bırak (ayar değişiklikleri anında geçerli olsun)."""
+        self._bulk_mode = False
+        self._bulk_meta = {}
+
+    async def _get_plugin_meta(self, plugin_name: str):
+        """Plugin meta verisi: toplu moddayken önbellekten, normalde DB'den."""
+        if self._bulk_mode:
+            hit = self._bulk_meta.get(plugin_name)
+            if hit is not None:
+                return hit
+        return await db.get_plugin(plugin_name)
+
+    def _get_compiled_plugin(self, file_path: str):
+        """Plugin dosyasını oku→yamala→derle ve CACHE'le (mtime ile geçersizleşir).
+        Döndürür: (patched_content, code_obj, deps_ok) | None"""
+        try:
+            mtime = os.path.getmtime(file_path)
+        except Exception:
+            return None
+        hit = self._code_cache.get(file_path)
+        if hit and hit[0] == mtime:
+            return hit[1], hit[2], hit[3]
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                original = f.read()
+        except Exception:
+            return None
+        patched = self._patch_plugin_content(original)
+        try:
+            code = compile(patched, file_path, 'exec')
+        except SyntaxError:
+            log.error("Plugin derlenemedi: %s", file_path, exc_info=True)
+            return None
+        self._code_cache[file_path] = (mtime, patched, code, False)
+        return patched, code, False
+
+    def _mark_deps_ok(self, file_path: str):
+        """Bu dosyanın bağımlılıkları kontrol edildi → tekrar kontrol etme."""
+        hit = self._code_cache.get(file_path)
+        if hit:
+            self._code_cache[file_path] = (hit[0], hit[1], hit[2], True)
+
     def check_and_install_imports(self, content: str) -> Tuple[bool, List[str], List[str]]:
         """Plugin içeriğindeki import'ları kontrol et ve eksik olanları kur"""
         installed = []
@@ -601,7 +666,7 @@ class PluginManager:
             del self._retry_count[retry_key]
             return False, "❌ Plugin yüklenemedi. Uyumsuz olabilir."
         
-        plugin = await db.get_plugin(plugin_name)
+        plugin = await self._get_plugin_meta(plugin_name)
         if not plugin:
             return False, f"`{plugin_name}` adında bir plugin bulunamadı"
         
@@ -644,18 +709,21 @@ class PluginManager:
         # Uyumluluk katmanını kur
         self._setup_compatibility()
         
-        # Plugin dosyasını oku
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                original_content = f.read()
-        except Exception as e:
-            return False, f"❌ Dosya okunamadı: {e}"
-        
-        # Import'ları patch'le
-        patched_content = self._patch_plugin_content(original_content)
-        
-        # Bağımlılıkları kontrol et
-        success, installed, failed = self.check_and_install_imports(patched_content)
+        # Dosyayı oku + yamala + DERLE — dosya başına 1 kez (mtime cache).
+        # Bu üçü eskiden her kullanıcı için tekrarlanıyordu; açılışın büyük
+        # kısmını bu boşa giden CPU işi tüketiyordu.
+        _cached = self._get_compiled_plugin(file_path)
+        if not _cached:
+            return False, "❌ Dosya okunamadı veya derlenemedi"
+        patched_content, _code_obj, _deps_ok = _cached
+
+        # Bağımlılıklar da dosya başına 1 kez kontrol edilir
+        if _deps_ok:
+            success, installed, failed = True, [], []
+        else:
+            success, installed, failed = self.check_and_install_imports(patched_content)
+            if success:
+                self._mark_deps_ok(file_path)
         
         status_messages = []
         if installed:
@@ -699,8 +767,8 @@ class PluginManager:
                 # Mevcut handler sayısını kaydet (önceki durum)
                 handlers_before = len(client.list_event_handlers())
 
-                # Kodu çalıştır
-                exec(compile(patched_content, file_path, 'exec'), module.__dict__)
+                # Kodu çalıştır (önceden derlenmiş kod nesnesi — compile tekrar edilmez)
+                exec(_code_obj, module.__dict__)
 
                 # Register fonksiyonu varsa çağır (eski stil)
                 if hasattr(module, 'register') and callable(module.register):
