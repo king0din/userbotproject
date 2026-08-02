@@ -54,22 +54,19 @@ def register(bot):
     @bot.on(events.CallbackQuery(data=b"login_menu"))
     @check_ban
     async def login_menu_handler(event):
-        if event.sender_id in user_states:
-            del user_states[event.sender_id]
-        
-        rows = [
-            [btn.callback(" Telefon Numarası", "login_phone",
-                         style=ButtonBuilder.STYLE_SUCCESS,
-                         icon_custom_emoji_id=5832225314889015431)],
-            [btn.callback(" Geri", "main_menu",
-                         style=ButtonBuilder.STYLE_DANGER,
-                         icon_custom_emoji_id=5832646161554480591)]
-        ]
-        
+        """Giriş: tek yöntem (telefon) olduğu için ARA MENÜ göstermez,
+        doğrudan telefon numarası girişine yönlendirir."""
+        user_states[event.sender_id] = {"state": STATE_WAITING_PHONE}
+
+        text = config.MESSAGES["login_phone"] + "\n\n⚠️ İptal: /cancel"
+        rows = [[btn.callback(" İptal", "main_menu",
+                              style=ButtonBuilder.STYLE_DANGER,
+                              icon_custom_emoji_id=5832236194041176208)]]
+
         await bot_api.edit_message_text(
             chat_id=event.sender_id,
             message_id=event.message_id,
-            text=config.MESSAGES["login_method"],
+            text=text,
             reply_markup=btn.inline_keyboard(rows)
         )
         await event.answer()
@@ -79,7 +76,7 @@ def register(bot):
     async def login_phone_start(event):
         user_states[event.sender_id] = {"state": STATE_WAITING_PHONE}
         text = config.MESSAGES["login_phone"] + "\n\n⚠️ İptal: /cancel"
-        rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
+        rows = [[btn.callback(" İptal", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
         await bot_api.edit_message_text(chat_id=event.sender_id, message_id=event.message_id, text=text, reply_markup=btn.inline_keyboard(rows))
         await event.answer()
     
@@ -103,12 +100,12 @@ def register(bot):
             error = result.get("error", "Bilinmeyen hata")
             if result.get("error") == "flood_wait":
                 error = f"{result['seconds']} saniye bekleyin"
-            rows = [[btn.callback(" Geri", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+            rows = [[btn.callback(" Geri", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
             await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=f"❌ Hata: {error}", reply_markup=btn.inline_keyboard(rows))
             return
         
         user_states[user_id] = {"state": STATE_WAITING_CODE, "phone": phone}
-        rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
+        rows = [[btn.callback(" İptal", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
         await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=config.MESSAGES["login_code"] + "\n\n⚠️ İptal: /cancel", reply_markup=btn.inline_keyboard(rows))
     
 
@@ -124,7 +121,7 @@ def register(bot):
         
         if result.get("stage") == "2fa":
             user_states[user_id]["state"] = STATE_WAITING_2FA
-            rows = [[btn.callback(" İptal", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
+            rows = [[btn.callback(" İptal", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832236194041176208)]]
             await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=config.MESSAGES["login_2fa"] + "\n\n⚠️ İptal: /cancel", reply_markup=btn.inline_keyboard(rows))
             return
         
@@ -134,7 +131,7 @@ def register(bot):
             error = result.get("error", "Bilinmeyen hata")
             if error in ["code_expired", "no_pending_login"]:
                 if user_id in user_states: del user_states[user_id]
-            rows = [[btn.callback(" Geri", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+            rows = [[btn.callback(" Geri", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
             await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=f"❌ {error}", reply_markup=btn.inline_keyboard(rows))
     
 
@@ -151,7 +148,7 @@ def register(bot):
         if result["success"]:
             await handle_login_success(event, bot, result, msg)
         else:
-            rows = [[btn.callback(" Geri", "login_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
+            rows = [[btn.callback(" Geri", "main_menu", style=ButtonBuilder.STYLE_DANGER, icon_custom_emoji_id=5832646161554480591)]]
             await bot_api.edit_message_text(chat_id=user_id, message_id=msg.id, text=f"❌ {result.get('error', 'Hata')}", reply_markup=btn.inline_keyboard(rows))
     
 
