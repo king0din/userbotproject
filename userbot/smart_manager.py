@@ -18,6 +18,8 @@ from telethon.errors import (
     AuthKeyUnregisteredError,
     UserDeactivatedBanError,
     UserDeactivatedError,
+    SessionRevokedError,
+    AuthKeyDuplicatedError,
     FloodWaitError
 )
 import config
@@ -224,7 +226,7 @@ class SmartSessionManager:
                 # bağlanmaya çalışılmaz (açılışı yavaşlatan asıl sebep buydu).
                 log.info("Oturum geçersiz (çıkış yapılmış) → pasife alındı: user=%s", user_id)
                 await client.disconnect()
-                await self._handle_invalid_session(user_id, notify=False)
+                await self._handle_invalid_session(user_id, notify=True)
                 return None
 
             # Plugin çıktılarını (send/edit/respond) sahibin diline çevir
@@ -619,17 +621,28 @@ class SmartSessionManager:
         
         async def monitor():
             while user_id in self.active_clients:
-                await asyncio.sleep(300)  # 5 dakikada bir kontrol
-                
+                await asyncio.sleep(120)  # 2 dakikada bir kontrol (daha hızlı tespit)
+
                 client = self.active_clients.get(user_id)
                 if not client:
                     break
-                
+
                 try:
                     await client.get_me()
-                except Exception:
-                    await self._handle_invalid_session(user_id)
+                except (AuthKeyUnregisteredError, UserDeactivatedBanError,
+                        UserDeactivatedError, SessionRevokedError,
+                        AuthKeyDuplicatedError) as e:
+                    # Oturum GERÇEKTEN sonlandırıldı (Telegram ayarlarından atıldı,
+                    # hesap banlandı vb.) → kullanıcıyı bilgilendir
+                    log.info("Oturum sonlandırıldı: user=%s (%s)", user_id, type(e).__name__)
+                    await self._handle_invalid_session(user_id, notify=True)
                     break
+                except Exception as e:
+                    # Geçici ağ/sunucu hatası → oturumu ÖLDÜRME, sonraki turda tekrar bak.
+                    # (Eskiden her hata oturum sonlandırma sayılıyordu; ağ kesintisinde
+                    #  kullanıcı boşuna çıkarılıp yanlış bildirim gidiyordu.)
+                    log.debug("Oturum kontrolü geçici hata: user=%s (%s)", user_id, e)
+                    continue
         
         self.session_monitors[user_id] = asyncio.create_task(monitor())
     

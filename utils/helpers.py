@@ -167,43 +167,59 @@ def register_user(func: Callable) -> Callable:
 # LOG FONKSİYONLARI
 # ==========================================
 
+# Log kanalı bir kez "geçersiz" çıkarsa tekrar denemeyiz (her aksiyonda spam olmasın)
+_LOG_CHANNEL_DISABLED = False
+# Örnek/placeholder değerler — bunlara hiç gönderme deneme
+_LOG_CHANNEL_PLACEHOLDERS = {"", "0", "-100123456789", "-100XXXXXXXXXX"}
+
+
 async def send_log(bot, log_type: str, message: str, user_id: int = None):
-    """Log kanalına mesaj gönder"""
-    if not config.LOG_CHANNEL:
+    """Log kanalına mesaj gönder + DB'ye kaydet.
+    Geçersiz/erişilemez LOG_CHANNEL durumunda çökmeden devre dışı bırakır (spam yapmaz)."""
+    global _LOG_CHANNEL_DISABLED
+
+    # 1) DB log'u HER ZAMAN kaydet (kanaldan bağımsız)
+    try:
+        await db.add_log(log_type, user_id, message)
+    except Exception:
+        log.debug("DB log kaydedilemedi", exc_info=True)
+
+    # 2) Log kanalına gönder (geçerliyse)
+    if _LOG_CHANNEL_DISABLED:
         return
-    
+    if not config.LOG_CHANNEL or str(config.LOG_CHANNEL).strip() in _LOG_CHANNEL_PLACEHOLDERS:
+        _LOG_CHANNEL_DISABLED = True
+        log.warning("LOG_CHANNEL ayarlı değil ya da placeholder — log kanalı devre dışı. "
+                    ".env'deki LOG_CHANNEL'i gerçek grup/kanal ID'si ile doldur (ör. -100xxxxxxxxxx).")
+        return
+
     try:
         emoji_map = {
-            "info": "ℹ️",
-            "success": "✅",
-            "warning": "⚠️",
-            "error": "❌",
-            "login": "🔐",
-            "logout": "🚪",
-            "plugin": "🔌",
-            "ban": "🚫",
-            "sudo": "👑",
-            "update": "🔄",
-            "system": "🤖"
+            "info": "ℹ️", "success": "✅", "warning": "⚠️", "error": "❌",
+            "login": "🔐", "logout": "🚪", "plugin": "🔌", "ban": "🚫",
+            "sudo": "👑", "update": "🔄", "system": "🤖",
         }
-        
         emoji = emoji_map.get(log_type, "📋")
-        
-        log_text = f"{emoji} **{log_type.upper()}**\n\n"
-        log_text += message
-        
+        log_text = f"{emoji} **{log_type.upper()}**\n\n{message}"
         if user_id:
             log_text += f"\n\n👤 User ID: `{user_id}`"
-        
         log_text += f"\n⏱️ {format_datetime(time.time())}"
-        
         await bot.send_message(config.LOG_CHANNEL, log_text)
-        
-        # MongoDB'ye de kaydet
-        await db.add_log(log_type, user_id, message)
-        
     except Exception as e:
-        log.error("Hata", exc_info=True)
+        name = type(e).__name__
+        estr = str(e)
+        invalid = ("ChatIdInvalid" in name or "PeerIdInvalid" in name
+                   or "ChannelInvalid" in name or "ChatWriteForbidden" in name
+                   or "ChannelPrivate" in name or "Cannot find any entity" in estr
+                   or "Could not find the input entity" in estr)
+        if invalid:
+            # Kanal geçersiz/erişilemez → bir daha deneme, tek uyarı ver
+            _LOG_CHANNEL_DISABLED = True
+            log.warning("LOG_CHANNEL geçersiz/erişilemez (%s) — log kanalı devre dışı bırakıldı. "
+                        "Botun kanala/gruba ekli ve yazma yetkisinin olduğundan emin ol, "
+                        "veya .env'deki LOG_CHANNEL'i düzelt.", config.LOG_CHANNEL)
+        else:
+            log.debug("Log kanalına gönderilemedi", exc_info=True)
 
 # ==========================================
 # BUTON OLUŞTURUCULAR
