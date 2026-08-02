@@ -103,6 +103,7 @@ MESSAGES = {
     "not_registered": "❌ Henüz kayıtlı değilsiniz.\n\n/start komutu ile başlayın.",
     
     # Giriş
+    "login_method": "🔐 **Giriş Yöntemi Seçin:**",
     "login_phone": "📱 **Telefon Numarası ile Giriş**\n\n"
                    "Telefon numaranızı girin:\n"
                    "Örnek: `+905551234567`",
