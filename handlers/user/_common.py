@@ -259,7 +259,10 @@ async def build_my_plugins_page(user_id, page):
     for name in page_names:
         plugin = await db.get_plugin(name)
         is_default = plugin.get("default_active", False) if plugin else False
-        row_buf.append(_plugin_btn(name, True, is_default, page, "pm"))
+        star = "⭐" if is_default else ""
+        row_buf.append(btn.callback(f"{star} {name}".strip(), f"pm_{page}_{name}",
+                                    style=ButtonBuilder.STYLE_SUCCESS,
+                                    icon_custom_emoji_id=EMOJI_AKTIF))
         if len(row_buf) == 2:
             rows.append(row_buf)
             row_buf = []
@@ -269,11 +272,9 @@ async def build_my_plugins_page(user_id, page):
     nav = []
     if page > 0:
         nav.append(btn.callback(" Önceki", f"my_plugins_{page - 1}",
-                                style=ButtonBuilder.STYLE_SECONDARY,
                                 icon_custom_emoji_id=5834632747137638263))
     if page < total_pages - 1:
         nav.append(btn.callback(" Sonraki", f"my_plugins_{page + 1}",
-                                style=ButtonBuilder.STYLE_SECONDARY,
                                 icon_custom_emoji_id=5834933416323193844))
     if nav:
         rows.append(nav)
