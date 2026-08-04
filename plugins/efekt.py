@@ -267,6 +267,122 @@ def _s_balyoz(n):
     return fr
 
 
+# --- Poz varyantları (romantik sahneler için) ---
+_DIZ = " O \n/|\\\n_|_"
+_OLTA = " O /\n/|/\n/ \\"
+
+
+def _s_evlen(n):
+    """Diz çöküp yüzükle evlenme teklifi eder."""
+    n = n[:8]
+    gx = 20
+    nx = max(0, gx - (len(n) - 3) // 2)
+    fr = []
+
+    def base(c):
+        _ciz(c, 0, 5, ZEMIN); _ciz(c, gx, 2, _DUR); _ciz(c, nx, 1, n)
+
+    for x in (2, 5, 8):
+        c = _tuval(); base(c); _ciz(c, x, 2, _YUR); fr.append(_bas(c))
+    c = _tuval(); base(c); _ciz(c, 12, 2, _DIZ); fr.append(_bas(c))
+    for r in ("o", "O", "o"):
+        c = _tuval(); base(c); _ciz(c, 12, 2, _DIZ); _ciz(c, 16, 2, r); fr.append(_bas(c))
+    c = _tuval(); base(c); _ciz(c, 12, 2, _DIZ); _ciz(c, 16, 2, "o")
+    _ciz(c, 1, 0, "benimle evlenir misin?"); fr.append(_bas(c))
+    c = _tuval(); _ciz(c, 0, 5, ZEMIN); _ciz(c, nx, 1, n)
+    _ciz(c, 12, 2, _SEV); _ciz(c, gx, 2, _SEV); _ciz(c, 16, 0, "<3"); fr.append(_bas(c))
+    return fr
+
+
+def _s_gul(n):
+    """Elinde gülle yürüyüp hediye eder."""
+    n = n[:8]
+    GUL = "@\n|\n|"
+    gx = 22
+    nx = max(0, gx - (len(n) - 3) // 2)
+    fr = []
+
+    def base(c):
+        _ciz(c, 0, 5, ZEMIN); _ciz(c, gx, 2, _DUR); _ciz(c, nx, 1, n)
+
+    for x in (1, 5, 9, 13):
+        c = _tuval(); base(c); _ciz(c, x, 2, _YUR); _ciz(c, x + 4, 2, GUL); fr.append(_bas(c))
+    c = _tuval(); base(c); _ciz(c, 15, 2, _DUR); _ciz(c, 19, 2, GUL); fr.append(_bas(c))
+    c = _tuval(); base(c); _ciz(c, 15, 2, _DUR); _ciz(c, 20, 2, "@")
+    _ciz(c, 4, 0, "senin icin"); fr.append(_bas(c))
+    c = _tuval(); _ciz(c, 0, 5, ZEMIN); _ciz(c, nx, 1, n)
+    _ciz(c, 15, 2, _SEV); _ciz(c, gx, 2, _SEV); _ciz(c, 18, 0, ". * ."); fr.append(_bas(c))
+    return fr
+
+
+def _s_ask(n):
+    """İsmin altında atan büyük ASCII kalp."""
+    n = n[:10]
+    KUCUK = "  ,d8b.d8b,\n  88888888'\n   `Y88Y'"
+    BUYUK = " ,d88b.d88b,\n 88888888888\n `Y8888888Y'\n   `Y888Y'"
+    fr = []
+    for a in (KUCUK, BUYUK, KUCUK, BUYUK, KUCUK, BUYUK):
+        c = _tuval()
+        _ciz(c, 9, 1, a)
+        _ciz(c, max(0, (SW - len(n)) // 2), 0, n)
+        fr.append(_bas(c))
+    return fr
+
+
+def _s_tren(n):
+    """İsim rayda kalır, tren geçer."""
+    n = n[:6]
+    e = f"[{n}]"
+    T = " ____\n|[]|_n_\n|__|_|_|\n(o)(o)(o)"
+    RAY = "=" * SW
+    fr = []
+    for x in (-8, -2, 4, 10):
+        c = _tuval(); _ciz(c, 0, 5, RAY); _ciz(c, 20, 4, e); _ciz(c, x, 1, T); fr.append(_bas(c))
+    c = _tuval(); _ciz(c, 0, 5, RAY); _ciz(c, 16, 1, T); _ciz(c, 20, 4, "* ~ *"); fr.append(_bas(c))
+    for x in (22, 28):
+        c = _tuval(); _ciz(c, 0, 5, RAY); _ciz(c, x, 1, T); fr.append(_bas(c))
+    return fr
+
+
+def _s_balik(n):
+    """Oltayla ismi sudan çeker."""
+    n = n[:7]
+    e = f"<{n}>"
+    SU = "~" * SW
+    fr = []
+
+    def base(c):
+        _ciz(c, 0, 4, SU); _ciz(c, 1, 1, _OLTA); _ciz(c, 14, 2, "\\")
+
+    for i in range(3):
+        c = _tuval(); base(c); _ciz(c, 15, 3, "|")
+        _ciz(c, 15, 4, "o" if i % 2 else "O"); fr.append(_bas(c))
+    c = _tuval(); base(c); _ciz(c, 15, 3, "|"); _ciz(c, 13, 5, e); fr.append(_bas(c))
+    for y in (4, 3, 2):
+        c = _tuval(); base(c); _ciz(c, 13, y, e); fr.append(_bas(c))
+    c = _tuval(); _ciz(c, 0, 4, SU); _ciz(c, 1, 1, _SEV); _ciz(c, 12, 1, e); fr.append(_bas(c))
+    return fr
+
+
+def _s_gol(n):
+    """İsmi kaleye gönderir."""
+    n = n[:6]
+    e = f"({n})"
+    KALE = "  ____\n |    |\n |____|"
+    fr = []
+
+    def base(c):
+        _ciz(c, 0, 5, ZEMIN); _ciz(c, 21, 1, KALE)
+
+    c = _tuval(); base(c); _ciz(c, 1, 2, _DUR); _ciz(c, 5, 3, e); fr.append(_bas(c))
+    c = _tuval(); base(c); _ciz(c, 1, 2, _YUR); _ciz(c, 7, 3, e); fr.append(_bas(c))
+    for x, y in ((10, 2), (14, 1), (16, 1), (22, 2)):
+        c = _tuval(); base(c); _ciz(c, 1, 2, _YUR); _ciz(c, x, y, e); fr.append(_bas(c))
+    c = _tuval(); base(c); _ciz(c, 1, 2, _SEV); _ciz(c, 22, 2, e)
+    _ciz(c, 10, 0, "G O L !"); fr.append(_bas(c))
+    return fr
+
+
 EFFECTS = {
     "kalp": ("💘 Kalp", _f_kalp, False),
     "ates": ("🔥 Ateş", _f_ates, False),
@@ -282,10 +398,18 @@ EFFECTS = {
     "ufo": ("🛸 UFO", _s_ufo, True),
     "pota": ("🏀 Pota", _s_pota, True),
     "balyoz": ("🔨 Balyoz", _s_balyoz, True),
+    # --- romantik sahneler ---
+    "evlen":  ("💍 Evlenme Teklifi", _s_evlen, True),
+    "gul":    ("🌹 Gül Ver", _s_gul, True),
+    "ask":    ("💖 Atan Kalp", _s_ask, True),
+    # --- diğer sahneler ---
+    "tren":   ("🚂 Tren", _s_tren, True),
+    "balik":  ("🎣 Balık Tut", _s_balik, True),
+    "gol":    ("⚽ Gol", _s_gol, True),
 }
 
 # Türkçe karakter toleransı
-_ALIAS = {"ateş": "ates", "yıldız": "yildiz", "yildız": "yildiz", "atesh": "ates", "çöp": "cop", "cöp": "cop"}
+_ALIAS = {"ateş": "ates", "yıldız": "yildiz", "yildız": "yildiz", "atesh": "ates", "çöp": "cop", "cöp": "cop", "gül": "gul", "aşk": "ask", "balık": "balik"}
 
 
 async def _target_name(event, arg):
@@ -391,7 +515,7 @@ async def efekt_genel(event):
 
 
 @register(outgoing=True,
-          pattern=r"^\.(?:kalp|ates|ateş|bomba|hack|matrix|tokat|roket|yildiz|yıldız|kader|cop|çöp|ufo|pota|balyoz)(?:\s+(.+))?$")
+          pattern=r"^\.(?:kalp|ates|ateş|bomba|hack|matrix|tokat|roket|yildiz|yıldız|kader|cop|çöp|ufo|pota|balyoz|evlen|gul|gül|ask|aşk|tren|balik|balık|gol)(?:\s+(.+))?$")
 async def efekt_kisayol(event):
     # NOT: alternatifler (?:...) ile yazıldı — plugin komut çıkarıcısı yalnızca
     # bu biçimi tanıyor; (a|b) yazılırsa kısayollar menüde görünmüyor.
@@ -410,6 +534,7 @@ CMD_HELP.update({
     "`.efektler` - Tüm animasyon efektlerini listeler\n"
     "`.efekt <ad> [isim]` - Seçilen efekti çalıştırır\n"
     "`.kalp` `.ates` `.bomba` `.hack` `.matrix` `.tokat` `.roket` `.yildiz` `.kader`\n"
-    "`.cop` `.ufo` `.pota` `.balyoz` — ASCII çöp adam animasyonları\n"
+    "`.cop` `.ufo` `.pota` `.balyoz` `.tren` `.balik` `.gol` — ASCII sahneler\n"
+    "`.evlen` `.gul` `.ask` — romantik sahneler\n"
     "Bir mesajı yanıtla → o kişinin adı kullanılır, ya da komutun yanına isim yaz."
 })
