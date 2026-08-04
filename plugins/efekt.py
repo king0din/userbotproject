@@ -249,12 +249,17 @@ async def efekt_genel(event):
 
 
 @register(outgoing=True,
-          pattern=r"^\.(kalp|ates|ateş|bomba|hack|matrix|tokat|roket|yildiz|yıldız|kader)(?:\s+(.+))?$")
+          pattern=r"^\.(?:kalp|ates|ateş|bomba|hack|matrix|tokat|roket|yildiz|yıldız|kader)(?:\s+(.+))?$")
 async def efekt_kisayol(event):
+    # NOT: alternatifler (?:...) ile yazıldı — plugin komut çıkarıcısı yalnızca
+    # bu biçimi tanıyor; (a|b) yazılırsa kısayollar menüde görünmüyor.
     if event.fwd_from:
         return
-    key = event.pattern_match.group(1).lower()
-    arg = event.pattern_match.group(2)
+    try:
+        key = (event.text or "").split()[0].lstrip(".").lower()
+    except Exception:
+        return
+    arg = event.pattern_match.group(1)
     await _run_effect(event, key, arg)
 
 
