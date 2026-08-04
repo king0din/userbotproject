@@ -523,6 +523,33 @@ async def _animate(event, frames, mono=False):
         await asyncio.sleep(FRAME_DELAY)
 
 
+async def _cevir_kareler(uid, sablonlar):
+    """Emoji efektlerinin METİNLERİNİ kullanıcının diline çevirir.
+    Kareler `{n}` yer tutucusuyla üretilir; çeviri katmanı bu yer tutucuyu
+    koruduğu için isim bozulmaz. Tek TOPLU çağrı yapılır → animasyon yavaşlamaz
+    (ilk kullanımdan sonra önbellekten gelir).
+    ASCII sahneler bu yoldan GEÇMEZ: çizim çevrilirse hizalama bozulur."""
+    try:
+        import utils.i18n as _i18n
+        lang = _i18n.get_user_lang_cached(uid)
+        if not lang or lang == _i18n.SOURCE_LANG:
+            return sablonlar
+        cevrilen = await _i18n.translate_many(sablonlar, lang)
+        if not cevrilen or len(cevrilen) != len(sablonlar):
+            return sablonlar
+        out = []
+        for orj, cev in zip(sablonlar, cevrilen):
+            # Çeviri boşsa ya da yer tutucuyu kaybettiyse ORİJİNALİ kullan
+            if not cev or ("{n}" in orj and "{n}" not in cev):
+                out.append(orj)
+            else:
+                out.append(cev)
+        return out
+    except Exception:
+        log.debug("Efekt metni çevrilemedi", exc_info=True)
+        return sablonlar
+
+
 async def _run_effect(event, key, arg):
     key = _ALIAS.get(key, key)
     if key not in EFFECTS:
@@ -535,7 +562,15 @@ async def _run_effect(event, key, arg):
     try:
         ad = await _target_name(event, arg)
         _, uret, mono = EFFECTS[key]
-        await _animate(event, uret(ad), mono=mono)
+        if mono:
+            # ASCII sahne: çizim olduğu gibi kalır (çeviri hizayı bozar)
+            kareler = uret(ad)
+        else:
+            # Emoji efekti: önce şablonu çevir, sonra ismi yerleştir
+            sablon = uret("{n}")
+            sablon = await _cevir_kareler(event.sender_id, sablon)
+            kareler = [k.replace("{n}", ad) for k in sablon]
+        await _animate(event, kareler, mono=mono)
     finally:
         _busy.discard(uid)
 

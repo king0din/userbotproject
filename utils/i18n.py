@@ -517,8 +517,22 @@ def extract_translatable_strings(paths, min_len=2, max_len=400):
                 tree = _ast.parse(f.read())
         except Exception:
             continue
+
+        # Fonksiyon/sınıf DOCSTRING'lerini atla: bunlar kullanıcıya hiç
+        # gösterilmez, çevrilirse boşuna API çağrısı yapılır ve dil dosyaları
+        # şişer. Modül docstring'i (plugin açıklaması) KORUNUR — o menüde görünür.
+        _atla = set()
+        for node in _ast.walk(tree):
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef)):
+                ilk = node.body[0] if node.body else None
+                if (isinstance(ilk, _ast.Expr) and isinstance(ilk.value, _ast.Constant)
+                        and isinstance(ilk.value.value, str)):
+                    _atla.add(id(ilk.value))
+
         for node in _ast.walk(tree):
             if isinstance(node, _ast.Constant) and isinstance(node.value, str):
+                if id(node) in _atla:
+                    continue
                 _add(node.value)
             elif isinstance(node, _ast.JoinedStr):  # f-string
                 parts = []
