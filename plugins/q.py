@@ -3,7 +3,7 @@
 Herhangi bir sohbete kulanarak hızlıca mesajlsrınızı sticker'a dönüştürüp ölümsüzleştirin.
 
 🔧 Komutlar: .q, .qs, .qd, .q noreply, .qpaket, .qrenkler, .q random
-🚨 Tür: #eğlence #çok_amaçlı
+🚨 Tür: #çıkartma #eğlence
 
 
 Komular hakında:

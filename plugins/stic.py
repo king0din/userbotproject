@@ -9,7 +9,7 @@
 Bir resmi, videoyu veya GIF'i yanıtlayıp komutu yazmanız yeterli — gerisi otomatik.
 
 🔧 Komutlar: .stic, .sticker
-🚨 Tür: #eğlence #araç
+🚨 Tür: #çıkartma #araç
 
 Komutlar hakkında:
 .stic  → Yanıtladığınız medyayı Telegram çıkartmasına çevirir ve gönderir.

@@ -4,7 +4,7 @@ ASCII sahneler ve efektler gönderin. Mesaj kare kare canlanır.
 
 🔧 Komutlar: .efektler, .efekt, .cop, .ufo, .pota, .balyoz, .tren, .balik, .gol,
 .evlen, .gul, .ask, .kalp, .ates, .bomba, .hack, .matrix, .tokat, .roket, .yildiz, .kader
-🚨 Tür: #eğlence #animasyon
+🚨 Tür: #animasyon #eğlence
 
 
 Komular hakında:
