@@ -170,9 +170,21 @@ def _ciz(c, x, y, art):
                 c[Y][X] = ch
 
 
+# Görünmez ama BOŞLUK SAYILMAYAN karakter (Braille blank).
+# Telegram mesajın başındaki/sonundaki boş satırları siler; silince gönderdiğimiz
+# monospace entity'nin uzunluğu metinle uyuşmaz ve bazı karelerde tek-aralık
+# görünüm kaybolur (kare kare "kopyalanabilir/normal" diye titrer).
+# Boş satırları bu karakterle doldurunca hem yükseklik sabit kalır hem entity oturur.
+_BOS_SATIR = "\u2800"
+
+
 def _bas(c):
-    """Tuvali Telegram monospace bloğuna çevirir."""
-    return "\n".join("".join(r).rstrip() for r in c)
+    """Tuvali Telegram monospace metnine çevirir.
+    HER satır görünmez bir karakterle başlar: Telegram mesajın başındaki/sonundaki
+    boşlukları kırpar; kırpılırsa hem hizalama kayar hem monospace entity'si tutmaz
+    (animasyon kare kare 'kopyalanabilir/normal' diye titrerdi). Önek her satırda
+    aynı olduğu için görüntü bozulmaz."""
+    return "\n".join(_BOS_SATIR + "".join(r).rstrip() for r in c)
 
 
 def _s_cop(n):
