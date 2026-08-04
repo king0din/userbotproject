@@ -31,12 +31,25 @@ def register(bot):
 
     post_states = {}
 
+    def _icerik_menusu():
+        """İçerik alındıktan sonra gösterilen buton menüsü (tek yerde tanımlı)."""
+        return [
+            [Button.inline("🔗 Link Butonu", b"post_add_link")],
+            [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
+            [Button.inline("➡️ Aynı Satıra Ekle", b"post_same_row"),
+             Button.inline("⬇️ Alt Satıra Geç", b"post_new_row")],
+            [Button.inline("👁️ Önizleme", b"post_preview")],
+            [Button.inline("✅ Gönder", b"post_confirm"),
+             Button.inline("❌ İptal", b"cancel_post")]
+        ]
+
     @bot.on(events.NewMessage(pattern=r'^/post$'))
     async def post_command(event):
-        """Plugin kanalına post oluştur"""
+        """Plugin kanalına post oluştur.
+        Bir mesajı YANITLAYARAK /post yazılırsa o mesaj doğrudan içerik olur."""
         if event.sender_id != config.OWNER_ID and not await db.is_sudo(event.sender_id):
             return
-        
+
         post_states[event.sender_id] = {
             'stage': 'waiting_content',
             'content': None,
@@ -44,11 +57,31 @@ def register(bot):
             'buttons': [],
             'current_row': []
         }
-        
+
+        # Yanıtlayarak kullanım: içerik adımını atla
+        reply = None
+        try:
+            if event.reply_to_msg_id:
+                reply = await event.get_reply_message()
+        except Exception:
+            reply = None
+
+        if reply is not None and (reply.message or reply.media):
+            post_states[event.sender_id]['content'] = reply
+            post_states[event.sender_id]['stage'] = 'adding_buttons'
+            _tur = "medya" if reply.media else "metin"
+            await event.respond(
+                f"✅ **İçerik alındı!** (yanıtlanan {_tur} mesajı)\n\n"
+                "Şimdi buton ekleyebilirsiniz:",
+                buttons=_icerik_menusu()
+            )
+            return
+
         await event.respond(
             "📝 **Post Oluşturma**\n\n"
             "Göndermek istediğiniz postu yazın veya medya gönderin.\n"
-            "Başka bir mesajı iletmek için mesajı **forward** edin.\n\n"
+            "Başka bir mesajı iletmek için mesajı **forward** edin.\n"
+            "💡 Hazır bir mesajı **yanıtlayıp** `/post` yazarsanız o mesaj kullanılır.\n\n"
             "⚠️ İptal: /cancelpost",
             buttons=[[Button.inline("❌ İptal", b"cancel_post")]]
         )
@@ -80,15 +113,7 @@ def register(bot):
             await event.respond(
                 "✅ **İçerik alındı!**\n\n"
                 "Şimdi buton ekleyebilirsiniz:",
-                buttons=[
-                    [Button.inline("🔗 Link Butonu", b"post_add_link")],
-                    [Button.inline("👍 Tepki Butonu", b"post_add_reaction")],
-                    [Button.inline("➡️ Aynı Satıra Ekle", b"post_same_row"),
-                     Button.inline("⬇️ Alt Satıra Geç", b"post_new_row")],
-                    [Button.inline("👁️ Önizleme", b"post_preview")],
-                    [Button.inline("✅ Gönder", b"post_confirm"),
-                     Button.inline("❌ İptal", b"cancel_post")]
-                ]
+                buttons=_icerik_menusu()
             )
         
         elif stage == 'waiting_link_text':
