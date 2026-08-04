@@ -15,6 +15,7 @@ import subprocess
 import time
 import psutil
 from datetime import datetime
+import copy as _copy
 from telethon import events, Button
 import config
 from database import database as db
@@ -463,6 +464,50 @@ def register(bot):
         """Telegram karakter sınırını UTF-16 birimiyle sayar (emoji 2 sayılır)."""
         return len((s or "").encode("utf-16-le")) // 2
 
+    def _u16_to_idx(metin, hedef):
+        """UTF-16 konumunu Python dizin konumuna çevirir."""
+        sayac = 0
+        for i, ch in enumerate(metin):
+            if sayac >= hedef:
+                return i
+            sayac += 2 if ord(ch) > 0xFFFF else 1
+        return len(metin)
+
+    def _metni_bol(metin, entities, limit):
+        """Metni caption sınırında ikiye böler; BİÇİMLENDİRME (entity) korunur.
+        Mümkünse satır sonundan böler ki cümle ortadan kesilmesin.
+        Döner: (parca1, ent1, parca2, ent2)"""
+        kes_u16 = limit
+        kes_idx = _u16_to_idx(metin, kes_u16)
+        # Satır sonu ara (son %25'lik bölgede) → daha temiz görünür
+        pencere = metin.rfind("\n", _u16_to_idx(metin, int(limit * 0.75)), kes_idx)
+        if pencere > 0:
+            kes_idx = pencere
+        kes_u16 = _uzunluk(metin[:kes_idx])
+
+        p1, p2 = metin[:kes_idx], metin[kes_idx:].lstrip("\n")
+        atlanan = _uzunluk(metin[kes_idx:]) - _uzunluk(p2)   # kırpılan \n sayısı
+
+        e1, e2 = [], []
+        for ent in (entities or []):
+            bas, boy = ent.offset, ent.length
+            son = bas + boy
+            if son <= kes_u16:                      # tamamen ilk parçada
+                e1.append(ent)
+            elif bas >= kes_u16:                    # tamamen ikinci parçada
+                yeni = _copy.copy(ent)
+                yeni.offset = bas - kes_u16 - atlanan
+                if yeni.offset >= 0:
+                    e2.append(yeni)
+            else:                                   # sınırı aşıyor → ikiye böl
+                a = _copy.copy(ent); a.length = kes_u16 - bas
+                if a.length > 0:
+                    e1.append(a)
+                b = _copy.copy(ent); b.offset = 0; b.length = son - kes_u16 - atlanan
+                if b.length > 0:
+                    e2.append(b)
+        return p1, e1, p2, e2
+
     async def _post_gonder(hedef, content, buttons):
         """Postu gönderir. Metin caption sınırını aşarsa medya ile metni AYIRIR
         (eskiden 'The caption is too long' hatası verip post hiç gitmiyordu).
@@ -477,11 +522,14 @@ def register(bot):
                 return await bot.send_file(
                     hedef, file=content.media, caption=metin,
                     buttons=buttons, formatting_entities=content.entities)
-            # Uzun metin → önce medya (açıklamasız), sonra metin + butonlar
-            await bot.send_file(hedef, file=content.media)
+            # Uzun metin → ilk kısmı GIF/medyanın ALTINA caption olarak koy,
+            # kalanı hemen ardından mesaj olarak gönder (butonlar sonda kalır).
+            p1, e1, p2, e2 = _metni_bol(metin, content.entities, CAPTION_LIMIT)
+            await bot.send_file(hedef, file=content.media, caption=p1,
+                                formatting_entities=e1)
             return await bot.send_message(
-                hedef, metin, buttons=buttons,
-                formatting_entities=content.entities, link_preview=False)
+                hedef, p2, buttons=buttons,
+                formatting_entities=e2, link_preview=False)
         return await bot.send_message(
             hedef, metin, buttons=buttons,
             formatting_entities=content.entities, link_preview=False)
