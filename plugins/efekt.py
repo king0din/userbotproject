@@ -1,20 +1,61 @@
 """
-Birinin mesajını yanıtlayarak ya da isim yazarak şık animasyonlu efektler gönderin.
+Birinin mesajını yanıtlayarak ya da yanına isim yazarak, adına özel animasyonlu
+ASCII sahneler ve efektler gönderin. Mesaj kare kare canlanır.
 
-🔧 Komutlar: .efektler, .efekt, .kalp, .ates, .bomba, .hack, .matrix, .tokat, .roket, .yildiz, .kader
-🚨 Tür: #eğlence
+🔧 Komutlar: .efektler, .efekt, .cop, .ufo, .pota, .balyoz, .tren, .balik, .gol,
+.evlen, .gul, .ask, .kalp, .ates, .bomba, .hack, .matrix, .tokat, .roket, .yildiz, .kader
+🚨 Tür: #eğlence #animasyon
 
 
 Komular hakında:
 .efektler:
-kullanılabilir tüm animasyon efektlerini listeler.
+kullanılabilir tüm efektleri tek listede gösterir.
 
 .efekt <ad> [isim]:
-seçtiğiniz efekti çalıştırır. Örnek: `.efekt kalp Ayşe`
+istediğiniz efekti adıyla çalıştırır. Örnek: `.efekt evlen Elif`
+
+── ASCII SAHNELER (çöp adam animasyonları) ──
+
+.cop:
+çöp adam ismi taşıyıp çöp kovasına fırlatır, kapağı kapatır.
+
+.ufo:
+UFO gelip ışın tutar ve ismi uzaya kaçırır.
+
+.pota:
+ismi potaya atar, top ağdan geçip sayı olur.
+
+.balyoz:
+balyozu tepeye kaldırıp indirir, ismi yerle bir eder.
+
+.tren:
+isim rayda kalır, tren üstünden geçip gider.
+
+.balik:
+oltayı suya atar, şamandıra oynar ve ismi sudan çeker.
+
+.gol:
+ismi kaleye gönderir, "G O L !" yazısı çıkar.
+
+── ROMANTİK SAHNELER ──
+
+.evlen:
+diz çöküp yüzükle evlenme teklifi eder, kabul edilince kalp belirir.
+
+.gul:
+elinde gülle yürüyüp gülü hediye eder.
+
+.ask:
+ismin altında büyük bir kalp atmaya başlar.
+
+── HIZLI EFEKTLER ──
 
 .kalp / .ates / .bomba / .hack / .matrix / .tokat / .roket / .yildiz / .kader:
-kısayol komutlarıdır. Bir mesajı yanıtlarsanız o kişinin adını,
-komutun yanına isim yazarsanız onu kullanır. Örnek: `.bomba Ali`
+kısa emoji animasyonlarıdır (kalp yağmuru, yangın, bomba geri sayımı,
+hack ilerleme çubuğu, matrix akışı, tokat, roket fırlatma, yıldız, fal).
+
+Kullanım: bir mesajı yanıtlarsanız o kişinin adı alınır; yanıtlamazsanız
+komutun yanına isim yazabilirsiniz. Örnek: `.bomba Ali` · `.evlen Elif`
 """
 
 import asyncio
@@ -503,14 +544,23 @@ async def _run_effect(event, key, arg):
 async def efekt_liste(event):
     if event.fwd_from:
         return
-    satir = "\n".join(f"• `.{k}` — {ad}" for k, (ad, _f, _m) in EFFECTS.items())
+    ROMANTIK = ("evlen", "gul", "ask")
+    SAHNE = ("cop", "ufo", "pota", "balyoz", "tren", "balik", "gol")
+
+    def blok(anahtarlar):
+        return "\n".join(f"• `.{k}` — {EFFECTS[k][0]}"
+                         for k in anahtarlar if k in EFFECTS)
+
+    hizli = [k for k in EFFECTS if k not in ROMANTIK and k not in SAHNE]
     await event.edit(
         "**✨ Animasyon Efektleri**\n\n"
-        f"{satir}\n\n"
+        "**🎬 ASCII Sahneler**\n" + blok(SAHNE) + "\n\n"
+        "**💖 Romantik**\n" + blok(ROMANTIK) + "\n\n"
+        "**⚡ Hızlı Efektler**\n" + blok(hizli) + "\n\n"
         "**Kullanım:**\n"
-        "• Bir mesajı yanıtla → `.kalp`\n"
+        "• Bir mesajı yanıtla → `.evlen`\n"
         "• Ya da isim yaz → `.bomba Ali`\n"
-        "• Genel kullanım → `.efekt hack Ayşe`"
+        "• Genel kullanım → `.efekt ufo Ayşe`"
     )
 
 
@@ -543,10 +593,25 @@ async def efekt_kisayol(event):
 
 CMD_HELP.update({
     "efekt":
-    "`.efektler` - Tüm animasyon efektlerini listeler\n"
-    "`.efekt <ad> [isim]` - Seçilen efekti çalıştırır\n"
-    "`.kalp` `.ates` `.bomba` `.hack` `.matrix` `.tokat` `.roket` `.yildiz` `.kader`\n"
-    "`.cop` `.ufo` `.pota` `.balyoz` `.tren` `.balik` `.gol` — ASCII sahneler\n"
-    "`.evlen` `.gul` `.ask` — romantik sahneler\n"
-    "Bir mesajı yanıtla → o kişinin adı kullanılır, ya da komutun yanına isim yaz."
+    "**✨ Animasyonlu Efektler**\n"
+    "Bir mesajı yanıtla → o kişinin adı kullanılır.\n"
+    "Yanıtlamadan da olur: komutun yanına isim yaz.\n\n"
+    "`.efektler` - Tüm efektleri listeler\n"
+    "`.efekt <ad> [isim]` - Efekti adıyla çalıştırır\n\n"
+    "**🎬 ASCII sahneler:**\n"
+    "`.cop` - Çöp kovasına fırlatır\n"
+    "`.ufo` - UFO kaçırır\n"
+    "`.pota` - Potaya atar\n"
+    "`.balyoz` - Balyozla ezer\n"
+    "`.tren` - Tren geçer\n"
+    "`.balik` - Oltayla çeker\n"
+    "`.gol` - Kaleye gönderir\n\n"
+    "**💖 Romantik:**\n"
+    "`.evlen` - Evlenme teklifi\n"
+    "`.gul` - Gül hediye eder\n"
+    "`.ask` - Atan büyük kalp\n\n"
+    "**⚡ Hızlı efektler:**\n"
+    "`.kalp` `.ates` `.bomba` `.hack` `.matrix`\n"
+    "`.tokat` `.roket` `.yildiz` `.kader`\n\n"
+    "Örnek: `.evlen Elif` · `.bomba Ali` · `.efekt ufo Ayşe`"
 })
