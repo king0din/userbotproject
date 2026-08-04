@@ -1132,9 +1132,10 @@ class PluginManager:
         except Exception:
             return 0
         try:
-            existing = {p.get("name") for p in await _db.get_all_plugins()}
+            # Ad -> kayıt sözlüğü: değişmeyen pluginler için gereksiz DB yazması olmasın
+            existing = {p.get("name"): p for p in await _db.get_all_plugins()}
         except Exception:
-            existing = set()
+            existing = {}
         try:
             files = [f for f in os.listdir(config.PLUGINS_DIR) if f.endswith(".py")]
         except Exception:
@@ -1144,9 +1145,28 @@ class PluginManager:
             name = fn[:-3]
             if name.startswith("_") or name.startswith("temp_") or name == "__init__":
                 continue
-            if name in existing:
-                continue
             path = os.path.join(config.PLUGINS_DIR, fn)
+            if name in existing:
+                # Var olan plugin: açıklama/komut bilgisini DOSYADAN TAZELE.
+                # Eskiden atlanıyordu → plugin dosyası güncellense bile menülerde
+                # ve detay kartında ilk kayıttaki eski açıklama/komutlar kalıyordu.
+                # Admin ayarlarına (is_public, premium, izinler) DOKUNULMAZ.
+                try:
+                    _info = self.extract_plugin_info(path)
+                    _yeni = {
+                        "description": _info.get("description", ""),
+                        "commands": _info.get("commands", []),
+                    }
+                    _eski = existing.get(name) if isinstance(existing, dict) else None
+                    if (not isinstance(_eski, dict)
+                            or _eski.get("description") != _yeni["description"]
+                            or list(_eski.get("commands") or []) != list(_yeni["commands"])):
+                        await _db.update_plugin(name, _yeni)
+                        log.info("Plugin bilgisi tazelendi: %s (%s komut)",
+                                 name, len(_yeni["commands"]))
+                except Exception:
+                    log.debug("Plugin bilgisi tazelenemedi: %s", name, exc_info=True)
+                continue
             try:
                 info = self.extract_plugin_info(path)
                 await _db.add_plugin(
