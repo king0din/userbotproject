@@ -413,22 +413,7 @@ def register(bot):
         
         try:
             # Mesajı butonlarla birlikte gönder
-            if content.media:
-                preview = await bot.send_file(
-                    user_id,
-                    file=content.media,
-                    caption=content.message,
-                    buttons=buttons,
-                    formatting_entities=content.entities
-                )
-            else:
-                preview = await bot.send_message(
-                    user_id,
-                    content.message,
-                    buttons=buttons,
-                    formatting_entities=content.entities,
-                    link_preview=False
-                )
+            preview = await _post_gonder(user_id, content, buttons)
             
             state['preview_id'] = preview.id
             
@@ -444,6 +429,37 @@ def register(bot):
         except Exception as e:
             await event.respond(f"❌ Önizleme hatası: `{e}`")
     
+
+    # Telegram sınırları: medya açıklaması 1024, düz mesaj 4096 karakter.
+    CAPTION_LIMIT = 1024
+    TEXT_LIMIT = 4096
+
+    def _uzunluk(s):
+        """Telegram karakter sınırını UTF-16 birimiyle sayar (emoji 2 sayılır)."""
+        return len((s or "").encode("utf-16-le")) // 2
+
+    async def _post_gonder(hedef, content, buttons):
+        """Postu gönderir. Metin caption sınırını aşarsa medya ile metni AYIRIR
+        (eskiden 'The caption is too long' hatası verip post hiç gitmiyordu).
+        Metin biçimlendirmesi (entity) bölünmediği için bozulmaz."""
+        metin = content.message or ""
+        if _uzunluk(metin) > TEXT_LIMIT:
+            raise ValueError(
+                f"Metin çok uzun ({_uzunluk(metin)} karakter). "
+                f"Telegram sınırı {TEXT_LIMIT}. Postu kısalt ya da ikiye böl.")
+        if content.media:
+            if _uzunluk(metin) <= CAPTION_LIMIT:
+                return await bot.send_file(
+                    hedef, file=content.media, caption=metin,
+                    buttons=buttons, formatting_entities=content.entities)
+            # Uzun metin → önce medya (açıklamasız), sonra metin + butonlar
+            await bot.send_file(hedef, file=content.media)
+            return await bot.send_message(
+                hedef, metin, buttons=buttons,
+                formatting_entities=content.entities, link_preview=False)
+        return await bot.send_message(
+            hedef, metin, buttons=buttons,
+            formatting_entities=content.entities, link_preview=False)
 
     @bot.on(events.CallbackQuery(data=b"post_confirm"))
     async def post_confirm_handler(event):
@@ -461,22 +477,7 @@ def register(bot):
         
         try:
             # Kanala gönder
-            if content.media:
-                msg = await bot.send_file(
-                    f"@{channel}",
-                    file=content.media,
-                    caption=content.message,
-                    buttons=buttons,
-                    formatting_entities=content.entities
-                )
-            else:
-                msg = await bot.send_message(
-                    f"@{channel}",
-                    content.message,
-                    buttons=buttons,
-                    formatting_entities=content.entities,
-                    link_preview=False
-                )
+            msg = await _post_gonder(f"@{channel}", content, buttons)
             
             del post_states[user_id]
             
