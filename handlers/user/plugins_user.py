@@ -175,9 +175,15 @@ def register(bot):
     # ==========================================
     # TOPLU İŞLEMLER (tek dokunuş)
     # ==========================================
-    @bot.on(events.CallbackQuery(data=b"pall_on"))
+    @bot.on(events.CallbackQuery(pattern=rb"^pall_on_(\d+)$"))
     @check_ban
     async def pall_on_handler(event):
+        # Buton `pall_on_<sayfa>` gönderiyor; eskiden handler düz "pall_on"
+        # beklediği için HİÇ tetiklenmiyordu (butonlar çalışmıyor görünüyordu).
+        try:
+            _sayfa = int(event.pattern_match.group(1).decode())
+        except Exception:
+            _sayfa = 0
         user_id = event.sender_id
         u = await _ensure_logged(event)
         if not u:
@@ -207,12 +213,16 @@ def register(bot):
             except Exception:
                 log.warning("Toplu aç: %s yüklenemedi (user=%s)", name, user_id, exc_info=True)
         await send_log(bot, "plugin", f"Toplu aç: {done}", user_id)
-        text, rows = await build_plugins_page(user_id, 0)
+        text, rows = await build_plugins_page(user_id, _sayfa)
         await _render(event, f"✅ {done} plugin açıldı.\n\n" + text, rows)
 
-    @bot.on(events.CallbackQuery(data=b"pall_off"))
+    @bot.on(events.CallbackQuery(pattern=rb"^pall_off_(\d+)$"))
     @check_ban
     async def pall_off_handler(event):
+        try:
+            _sayfa = int(event.pattern_match.group(1).decode())
+        except Exception:
+            _sayfa = 0
         user_id = event.sender_id
         u = await _ensure_logged(event)
         if not u:
@@ -230,7 +240,7 @@ def register(bot):
             except Exception:
                 log.warning("Toplu kapat: %s kapatılamadı (user=%s)", name, user_id, exc_info=True)
         await send_log(bot, "plugin", f"Toplu kapat: {done}", user_id)
-        text, rows = await build_plugins_page(user_id, 0)
+        text, rows = await build_plugins_page(user_id, _sayfa)
         await _render(event, f"⏹ {done} plugin kapatıldı.\n\n" + text, rows)
 
     @bot.on(events.CallbackQuery(data=b"pdefaults"))
